@@ -46,7 +46,7 @@ Per [HCP certificates inventory reporting](https://developer.hashicorp.com/hcp/d
 | **Retroactive** | **No** — enabling reporting on an existing cluster does **not** backfill historical PKI certs into certificate inventory (unlike secrets inventory scan) |
 | **UI** | HCP Portal → Vault Dedicated → **Certificates Inventory** (CN, status, role, valid until, mount path, issuer, serial, revoked at, …) |
 | **Export** | Portal **Export** → JSON/CSV (max **1,000** rows per export) |
-| **API** | Docs mention "UI and API"; public HCP API docs today cover **cluster lifecycle** (`api.cloud.hashicorp.com/vault/...`), not a documented programmatic **list certificates inventory** endpoint. Operational cert data is read from the **Vault cluster HTTP API** (PKI paths). |
+| **API** | HCP **Vault Reporting** API (`GET /vault-reporting/2025-05-05/.../reports/certificates-inventory`) is documented in [`hashicorp/cloud-vault-reporting`](https://github.com/hashicorp/cloud-vault-reporting/blob/main/docs/api-docs/20250505.md) — a **cloud control-plane** service, not the Vault cluster HTTP API. The separate HCP **Vault cluster lifecycle** API (`api.cloud.hashicorp.com/vault/...`) does not list certificate inventory rows. |
 | **Auth** | HCP IAM (admin, Report reader role) for portal; Vault tokens/policies for cluster API |
 
 ### Vault CLM Discovery (this project)
@@ -100,6 +100,91 @@ flowchart LR
 
   HCPUI -.->|human compare only| Dash
 ```
+
+---
+
+## Vault Enterprise vs HCP Certificates Inventory
+
+Research target: [`hashicorp/vault`](https://github.com/hashicorp/vault) (OSS binary + UI) cross-checked against [`hashicorp/cloud-vault-reporting`](https://github.com/hashicorp/cloud-vault-reporting) (public HCP reporting service) and HCP docs. [`hashicorp/vault-enterprise`](https://github.com/hashicorp/vault-enterprise) is **private**; enterprise-only observer behavior is inferred from OSS stubs plus `cloud-vault-reporting` README (local dev builds a Vault Enterprise image).
+
+### Summary answers
+
+| Question | Answer (evidence-based) |
+|----------|-------------------------|
+| Is HCP Certificates Inventory a cloud-only control plane UI fed by Vault PKI telemetry? | **Yes.** HCP Portal UI lives in [`hashicorp/shared-secure-ui`](https://github.com/hashicorp/shared-secure-ui) (`certificates-inventory` routes). Data is served by [`hashicorp/cloud-vault-reporting`](https://github.com/hashicorp/cloud-vault-reporting) (`FetchCertificatesInventory`, org DB tables `pki_leaf_certificates`, etc.). Vault PKI emits **observation events** on issue/revoke (and ACME/SCEP/EST/CMPv2 paths); HCP docs describe reporting as **telemetry**-based ([certificates inventory reporting](https://developer.hashicorp.com/hcp/docs/vault/reporting/certificates-inventory-reporting)). |
+| Does Vault Enterprise (self-managed) expose an equivalent in-Vault UI or org-wide inventory API? | **No equivalent Certificates Inventory product in the Vault binary UI.** OSS Vault sidebar **Reporting** nav exposes only **Vault usage** and **License** ([`ui/lib/core/addon/components/sidebar/nav/reporting.hbs`](https://github.com/hashicorp/vault/blob/main/ui/lib/core/addon/components/sidebar/nav/reporting.hbs)); zero matches for `certificates-inventory` / `secrets-inventory` under `ui/`. **Usage reporting** (leases, replication, billing-style metrics) is not certificate inventory. Operators on self-managed Enterprise reconcile via **Vault PKI HTTP API** (list/read stored certs) or custom tooling — not an HCP-style inventory dashboard inside Vault. |
+| What PKI APIs exist in OSS Vault that both deployment models share? | **`LIST {mount}/certs/`** (serials), **`READ {mount}/cert/{serial}`** (PEM + metadata), **`LIST sys/mounts`** (discover PKI mounts), plus revocation list paths. Implemented in OSS: [`builtin/logical/pki/path_fetch.go`](https://github.com/hashicorp/vault/blob/main/builtin/logical/pki/path_fetch.go) (`pathFetchListCerts`, `pathFetchValid`). Documented: [Vault PKI API — List certificates](https://developer.hashicorp.com/vault/api-docs/secret/pki#list-certificates). |
+| Can CLM integrate once against Vault PKI API and cover both models? | **Yes — recommended.** Same stored-cert source whether the cluster is HCP Vault Dedicated or self-managed Enterprise/OSS. HCP Certificates Inventory is a **filtered, telemetry-fed audit view** (issue/revoke after reporting enablement); Vault PKI API is the **authoritative stored-cert catalog** for reconciliation, including pre-reporting issuances. |
+
+### Comparison table
+
+| Capability | HCP Vault Dedicated Certificates Inventory | Vault Enterprise (self-managed) | OSS / Enterprise Vault PKI API |
+|------------|-------------------------------------------|----------------------------------|--------------------------------|
+| **Where it runs** | HCP Portal + `cloud-vault-reporting` control plane | Not available as same product | Vault cluster HTTP API (`/v1/...`) |
+| **UI** | HCP → Vault Dedicated → **Certificates Inventory** | Vault UI: **Vault usage** / **License** only under Reporting | PKI mount UI (per-mount ops); no org-wide cert inventory page |
+| **Data source** | PKI **telemetry observations** ingested after reporting enabled | N/A (no HCP reporting pipeline unless linked to HCP) | PKI storage (`issuing.PathCerts`); list/read endpoints |
+| **Backfill on enable reporting** | **Secrets inventory:** cluster scan populates ([HCP reporting index](https://developer.hashicorp.com/hcp/docs/vault/reporting/index)). **Certificates inventory:** **no backfill** — only certs issued/revoked **after** enablement | N/A | Full stored cert list via `LIST {mount}/certs/` regardless of reporting |
+| **Programmatic access** | HCP Vault Reporting API: `GET .../reports/certificates-inventory` ([`cloud-vault-reporting` API docs](https://github.com/hashicorp/cloud-vault-reporting/blob/main/docs/api-docs/20250505.md)) | No in-Vault certificates inventory API | `LIST/READ` PKI paths; client in [`api/`](https://github.com/hashicorp/vault/tree/main/api) |
+| **Auth** | HCP IAM (admin, Report reader) + HCP token for reporting API | Vault token/policy | Vault token/policy |
+| **Export cap** | Portal export max **1,000** rows (HCP docs) | N/A | No built-in export; paginate via LIST |
+| **Network / deployment visibility** | None | None | None — CLM Discovery value-add |
+| **In OSS Vault binary?** | **No** (HCP-only) | **No** (no cert inventory UI/API) | **Yes** (PKI engine + API) |
+
+### Telemetry path (HCP only)
+
+```mermaid
+flowchart LR
+  subgraph vaultCluster [Vault cluster - Enterprise when reporting linked]
+    PKI[PKI secrets engine]
+    Obs[RecordPKIObservation hooks]
+    CE[CE observer: no-op]
+    Ent[Enterprise observer: emits observations]
+  end
+
+  subgraph hcp [HCP control plane]
+    Ingest[cloud-vault-reporting ingest]
+    DB[(Org reporting DB)]
+    API[HCP Vault Reporting API]
+    Portal[HCP Portal Certificates Inventory]
+  end
+
+  PKI --> Obs
+  Obs --> CE
+  Obs --> Ent
+  Ent -->|telemetry| Ingest
+  Ingest --> DB
+  DB --> API
+  API --> Portal
+```
+
+**OSS facts from `hashicorp/vault`:**
+
+- PKI calls `RecordPKIObservation` on issue, revoke, root/intermediate generation, ACME/SCEP/EST/CMPv2, etc. ([`builtin/logical/pki/observe/observation_consts.go`](https://github.com/hashicorp/vault/blob/main/builtin/logical/pki/observe/observation_consts.go), e.g. `path_root.go`, `secret_certs.go`).
+- Community Edition observer is explicitly a **no-op** ([`builtin/logical/pki/observe/observer_ce.go`](https://github.com/hashicorp/vault/blob/main/builtin/logical/pki/observe/observer_ce.go): *"No-op for Community Edition"*). Enterprise implementation is not in the public repo.
+- `POST /v1/sys/reporting/scan` writes Vault state files to `reporting_scan_directory` ([`api/sys_reporting_scan.go`](https://github.com/hashicorp/vault/blob/main/api/sys_reporting_scan.go), [`changelog/_10068.txt`](https://github.com/hashicorp/vault/blob/main/changelog/_10068.txt)). HCP docs state this **scan backfills secrets inventory only**, not certificate inventory ([HCP reporting index — Warning](https://developer.hashicorp.com/hcp/docs/vault/reporting/index)).
+- GitHub code search: **0** matches for `certificates-inventory` or `FetchCertificatesInventory` in `hashicorp/vault`; **0** matches for `certificates inventory` in `hashicorp/vault` UI.
+
+**HCP-only facts from `hashicorp/cloud-vault-reporting` (public):**
+
+- Service README: *"Vault Reporting for Secure Governance"*; local dev uses **Vault Enterprise** image ([`README.md`](https://github.com/hashicorp/cloud-vault-reporting/blob/main/README.md)).
+- Public API `FetchCertificatesInventory` at `/vault-reporting/2025-05-05/organizations/{org}/projects/{project}/clusters/{cluster_id}/reports/certificates-inventory` ([`docs/api-docs/20250505.md`](https://github.com/hashicorp/cloud-vault-reporting/blob/main/docs/api-docs/20250505.md)).
+- Ingestion parses PKI observation types matching Vault constants (`pki/issue`, `pki/revoke`, `pki/acme/order/finalize-order`, etc.) ([`internal/ingest/observations/observation_type.go`](https://github.com/hashicorp/cloud-vault-reporting/blob/main/internal/ingest/observations/observation_type.go)).
+
+### Corrections to earlier assumptions in this spec
+
+| Prior assumption | Correction |
+|----------------|------------|
+| HCP has no documented certificates inventory API | **Partially wrong.** API is documented in **`hashicorp/cloud-vault-reporting`**, not the main HCP Vault cluster lifecycle API. Still **HCP-only** and **not** a substitute for Vault PKI reconciliation on self-managed clusters. |
+| HCP inventory and Vault PKI store are the same snapshot | **Not always.** HCP cert inventory is **telemetry-sourced** and **forward-only** after reporting enablement; Vault PKI `LIST/READ` includes stored certs regardless of reporting window (subject to `no_store`, replication, and mount scope). |
+| Vault Enterprise includes an in-cluster Certificates Inventory UI | **Not found in `hashicorp/vault`.** Enterprise adds usage/billing reporting UI, not HCP-style certificate inventory. |
+
+### Integration recommendation (unchanged, strengthened)
+
+**Primary target: Vault PKI HTTP API** (`LIST {mount}/certs/`, `READ {mount}/cert/{serial}`, `READ sys/mounts`). Works for HCP Vault Dedicated and self-managed Enterprise/OSS with the same reconciler.
+
+**Optional v1.2 (HCP deployments only):** HCP Vault Reporting API or portal export for **audit metadata** (role, revoked by, mount accessor) — does not replace fingerprint reconciliation and does not cover self-managed Enterprise.
+
+**Do not target:** pushing scan results into HCP inventory (telemetry-only, no injection API).
 
 ---
 
@@ -217,15 +302,15 @@ path "+/issuer/*" {
 
 Separate policy for `pki/issuers/import/bundle` (write) — import workflow only.
 
-### HCP API (v1.2 — optional)
+### HCP API (v1.2 — optional, HCP deployments only)
 
 | Use | API | Today |
 |-----|-----|-------|
-| Cluster metadata | `GET .../organizations/{org}/projects/{project}/clusters` | Documented |
+| Cluster metadata | `GET .../organizations/{org}/projects/{project}/clusters` | Documented (HCP Vault cluster lifecycle API) |
 | Enable reporting | Cluster update `reporting_config` | Documented |
-| **List certificate inventory** | — | **Not documented**; portal + export only |
+| **List certificate inventory** | `GET /vault-reporting/2025-05-05/.../reports/certificates-inventory` | Documented in [`hashicorp/cloud-vault-reporting` API docs](https://github.com/hashicorp/cloud-vault-reporting/blob/main/docs/api-docs/20250505.md); **HCP-only**, requires HCP IAM — not available on self-managed Enterprise |
 
-**Conclusion:** v1.1 auth is **Vault-only**. Revisit HCP reporting API when HashiCorp publishes inventory list endpoints.
+**Conclusion:** v1.1 auth is **Vault-only** (works for both HCP Dedicated and self-managed). Optional v1.2 may add HCP Vault Reporting API for supplemental audit columns on HCP clusters only.
 
 ### Environment variables (proposed)
 
@@ -358,5 +443,12 @@ Separate policy for `pki/issuers/import/bundle` (write) — import workflow only
 - [HCP Vault Dedicated inventory reporting](https://developer.hashicorp.com/hcp/docs/vault/reporting)
 - [Certificates inventory reporting](https://developer.hashicorp.com/hcp/docs/vault/reporting/certificates-inventory-reporting)
 - [HCP Vault API (cluster management)](https://developer.hashicorp.com/hcp/api-docs/vault)
+- [HCP Vault Reporting API (certificates inventory — `hashicorp/cloud-vault-reporting`)](https://github.com/hashicorp/cloud-vault-reporting/blob/main/docs/api-docs/20250505.md)
 - [Vault PKI secrets engine API](https://developer.hashicorp.com/vault/api-docs/secret/pki)
+- Vault OSS source (PKI list/read, observations, reporting scan):
+  - [`builtin/logical/pki/path_fetch.go`](https://github.com/hashicorp/vault/blob/main/builtin/logical/pki/path_fetch.go)
+  - [`builtin/logical/pki/observe/observer_ce.go`](https://github.com/hashicorp/vault/blob/main/builtin/logical/pki/observe/observer_ce.go)
+  - [`builtin/logical/pki/observe/observation_consts.go`](https://github.com/hashicorp/vault/blob/main/builtin/logical/pki/observe/observation_consts.go)
+  - [`api/sys_reporting_scan.go`](https://github.com/hashicorp/vault/blob/main/api/sys_reporting_scan.go)
+  - [`ui/lib/core/addon/components/sidebar/nav/reporting.hbs`](https://github.com/hashicorp/vault/blob/main/ui/lib/core/addon/components/sidebar/nav/reporting.hbs)
 - Project: `docs/architecture.md`, `docs/data-model.md`, `README.md`

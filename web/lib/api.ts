@@ -129,16 +129,16 @@ export function listIssuers() {
   return fetchJSON<{ items: Issuer[] }>("/api/v1/issuers");
 }
 
-export function statusColor(status: string): string {
+export function statusBadgeClass(status: string): string {
   switch (status) {
     case "valid":
-      return "#16a34a";
+      return "badge badge-success";
     case "expiring_soon":
-      return "#d97706";
+      return "badge badge-warning";
     case "expired":
     case "revoked":
-      return "#dc2626";
+      return "badge badge-critical";
     default:
-      return "#64748b";
+      return "badge badge-neutral";
   }
 }

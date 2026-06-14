@@ -40,3 +40,26 @@ func TestExpandTargetsRejectsLargeCIDR(t *testing.T) {
 		t.Fatal("expected error for large cidr")
 	}
 }
+
+func TestExpandHostnames(t *testing.T) {
+	targets, err := ExpandHostnames([]string{"example.com"}, []int{443})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) == 0 {
+		t.Fatal("expected targets")
+	}
+	if targets[0].Hostname != "example.com" {
+		t.Fatalf("expected hostname example.com, got %q", targets[0].Hostname)
+	}
+	if targets[0].Port != 443 {
+		t.Fatalf("unexpected port %d", targets[0].Port)
+	}
+}
+
+func TestExpandScanTargetsRequiresInput(t *testing.T) {
+	_, err := ExpandScanTargets(nil, nil, []int{443}, true)
+	if err == nil {
+		t.Fatal("expected error for empty input")
+	}
+}

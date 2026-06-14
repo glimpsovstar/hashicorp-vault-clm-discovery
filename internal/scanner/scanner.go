@@ -7,14 +7,16 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/cert"
 )
 
 type Target struct {
-	IP   string
-	Port int
+	IP       string
+	Port     int
+	Hostname string // DNS name for SNI (empty for CIDR-only targets)
 }
 
 type ProbeResult struct {
@@ -61,6 +63,58 @@ func ExpandTargets(cidrs []string, ports []int, allowPrivate bool) ([]Target, er
 	return targets, nil
 }
 
+func ExpandHostnames(hostnames []string, ports []int) ([]Target, error) {
+	var targets []Target
+	for _, host := range hostnames {
+		host = strings.TrimSpace(host)
+		if host == "" {
+			continue
+		}
+		ips, err := net.LookupIP(host)
+		if err != nil {
+			return nil, fmt.Errorf("lookup %q: %w", host, err)
+		}
+		if len(ips) == 0 {
+			return nil, fmt.Errorf("no addresses for %q", host)
+		}
+		for _, ip := range ips {
+			ip4 := ip.To4()
+			if ip4 == nil {
+				continue
+			}
+			for _, port := range ports {
+				targets = append(targets, Target{IP: ip4.String(), Port: port, Hostname: host})
+			}
+		}
+	}
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("no targets from hostnames")
+	}
+	return targets, nil
+}
+
+func ExpandScanTargets(cidrs, hostnames []string, ports []int, allowPrivate bool) ([]Target, error) {
+	var targets []Target
+	if len(cidrs) > 0 {
+		fromCIDR, err := ExpandTargets(cidrs, ports, allowPrivate)
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, fromCIDR...)
+	}
+	if len(hostnames) > 0 {
+		fromHost, err := ExpandHostnames(hostnames, ports)
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, fromHost...)
+	}
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("no scan targets: provide cidrs and/or hostnames")
+	}
+	return targets, nil
+}
+
 func isPrivatePrefix(p netip.Prefix) bool {
 	addr := p.Addr()
 	return addr.IsPrivate() || addr.IsLoopback() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast()
@@ -71,9 +125,13 @@ func (s *Scanner) Probe(ctx context.Context, target Target) ProbeResult {
 	addr := net.JoinHostPort(target.IP, fmt.Sprintf("%d", target.Port))
 
 	dialer := &net.Dialer{Timeout: s.cfg.Timeout}
+	sni := target.Hostname
+	if sni == "" {
+		sni = target.IP
+	}
 	conn, err := tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{
 		InsecureSkipVerify: true,
-		ServerName:         target.IP,
+		ServerName:         sni,
 		MinVersion:         tls.VersionTLS10,
 	})
 	if err != nil {
@@ -88,17 +146,20 @@ func (s *Scanner) Probe(ctx context.Context, target Target) ProbeResult {
 		return result
 	}
 
-	hostname := target.IP
-	if names, err := net.LookupAddr(target.IP); err == nil && len(names) > 0 {
-		hostname = names[0]
+	hostname := target.Hostname
+	if hostname == "" {
+		hostname = target.IP
+		if names, err := net.LookupAddr(target.IP); err == nil && len(names) > 0 {
+			hostname = strings.TrimSuffix(names[0], ".")
+		}
 	}
 
 	leaf := state.PeerCertificates[0]
-	parsed := cert.ParseCertificate(leaf, state.PeerCertificates, hostname, target.IP)
+	parsed := cert.ParseCertificate(leaf, state.PeerCertificates, hostname, sni)
 
 	var chain []cert.ParsedCertificate
 	for _, c := range state.PeerCertificates[1:] {
-		chain = append(chain, cert.ParseCertificate(c, state.PeerCertificates, hostname, target.IP))
+		chain = append(chain, cert.ParseCertificate(c, state.PeerCertificates, hostname, sni))
 	}
 
 	result.Certificate = parsed
@@ -107,7 +168,7 @@ func (s *Scanner) Probe(ctx context.Context, target Target) ProbeResult {
 		IP:          target.IP,
 		Port:        target.Port,
 		Hostname:    hostname,
-		SNI:         target.IP,
+		SNI:         sni,
 		TLSVersion:  tlsVersionName(state.Version),
 		CipherSuite: tls.CipherSuiteName(state.CipherSuite),
 		ObservedAt:  time.Now().UTC(),

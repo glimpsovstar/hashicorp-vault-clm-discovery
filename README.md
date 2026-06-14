@@ -11,7 +11,7 @@ Vault PKI reconciliation is planned for v1.1.
 - Lifecycle status (`valid`, `expiring_soon`, `expired`)
 - Discovery metadata (observations per IP/port/SNI)
 - Issuer/CA inventory from presented chains
-- REST API + Next.js dashboard
+- REST API + Next.js dashboard (Vault-style Helios UI — see [UI design spec](docs/superpowers/specs/2026-06-14-vault-ui-design.md))
 - Manual governance enrichment (owner, team, environment, tags)
 
 ## Quick start
@@ -79,7 +79,16 @@ Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVA
 
 ## Architecture
 
-See [docs/architecture.md](docs/architecture.md).
+See [docs/architecture.md](docs/architecture.md) (includes dashboard / Vault UI alignment).
+
+## Dashboard UI
+
+The web app mirrors HashiCorp Vault’s **AppFrame** layout (sidebar nav, page headers, HDS colors). Design spec and implementation plan:
+
+- [docs/superpowers/specs/2026-06-14-vault-ui-design.md](docs/superpowers/specs/2026-06-14-vault-ui-design.md)
+- [docs/superpowers/plans/2026-06-14-vault-ui-dashboard.md](docs/superpowers/plans/2026-06-14-vault-ui-dashboard.md)
+
+Official Vault logo: `@hashicorp/flight-icons` **vault-color-24** (gold chevron), matching [Vault’s app header](https://github.com/hashicorp/vault/blob/main/ui/lib/core/addon/components/sidebar/frame.hbs).
 
 ## Data model
 

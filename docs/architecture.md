@@ -63,8 +63,12 @@ flowchart TB
 
 ### Dashboard (`web/`)
 
-- Next.js App Router SPA
-- Inventory, certificate detail, scan management, issuer views
+- Next.js App Router UI aligned with **HashiCorp Vault’s Helios shell** (AppFrame: header, sidebar, main)
+- Routes: certificate inventory (`/`), scans (`/scans`), issuers (`/issuers`), certificate detail (`/certificates/[id]`)
+- Styling uses a subset of [Helios design tokens](https://helios.hashicorp.design/foundations/colors); header logo is Flight Icons `vault-color-24` (same glyph as Vault UI)
+- Server components call the Go API via `web/lib/api.ts` (`API_INTERNAL_URL` in Docker, `NEXT_PUBLIC_API_URL` in browser)
+
+See [docs/superpowers/specs/2026-06-14-vault-ui-design.md](superpowers/specs/2026-06-14-vault-ui-design.md) for UI design rationale and file map.
 
 ## Deployment
 

@@ -15,7 +15,7 @@ docker compose -f deploy/docker-compose.yml up --build -d
 
 | Service | URL |
 |---------|-----|
-| Dashboard | http://localhost:3000 |
+| Dashboard | http://localhost:3000 (Vault-style Helios UI — gold Vault logo, sidebar nav) |
 | API health | http://localhost:8080/api/v1/health |
 
 ## Demo scan (hostnames)
@@ -30,8 +30,8 @@ If `aap.david-joo.sbx.hashicorp.io` does not resolve, connect VPN or omit it; co
 
 ## SDLC demo (Cursor value)
 
-1. Show GitHub **Issues** #1–#3 and linked specs under `docs/superpowers/specs/`
-2. Show open **PR** with test plan checklist
+1. Show GitHub **Issues** #1–#3, **#5** (Vault UI), and linked specs under `docs/superpowers/specs/`
+2. Show open **PRs** [#4](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/pull/4) (v1) and [#6](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/pull/6) (Vault UI, stacked on #4; Fixes #5)
 3. Show **`.cursor/rules/`** + org rules in Cursor Settings
 4. Show **`.prompts-history.md`** — prompt → spec → issue → PR arc
 

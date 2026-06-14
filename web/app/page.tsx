@@ -1,16 +1,19 @@
-import Link from "next/link";
 import PageHeader from "@/components/page-header";
-import { listCertificates, statusBadgeClass } from "@/lib/api";
+import InventoryTable from "@/components/inventory-table";
+import { listCertificates } from "@/lib/api";
+
+export const dynamic = "force-dynamic";
 
 export default async function InventoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; search?: string }>;
+  searchParams: Promise<{ status?: string; search?: string; scan_id?: string }>;
 }) {
   const params = await searchParams;
   const query: Record<string, string> = {};
   if (params.status) query.status = params.status;
   if (params.search) query.search = params.search;
+  if (params.scan_id) query.scan_id = params.scan_id;
 
   const { items: rawItems, total } = await listCertificates(query);
   const items = rawItems ?? [];
@@ -19,7 +22,11 @@ export default async function InventoryPage({
     <>
       <PageHeader
         title="Certificate inventory"
-        description="Discovered TLS certificates across scanned network targets. Filter by status or search by common name, SAN, or fingerprint."
+        description={
+          params.scan_id
+            ? `Certificates discovered in scan ${params.scan_id.slice(0, 8)}…`
+            : "Discovered TLS certificates across scanned network targets. Filter by status or search by common name, SAN, or fingerprint."
+        }
       />
 
       <section className="panel">
@@ -43,6 +50,9 @@ export default async function InventoryPage({
                 defaultValue={params.search || ""}
               />
             </div>
+            {params.scan_id && (
+              <input type="hidden" name="scan_id" value={params.scan_id} />
+            )}
             <button type="submit" className="button button-primary">
               Apply filters
             </button>
@@ -51,49 +61,7 @@ export default async function InventoryPage({
         </div>
 
         <div className="panel-body panel-body-flush data-table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Subject CN</th>
-                <th>Status</th>
-                <th>Days left</th>
-                <th>Chain</th>
-                <th>Observations</th>
-                <th>Last seen</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((cert) => (
-                <tr key={cert.id}>
-                  <td>
-                    <Link href={`/certificates/${cert.id}`}>
-                      {cert.subject_cn || cert.fingerprint_sha256.slice(0, 12)}
-                    </Link>
-                    {!cert.hostname_matches_san && (
-                      <span className="muted" title="Hostname mismatch">
-                        {" "}
-                        ⚠
-                      </span>
-                    )}
-                  </td>
-                  <td>
-                    <span className={statusBadgeClass(cert.status)}>{cert.status}</span>
-                  </td>
-                  <td>{cert.days_until_expiry}</td>
-                  <td>{cert.chain_status}</td>
-                  <td>{cert.observation_count ?? 0}</td>
-                  <td>{new Date(cert.last_seen).toLocaleString()}</td>
-                </tr>
-              ))}
-              {items.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="muted">
-                    No certificates discovered yet. Run a scan from the Scans page.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+          <InventoryTable items={items} />
         </div>
       </section>
     </>

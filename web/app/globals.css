@@ -377,6 +377,29 @@ input[type="checkbox"] {
   cursor: not-allowed;
 }
 
+.button-compact {
+  min-width: auto;
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+a.button {
+  text-decoration: none;
+  display: inline-flex;
+}
+
+a.button:hover {
+  text-decoration: none;
+}
+
 /* Badges (HDS semantic) */
 .badge {
   display: inline-flex;

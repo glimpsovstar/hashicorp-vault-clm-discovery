@@ -88,6 +88,20 @@ async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
+async function fetchVoid(path: string, init?: RequestInit): Promise<void> {
+  const res = await fetch(`${getApiBaseUrl()}${path}`, {
+    ...init,
+    headers: {
+      ...(init?.headers || {}),
+    },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || res.statusText);
+  }
+}
+
 export function listCertificates(params: Record<string, string> = {}) {
   const qs = new URLSearchParams(params).toString();
   return fetchJSON<{ items: Certificate[]; total: number }>(`/api/v1/certificates?${qs}`);
@@ -103,6 +117,22 @@ export function listScans() {
 
 export function getScan(id: string) {
   return fetchJSON<Scan>(`/api/v1/scans/${id}`);
+}
+
+export function listScanCertificates(scanId: string) {
+  return fetchJSON<{ items: Certificate[]; total: number }>(`/api/v1/scans/${scanId}/certificates`);
+}
+
+export function deleteScan(id: string) {
+  return fetchVoid(`/api/v1/scans/${id}`, { method: "DELETE" });
+}
+
+export function deleteCertificate(id: string) {
+  return fetchVoid(`/api/v1/certificates/${id}`, { method: "DELETE" });
+}
+
+export function deleteIssuer(id: string) {
+  return fetchVoid(`/api/v1/issuers/${id}`, { method: "DELETE" });
 }
 
 export function createScan(body: {

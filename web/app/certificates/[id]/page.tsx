@@ -8,7 +8,8 @@ export default async function CertificateDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { certificate: cert, observations } = await getCertificate(id);
+  const { certificate: cert, observations: rawObservations } = await getCertificate(id);
+  const observations = rawObservations ?? [];
 
   return (
     <section>

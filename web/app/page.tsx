@@ -11,7 +11,8 @@ export default async function InventoryPage({
   if (params.status) query.status = params.status;
   if (params.search) query.search = params.search;
 
-  const { items, total } = await listCertificates(query);
+  const { items: rawItems, total } = await listCertificates(query);
+  const items = rawItems ?? [];
 
   return (
     <section>

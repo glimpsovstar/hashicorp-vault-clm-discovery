@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
+	"fmt"
 	"net"
 	"strings"
 )
@@ -76,9 +77,29 @@ func keyUsageStrings(c *x509.Certificate) []string {
 }
 
 func extKeyUsageStrings(c *x509.Certificate) []string {
+	ekuMap := map[x509.ExtKeyUsage]string{
+		x509.ExtKeyUsageAny:                        "any",
+		x509.ExtKeyUsageServerAuth:                 "server_auth",
+		x509.ExtKeyUsageClientAuth:                 "client_auth",
+		x509.ExtKeyUsageCodeSigning:                "code_signing",
+		x509.ExtKeyUsageEmailProtection:            "email_protection",
+		x509.ExtKeyUsageIPSECEndSystem:             "ipsec_end_system",
+		x509.ExtKeyUsageIPSECTunnel:                "ipsec_tunnel",
+		x509.ExtKeyUsageIPSECUser:                  "ipsec_user",
+		x509.ExtKeyUsageTimeStamping:               "time_stamping",
+		x509.ExtKeyUsageOCSPSigning:                "ocsp_signing",
+		x509.ExtKeyUsageMicrosoftServerGatedCrypto: "microsoft_server_gated_crypto",
+		x509.ExtKeyUsageNetscapeServerGatedCrypto:  "netscape_server_gated_crypto",
+		x509.ExtKeyUsageMicrosoftCommercialCodeSigning: "microsoft_commercial_code_signing",
+		x509.ExtKeyUsageMicrosoftKernelCodeSigning: "microsoft_kernel_code_signing",
+	}
 	var out []string
 	for _, u := range c.ExtKeyUsage {
-		out = append(out, u.String())
+		if name, ok := ekuMap[u]; ok {
+			out = append(out, name)
+		} else {
+			out = append(out, fmt.Sprintf("unknown(%d)", u))
+		}
 	}
 	return out
 }

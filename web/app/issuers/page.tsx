@@ -1,7 +1,8 @@
 import { listIssuers, statusColor } from "@/lib/api";
 
 export default async function IssuersPage() {
-  const { items } = await listIssuers();
+  const { items: rawItems } = await listIssuers();
+  const items = rawItems ?? [];
 
   return (
     <section>

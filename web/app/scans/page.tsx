@@ -2,7 +2,8 @@ import { listScans } from "@/lib/api";
 import ScanForm from "./scan-form";
 
 export default async function ScansPage() {
-  const { items } = await listScans();
+  const { items: rawItems } = await listScans();
+  const items = rawItems ?? [];
 
   return (
     <section>
@@ -29,7 +30,7 @@ export default async function ScansPage() {
               <tr key={scan.id}>
                 <td>{scan.id.slice(0, 8)}…</td>
                 <td>{scan.status}</td>
-                <td>{scan.cidrs.join(", ")}</td>
+                <td>{scan.hostnames?.length ? scan.hostnames.join(", ") : scan.cidrs.join(", ") || "—"}</td>
                 <td>{scan.targets_scanned}/{scan.targets_total}</td>
                 <td>{scan.certs_found}</td>
                 <td>{scan.started_at ? new Date(scan.started_at).toLocaleString() : "—"}</td>

@@ -1,0 +1,15 @@
+---
+description: Vault CLM Discovery — external service alongside Vault PKI (not a Vault plugin)
+alwaysApply: true
+---
+
+# Project context
+
+This repo is an **external** certificate discovery service — not a Vault secrets-engine plugin.
+
+- **v1:** network TLS scan + PostgreSQL + REST API + Next.js dashboard
+- **v1.1:** Vault PKI reconciliation via HTTP API (`internal/vault/` — planned)
+
+Read [docs/architecture.md](../../docs/architecture.md) and [docs/data-model.md](../../docs/data-model.md) before schema or API changes.
+
+Org rules (Superpowers, SDLC, commit policy) live in global `org-*.mdc` or Cursor Team Rules.

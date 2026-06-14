@@ -1,0 +1,25 @@
+---
+description: SDLC demo repo — always use GitHub issue → spec → branch → PR
+alwaysApply: true
+---
+
+# SDLC demo (this repo)
+
+This repository is a **Cursor workflow demo**. Follow org SDLC unless the user says "skip SDLC".
+
+## Required path
+
+1. **Issue** on GitHub (templates in `.github/ISSUE_TEMPLATE/`)
+2. **Spec** in `docs/superpowers/specs/` before implementation
+3. **Plan** in `docs/superpowers/plans/` for multi-step work
+4. **Branch** `feature/<#>-slug` or `fix/<#>-slug`
+5. **Verify** — `go test ./...`, web build, Docker Compose (see `CONTRIBUTING.md`)
+6. **PR** with `Fixes #N` and filled test plan
+
+## Demo artifacts
+
+- [CONTRIBUTING.md](../../CONTRIBUTING.md)
+- [docs/demo-flow.md](../../docs/demo-flow.md)
+- [.prompts-history.md](../../.prompts-history.md)
+
+Link PRs to `.prompts-history.md` when part of the AI-assisted demo narrative.

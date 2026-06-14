@@ -55,8 +55,8 @@ Net-new; where/when the cert was seen.
 
 | Field | Type | v1 default | Description |
 |-------|------|------------|-------------|
-| `managed_status` | enum | `unmanaged` | `managed_in_vault`, `unmanaged`, `imported` |
-| `cert_scope` | enum | `external` | `internal`, `external` — derived at scan from chain, issuer, hostname |
+| `managed_status` | enum | `unmanaged` | `managed_in_vault`, `unmanaged`, `imported` — v1 defaults to `unmanaged`; dashboard **Vault** / **Imported** columns derive from this |
+| `cert_scope` | enum | `external` | `internal`, `external` — set at scan via `governance.ClassifyScope` (chain, issuer DN, hostname); dashboard **Scope** column |
 | `vault_issuer_ref` | text | null | Vault issuer ref if managed |
 | `vault_pki_mount` | text | null | PKI mount path |
 | `owner` | text | null | Asset owner |
@@ -84,18 +84,32 @@ Discovered CA/intermediate certs for import via `pki/issuers/import/bundle`.
 - `scans` — scan run metadata and diagnostics
 - `issuers` — CA/intermediate inventory
 
-### Scan diagnostics (`scans`)
+### Scan run metadata (`scans`)
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `expansion_warnings` | text[] | Hostname/DNS expansion warnings (non-fatal) |
+| `status` | enum | `pending`, `running`, `completed`, `failed` |
+| `cidrs`, `hostnames`, `ports` | | Scan targets |
+| `targets_total` | int | Expanded target count |
+| `targets_scanned` | int | Targets processed so far |
+| `certs_found` | int | Certificates **successfully persisted** (upsert OK), not probe count |
 | `targets_succeeded` | int | Targets where TLS probe returned a certificate |
 | `targets_failed` | int | Targets where probe failed (timeout, TLS error, no certs) |
 | `upsert_failures` | int | Certificates probed successfully but not persisted |
+| `expansion_warnings` | text[] | Hostname/DNS expansion warnings (non-fatal) |
 | `failure_samples` | jsonb | Capped array of `{ip, port, hostname, sni, reason, kind}` samples |
 | `error` | text | Fatal scan error only (status `failed`) |
 
-Expansion warnings are no longer stored in `error` on successful scans.
+Expansion warnings are not stored in `error` on successful scans.
+
+### Dashboard column mapping (inventory)
+
+| UI column | Source field | v1 display |
+|-----------|--------------|------------|
+| Vault | `managed_status` | Connected if `managed_in_vault`, else Not connected |
+| Imported | `managed_status` | Imported if `imported`, else Not imported |
+| Scope | `cert_scope` | Internal / External |
+| Expiry | `status` | Active (green) unless `expired` or `revoked` (red) |
 
 ## Status computation
 

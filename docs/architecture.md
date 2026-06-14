@@ -54,14 +54,33 @@ flowchart TB
 - PostgreSQL persistence with upsert-by-fingerprint
 - Normalized observations table for `found_at[]` semantics
 - Lifecycle fields computed on write
+- Empty OCSP/CRL arrays stored as `{}` (not NULL) so upserts satisfy NOT NULL constraints
+- `cert_scope` set on upsert via `governance.ClassifyScope` (chain status, issuer DN, hostname heuristics)
 
 ### API (`internal/api`)
 
 - Chi HTTP router with CORS for dashboard
 - Background scan worker with bounded concurrency
 - Consent gate on scan creation
+- `GET /api/v1/scans/{id}` — scan detail and diagnostics
+- `GET /api/v1/scans/{id}/certificates` — certificates discovered in that scan
+- `DELETE` on scans, certificates, and issuers (204 No Content) for demo reset
 - Request ID propagated into structured logs and JSON error responses
-- Scan diagnostics exposed on `GET /api/v1/scans/{id}`
+
+### Governance classification (`internal/governance`)
+
+At certificate upsert, `ClassifyScope` assigns `cert_scope`:
+
+- `internal` — self-signed chains, internal hostname suffixes (`.local`, `.internal`, …), Vault/internal CA issuers, dev/staging environment
+- `external` — public CA issuer hints (Let's Encrypt, DigiCert, …) or default until v1.1 Vault reconciliation overrides
+
+### Scan worker flow
+
+1. Expand hostnames/CIDRs into targets; record non-fatal expansion warnings
+2. Probe each target concurrently; on success, upsert certificate (empty AIA arrays as `{}`)
+3. Increment `certs_found` only after a successful certificate upsert (not on probe alone)
+4. Track `targets_succeeded` / `targets_failed`, `upsert_failures`, and capped `failure_samples`
+5. On completion, persist summary counts on the `scans` row
 
 ### Observability
 
@@ -70,12 +89,11 @@ flowchart TB
 - Persisted scan diagnostics on `scans`: `expansion_warnings`, probe/upsert aggregate counts, capped `failure_samples` JSON
 - Scan completion emits a summary log line with targets succeeded/failed, certs found, and upsert failures
 
-- Scan completion emits a summary log line with targets succeeded/failed, certs found, and upsert failures
-
 ### Dashboard (`web/`)
 
 - Next.js App Router UI aligned with **HashiCorp Vault’s Helios shell** (AppFrame: header, sidebar, main)
-- Routes: certificate inventory (`/`), scans (`/scans`), issuers (`/issuers`), certificate detail (`/certificates/[id]`)
+- Routes: certificate inventory (`/`), scans (`/scans`), scan detail (`/scans/[id]`), issuers (`/issuers`), certificate detail (`/certificates/[id]`)
+- Inventory table: Vault, Imported, Scope, Expiry governance columns; delete actions on inventory, scans, and issuers
 - Styling uses a subset of [Helios design tokens](https://helios.hashicorp.design/foundations/colors); header logo is Flight Icons `vault-color-24` (same glyph as Vault UI)
 - Server components call the Go API via `web/lib/api.ts` (`API_INTERNAL_URL` in Docker, `NEXT_PUBLIC_API_URL` in browser)
 

@@ -12,6 +12,9 @@ Vault PKI reconciliation is planned for v1.1.
 - Discovery metadata (observations per IP/port/SNI)
 - Issuer/CA inventory from presented chains
 - REST API + Next.js dashboard (Vault-style Helios UI — see [UI design spec](docs/superpowers/specs/2026-06-14-vault-ui-design.md))
+- Inventory governance columns: Vault connection, import state, internal/external scope, expiry badges
+- Scan detail page (`/scans/{id}`) with **View results** and inventory filter by scan
+- DELETE API + dashboard actions to reset scans, certificates, and issuers between demos
 - Manual governance enrichment (owner, team, environment, tags)
 
 ## Quick start
@@ -116,10 +119,15 @@ See [docs/data-model.md](docs/data-model.md).
 | GET | `/api/v1/health` | Health check |
 | POST | `/api/v1/scans` | Start scan (`consent: true` required) |
 | GET | `/api/v1/scans` | List scans |
-| GET | `/api/v1/certificates` | List certificates |
+| GET | `/api/v1/scans/{id}` | Scan detail (status, diagnostics, counts) |
+| GET | `/api/v1/scans/{id}/certificates` | Certificates discovered in a scan |
+| DELETE | `/api/v1/scans/{id}` | Delete scan record |
+| GET | `/api/v1/certificates` | List certificates (`?scan_id=` filters by scan) |
 | GET | `/api/v1/certificates/{id}` | Certificate detail + observations |
 | PATCH | `/api/v1/certificates/{id}` | Update governance fields |
+| DELETE | `/api/v1/certificates/{id}` | Delete certificate |
 | GET | `/api/v1/issuers` | List issuers/CAs |
+| DELETE | `/api/v1/issuers/{id}` | Delete issuer |
 
 ## License
 

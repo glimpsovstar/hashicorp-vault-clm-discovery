@@ -2,7 +2,7 @@
 
 **Status:** Draft — pending user review  
 **Date:** 2026-06-14  
-**Issues:** Scan report (TBD), Vault import workflow (TBD); parent [#20](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/20)  
+**Issues:** [#24](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/24) (scan report), [#25](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/25) (Vault import workflow); parent [#20](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/20)  
 **Related specs:** [CLM lifecycle workflow](2026-06-14-clm-lifecycle-workflow-design.md), [HCP integration](2026-06-14-hcp-vault-cert-inventory-integration-design.md), [reporting architecture](../../reporting-architecture.md)  
 **Related docs:** `docs/architecture.md`, `docs/data-model.md`, `docs/program-context.md`
 

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/go-chi/chi/v5"
@@ -280,7 +281,7 @@ func (w *ScanWorker) run() {
 
 func (w *ScanWorker) execute(job scanJob) {
 	ctx := context.Background()
-	targets, err := scanner.ExpandScanTargets(job.CIDRs, job.Hostnames, job.Ports, w.srv.cfg.AllowPrivateRanges)
+	targets, warnings, err := scanner.ExpandScanTargets(job.CIDRs, job.Hostnames, job.Ports, w.srv.cfg.AllowPrivateRanges)
 	if err != nil {
 		_ = w.srv.store.FailScan(ctx, job.ID, err.Error())
 		return
@@ -335,5 +336,10 @@ func (w *ScanWorker) execute(job scanJob) {
 	}
 
 	wg.Wait()
-	_ = w.srv.store.CompleteScan(ctx, job.ID, scanned, certsFound)
+	var warnMsg *string
+	if len(warnings) > 0 {
+		msg := strings.Join(warnings, "; ")
+		warnMsg = &msg
+	}
+	_ = w.srv.store.CompleteScan(ctx, job.ID, scanned, certsFound, warnMsg)
 }

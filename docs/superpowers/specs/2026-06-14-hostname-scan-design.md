@@ -6,7 +6,7 @@
 
 ## Problem
 
-Demo targets (`coffeesnob.withdevo.net`, `aap.david-joo.sbx.hashicorp.io`) are **hostnames**, not CIDR ranges. Scanning resolved IPs without correct **SNI** returns wrong certificates on shared hosting (Vercel, ALB).
+Demo targets (`coffeesnob.withdevo.net`, `aap.david-joo.sbx.hashidemos.io`) are **hostnames**, not CIDR ranges. Scanning resolved IPs without correct **SNI** returns wrong certificates on shared hosting (Vercel, ALB).
 
 ## Solution
 

@@ -21,12 +21,12 @@ docker compose -f deploy/docker-compose.yml up --build -d
 ## Demo scan (hostnames)
 
 1. Open **Scans**
-2. Hostnames: `coffeesnob.withdevo.net,aap.david-joo.sbx.hashicorp.io`
+2. Hostnames: `coffeesnob.withdevo.net,aap.david-joo.sbx.hashidemos.io`
 3. Ports: `443`
 4. Check consent → **Start scan**
 5. Refresh → **Inventory** shows certificates with observations
 
-If `aap.david-joo.sbx.hashicorp.io` does not resolve, connect VPN or omit it; coffee alone is enough for the demo.
+If `aap.david-joo.sbx.hashidemos.io` is unreachable from your network, omit it; coffee alone is enough for the demo.
 
 ## SDLC demo (Cursor value)
 

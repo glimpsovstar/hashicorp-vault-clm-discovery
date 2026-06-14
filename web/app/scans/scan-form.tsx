@@ -3,13 +3,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createScan } from "@/lib/api";
+import { DEMO_SCAN_HOSTNAMES_CSV } from "@/lib/demo-hostnames";
 
 export default function ScanForm() {
   const router = useRouter();
   const [cidrs, setCidrs] = useState("");
-  const [hostnames, setHostnames] = useState(
-    "aap.david-joo.sbx.hashidemos.io,coffeesnob.withdevo.net"
-  );
+  const [hostnames, setHostnames] = useState(DEMO_SCAN_HOSTNAMES_CSV);
   const [ports, setPorts] = useState("443");
   const [consent, setConsent] = useState(false);
   const [loading, setLoading] = useState(false);

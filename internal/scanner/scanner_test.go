@@ -1,7 +1,10 @@
 package scanner
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/demo"
 )
 
 func TestExpandTargetsSingleHost(t *testing.T) {
@@ -86,6 +89,34 @@ func TestExpandHostnamesPartialSkipsUnresolvable(t *testing.T) {
 	}
 	if !foundExample {
 		t.Fatalf("expected example.com target, got %+v", targets)
+	}
+}
+
+func TestExpandScanTargetsPartialDemoMix(t *testing.T) {
+	wrongAAP := "aap.david-joo.sbx.hashicorp.io"
+	good := demo.ScanHostnames[1] // coffeesnob.withdevo.net
+
+	targets, warnings, err := ExpandScanTargets(nil, []string{wrongAAP, good}, []int{443}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) == 0 {
+		t.Fatal("expected targets from resolvable demo hostname")
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("expected 1 warning for wrong AAP domain, got %d: %v", len(warnings), warnings)
+	}
+	if !strings.Contains(warnings[0], wrongAAP) {
+		t.Fatalf("expected warning about %q, got %q", wrongAAP, warnings[0])
+	}
+	found := false
+	for _, tg := range targets {
+		if tg.Hostname == good {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected target for %q, got %+v", good, targets)
 	}
 }
 

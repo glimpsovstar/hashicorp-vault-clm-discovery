@@ -4,15 +4,15 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/config"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/logging"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanrunner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
 )
@@ -25,22 +25,29 @@ func main() {
 	consent := flag.Bool("i-consent-to-scan", false, "confirm authorized scanning")
 	flag.Parse()
 
+	logger := logging.New(os.Getenv("LOG_LEVEL"))
+
 	if !*consent {
-		log.Fatal("scanning requires --i-consent-to-scan flag confirming authorized use")
+		logger.Error("scanning requires consent", "hint", "pass --i-consent-to-scan")
+		os.Exit(1)
 	}
 	if *cidrs == "" && *hostnames == "" {
-		log.Fatal("--cidrs and/or --hostnames required")
+		logger.Error("no targets", "hint", "pass --cidrs and/or --hostnames")
+		os.Exit(1)
 	}
 
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatal(err)
+		logger.Error("load config", "err", err)
+		os.Exit(1)
 	}
+	logger = logging.New(cfg.LogLevel)
 
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
-		log.Fatal(err)
+		logger.Error("connect database", "err", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
@@ -48,7 +55,8 @@ func main() {
 	hostnameList := splitCSV(*hostnames)
 	portList, err := parsePorts(*ports)
 	if err != nil {
-		log.Fatal(err)
+		logger.Error("parse ports", "err", err)
+		os.Exit(1)
 	}
 
 	st := store.New(pool, cfg.ExpiringSoonDays)
@@ -59,64 +67,38 @@ func main() {
 
 	scan, err := st.CreateScan(ctx, cidrList, hostnameList, portList, *concurrency)
 	if err != nil {
-		log.Fatal(err)
+		logger.Error("create scan", "err", err)
+		os.Exit(1)
 	}
 
-	targets, warnings, err := scanner.ExpandScanTargets(cidrList, hostnameList, portList, cfg.AllowPrivateRanges)
+	fmt.Printf("scan %s: starting\n", scan.ID)
+
+	runner := scanrunner.New(st, sc, logger, cfg.LogLevel, cfg.AllowPrivateRanges)
+	if err := runner.Run(ctx, scanrunner.Job{
+		ScanID:      scan.ID,
+		CIDRs:       cidrList,
+		Hostnames:   hostnameList,
+		Ports:       portList,
+		Concurrency: *concurrency,
+	}); err != nil {
+		os.Exit(1)
+	}
+
+	completed, err := st.GetScan(ctx, scan.ID)
 	if err != nil {
-		_ = st.FailScan(ctx, scan.ID, err.Error())
-		log.Fatal(err)
-	}
-	for _, w := range warnings {
-		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+		logger.Error("load scan summary", "err", err)
+		os.Exit(1)
 	}
 
-	if err := st.UpdateScanRunning(ctx, scan.ID, len(targets)); err != nil {
-		log.Fatal(err)
-	}
-
-	fmt.Printf("scan %s: probing %d targets\n", scan.ID, len(targets))
-
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, *concurrency)
-	var mu sync.Mutex
-	scanned, certsFound := 0, 0
-
-	for _, target := range targets {
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(t scanner.Target) {
-			defer wg.Done()
-			defer func() { <-sem }()
-
-			result := sc.Probe(ctx, t)
-			mu.Lock()
-			scanned++
-			if result.Error == nil {
-				if _, err := st.UpsertCertificate(ctx, scan.ID, result.Certificate, result.Observation); err != nil {
-					log.Printf("upsert error: %v", err)
-				} else {
-					certsFound++
-				}
-			}
-			curScanned, curCerts := scanned, certsFound
-			mu.Unlock()
-
-			if curScanned%50 == 0 {
-				fmt.Printf("progress: %d/%d, certs=%d\n", curScanned, len(targets), curCerts)
-				_ = st.UpdateScanProgress(ctx, scan.ID, curScanned, curCerts)
-			}
-		}(target)
-	}
-
-	wg.Wait()
-	var warnMsg *string
-	if len(warnings) > 0 {
-		msg := strings.Join(warnings, "; ")
-		warnMsg = &msg
-	}
-	_ = st.CompleteScan(ctx, scan.ID, scanned, certsFound, warnMsg)
-	fmt.Printf("scan complete: %d targets, %d certificates found\n", scanned, certsFound)
+	fmt.Fprintf(os.Stderr,
+		"scan complete: %d targets, %d succeeded, %d failed, %d certificates, %d upsert failures, %d warnings\n",
+		completed.TargetsTotal,
+		completed.TargetsSucceeded,
+		completed.TargetsFailed,
+		completed.CertsFound,
+		completed.UpsertFailures,
+		len(completed.ExpansionWarnings),
+	)
 }
 
 func parsePorts(s string) ([]int, error) {

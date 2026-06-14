@@ -23,7 +23,7 @@ export default async function ScanDetailPage({
       <PageHeader
         title={`Scan ${scan.id.slice(0, 8)}…`}
         subtitle="Scans"
-        description={`Targets: ${targets} · Progress ${scan.targets_scanned}/${scan.targets_total} · ${scan.certs_found} certificate(s) persisted`}
+        description={`Targets: ${targets} · Progress ${scan.targets_scanned}/${scan.targets_total} · ${scan.certs_found} certificate(s) persisted · ${scan.targets_failed} probe failures · ${scan.upsert_failures} upsert failures`}
         breadcrumbs={<Link href="/scans">← Back to scans</Link>}
         actions={
           <Link className="button button-secondary" href={`/?scan_id=${scan.id}`}>
@@ -51,7 +51,21 @@ export default async function ScanDetailPage({
             </p>
             {scan.error && (
               <p>
-                <strong>Notes:</strong> {scan.error}
+                <strong>Error:</strong> {scan.error}
+              </p>
+            )}
+            {scan.expansion_warnings && scan.expansion_warnings.length > 0 && (
+              <p>
+                <strong>Expansion warnings:</strong> {scan.expansion_warnings.join("; ")}
+              </p>
+            )}
+            {scan.failure_samples && scan.failure_samples.length > 0 && (
+              <p>
+                <strong>Failure samples:</strong>{" "}
+                {scan.failure_samples
+                  .slice(0, 5)
+                  .map((s) => `${s.ip}:${s.port} (${s.kind}: ${s.reason})`)
+                  .join("; ")}
               </p>
             )}
           </div>

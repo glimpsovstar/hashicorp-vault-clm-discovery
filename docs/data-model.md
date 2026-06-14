@@ -81,8 +81,21 @@ Discovered CA/intermediate certs for import via `pki/issuers/import/bundle`.
 
 - `certificates` — deduplicated cert inventory
 - `certificate_observations` — normalized `found_at[]`
-- `scans` — scan run metadata
+- `scans` — scan run metadata and diagnostics
 - `issuers` — CA/intermediate inventory
+
+### Scan diagnostics (`scans`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `expansion_warnings` | text[] | Hostname/DNS expansion warnings (non-fatal) |
+| `targets_succeeded` | int | Targets where TLS probe returned a certificate |
+| `targets_failed` | int | Targets where probe failed (timeout, TLS error, no certs) |
+| `upsert_failures` | int | Certificates probed successfully but not persisted |
+| `failure_samples` | jsonb | Capped array of `{ip, port, hostname, sni, reason, kind}` samples |
+| `error` | text | Fatal scan error only (status `failed`) |
+
+Expansion warnings are no longer stored in `error` on successful scans.
 
 ## Status computation
 

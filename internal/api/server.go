@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/go-chi/chi/v5"
@@ -15,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/config"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanrunner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
 )
@@ -38,6 +38,7 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
+	r.Use(RequestLogger(s.log))
 	r.Use(middleware.Logger)
 
 	r.Use(cors.Handler(cors.Options{
@@ -71,7 +72,8 @@ func (s *Server) Router() http.Handler {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.Ping(r.Context()); err != nil {
-		writeError(w, http.StatusServiceUnavailable, "database unavailable")
+		requestLogger(r).Error("database unavailable", "err", err, "route", r.URL.Path)
+		writeError(w, r, http.StatusServiceUnavailable, "database unavailable")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -88,15 +90,15 @@ type createScanRequest struct {
 func (s *Server) handleCreateScan(w http.ResponseWriter, r *http.Request) {
 	var req createScanRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if !req.Consent {
-		writeError(w, http.StatusBadRequest, "scan consent required; set consent=true to confirm authorized scanning")
+		writeError(w, r, http.StatusBadRequest, "scan consent required; set consent=true to confirm authorized scanning")
 		return
 	}
 	if len(req.CIDRs) == 0 && len(req.Hostnames) == 0 {
-		writeError(w, http.StatusBadRequest, "cidrs or hostnames required")
+		writeError(w, r, http.StatusBadRequest, "cidrs or hostnames required")
 		return
 	}
 	if len(req.Ports) == 0 {
@@ -108,8 +110,7 @@ func (s *Server) handleCreateScan(w http.ResponseWriter, r *http.Request) {
 
 	scan, err := s.store.CreateScan(r.Context(), req.CIDRs, req.Hostnames, req.Ports, req.Concurrency)
 	if err != nil {
-		s.log.Error("create scan", "err", err)
-		writeError(w, http.StatusInternalServerError, "failed to create scan")
+		s.writeServerError(w, r, err, "failed to create scan")
 		return
 	}
 
@@ -121,7 +122,7 @@ func (s *Server) handleListScans(w http.ResponseWriter, r *http.Request) {
 	limit, offset := pagination(r)
 	scans, err := s.store.ListScans(r.Context(), limit, offset)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list scans")
+		s.writeServerError(w, r, err, "failed to list scans")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": scans, "limit": limit, "offset": offset})
@@ -130,12 +131,12 @@ func (s *Server) handleListScans(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetScan(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid scan id")
+		writeError(w, r, http.StatusBadRequest, "invalid scan id")
 		return
 	}
 	scan, err := s.store.GetScan(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "scan not found")
+		writeError(w, r, http.StatusNotFound, "scan not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, scan)
@@ -144,11 +145,11 @@ func (s *Server) handleGetScan(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListScanCertificates(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid scan id")
+		writeError(w, r, http.StatusBadRequest, "invalid scan id")
 		return
 	}
 	if _, err := s.store.GetScan(r.Context(), id); err != nil {
-		writeError(w, http.StatusNotFound, "scan not found")
+		writeError(w, r, http.StatusNotFound, "scan not found")
 		return
 	}
 	limit, offset := pagination(r)
@@ -158,7 +159,7 @@ func (s *Server) handleListScanCertificates(w http.ResponseWriter, r *http.Reque
 		Offset: offset,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list scan certificates")
+		s.writeServerError(w, r, err, "failed to list scan certificates")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": certs, "total": total, "limit": limit, "offset": offset})
@@ -167,11 +168,11 @@ func (s *Server) handleListScanCertificates(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleDeleteScan(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid scan id")
+		writeError(w, r, http.StatusBadRequest, "invalid scan id")
 		return
 	}
 	if err := s.store.DeleteScan(r.Context(), id); err != nil {
-		writeError(w, http.StatusNotFound, "scan not found")
+		writeError(w, r, http.StatusNotFound, "scan not found")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -180,11 +181,11 @@ func (s *Server) handleDeleteScan(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteCertificate(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid certificate id")
+		writeError(w, r, http.StatusBadRequest, "invalid certificate id")
 		return
 	}
 	if err := s.store.DeleteCertificate(r.Context(), id); err != nil {
-		writeError(w, http.StatusNotFound, "certificate not found")
+		writeError(w, r, http.StatusNotFound, "certificate not found")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -193,11 +194,11 @@ func (s *Server) handleDeleteCertificate(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleDeleteIssuer(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid issuer id")
+		writeError(w, r, http.StatusBadRequest, "invalid issuer id")
 		return
 	}
 	if err := s.store.DeleteIssuer(r.Context(), id); err != nil {
-		writeError(w, http.StatusNotFound, "issuer not found")
+		writeError(w, r, http.StatusNotFound, "issuer not found")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -215,14 +216,14 @@ func (s *Server) handleListCertificates(w http.ResponseWriter, r *http.Request) 
 	if scanID := r.URL.Query().Get("scan_id"); scanID != "" {
 		id, err := uuid.Parse(scanID)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid scan_id")
+			writeError(w, r, http.StatusBadRequest, "invalid scan_id")
 			return
 		}
 		filter.ScanID = id
 	}
 	certs, total, err := s.store.ListCertificates(r.Context(), filter)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list certificates")
+		s.writeServerError(w, r, err, "failed to list certificates")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": certs, "total": total, "limit": limit, "offset": offset})
@@ -231,17 +232,17 @@ func (s *Server) handleListCertificates(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleGetCertificate(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid certificate id")
+		writeError(w, r, http.StatusBadRequest, "invalid certificate id")
 		return
 	}
 	cert, err := s.store.GetCertificate(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "certificate not found")
+		writeError(w, r, http.StatusNotFound, "certificate not found")
 		return
 	}
 	obs, err := s.store.GetCertificateObservations(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to get observations")
+		s.writeServerError(w, r, err, "failed to get observations")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"certificate": cert, "observations": obs})
@@ -250,12 +251,12 @@ func (s *Server) handleGetCertificate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetCertificatePEM(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid certificate id")
+		writeError(w, r, http.StatusBadRequest, "invalid certificate id")
 		return
 	}
 	cert, err := s.store.GetCertificate(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "certificate not found")
+		writeError(w, r, http.StatusNotFound, "certificate not found")
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-pem-file")
@@ -273,19 +274,19 @@ type patchCertificateRequest struct {
 func (s *Server) handlePatchCertificate(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid certificate id")
+		writeError(w, r, http.StatusBadRequest, "invalid certificate id")
 		return
 	}
 	var req patchCertificateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	cert, err := s.store.UpdateCertificateEnrichment(r.Context(), id, store.EnrichmentUpdate{
 		Owner: req.Owner, Team: req.Team, Environment: req.Environment, Tags: req.Tags,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update certificate")
+		s.writeServerError(w, r, err, "failed to update certificate")
 		return
 	}
 	writeJSON(w, http.StatusOK, cert)
@@ -295,7 +296,7 @@ func (s *Server) handleListIssuers(w http.ResponseWriter, r *http.Request) {
 	limit, offset := pagination(r)
 	issuers, err := s.store.ListIssuers(r.Context(), limit, offset)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list issuers")
+		s.writeServerError(w, r, err, "failed to list issuers")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": issuers, "limit": limit, "offset": offset})
@@ -311,16 +312,6 @@ func pagination(r *http.Request) (int, int) {
 		offset = 0
 	}
 	return limit, offset
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
 }
 
 type scanJob struct {
@@ -355,73 +346,12 @@ func (w *ScanWorker) run() {
 
 func (w *ScanWorker) execute(job scanJob) {
 	ctx := context.Background()
-	targets, warnings, err := scanner.ExpandScanTargets(job.CIDRs, job.Hostnames, job.Ports, w.srv.cfg.AllowPrivateRanges)
-	if err != nil {
-		_ = w.srv.store.FailScan(ctx, job.ID, err.Error())
-		return
-	}
-
-	if err := w.srv.store.UpdateScanRunning(ctx, job.ID, len(targets)); err != nil {
-		w.srv.log.Error("update scan running", "err", err)
-		return
-	}
-
-	sem := make(chan struct{}, job.Concurrency)
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	scanned := 0
-	certsFound := 0
-
-	for _, target := range targets {
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(t scanner.Target) {
-			defer wg.Done()
-			defer func() { <-sem }()
-
-			result := w.srv.scanner.Probe(ctx, t)
-			mu.Lock()
-			scanned++
-			curScanned := scanned
-			mu.Unlock()
-
-			if result.Error == nil {
-				if _, err := w.srv.store.UpsertCertificate(ctx, job.ID, result.Certificate, result.Observation); err != nil {
-					w.srv.log.Error("upsert certificate", "err", err)
-				} else {
-					mu.Lock()
-					certsFound++
-					curCerts := certsFound
-					mu.Unlock()
-
-					for _, ca := range result.Chain {
-						if ca.IsCA {
-							chainPEMs := make([]string, len(result.Chain))
-							for i, c := range result.Chain {
-								chainPEMs[i] = c.PEM
-							}
-							_ = w.srv.store.UpsertIssuer(ctx, ca, chainPEMs)
-						}
-					}
-
-					if curScanned%10 == 0 || curScanned == len(targets) {
-						_ = w.srv.store.UpdateScanProgress(ctx, job.ID, curScanned, curCerts)
-					}
-				}
-			} else if curScanned%10 == 0 || curScanned == len(targets) {
-				mu.Lock()
-				curCerts := certsFound
-				mu.Unlock()
-				_ = w.srv.store.UpdateScanProgress(ctx, job.ID, curScanned, curCerts)
-			}
-		}(target)
-	}
-
-	wg.Wait()
-	var warnMsg *string
-	if len(warnings) > 0 {
-		msg := strings.Join(warnings, "; ")
-		warnMsg = &msg
-	}
-	_ = w.srv.store.CompleteScan(ctx, job.ID, scanned, certsFound, warnMsg)
+	runner := scanrunner.New(w.srv.store, w.srv.scanner, w.srv.log, w.srv.cfg.LogLevel, w.srv.cfg.AllowPrivateRanges)
+	_ = runner.Run(ctx, scanrunner.Job{
+		ScanID:      job.ID,
+		CIDRs:       job.CIDRs,
+		Hostnames:   job.Hostnames,
+		Ports:       job.Ports,
+		Concurrency: job.Concurrency,
+	})
 }

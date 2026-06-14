@@ -57,6 +57,7 @@ migrate -path migrations -database "$DATABASE_URL" up
 
 # API
 export ALLOW_PRIVATE_RANGES=true
+export LOG_LEVEL=info   # info (default), debug, trace, warn, error
 go run ./cmd/clm-discovery
 
 # Dashboard
@@ -68,6 +69,7 @@ cd web && npm install && NEXT_PUBLIC_API_URL=http://localhost:8080 npm run dev
 ```bash
 export DATABASE_URL=postgres://clm:clm@localhost:5432/clm?sslmode=disable
 export ALLOW_PRIVATE_RANGES=true
+export LOG_LEVEL=info
 go run ./cmd/clm-scan --cidrs=127.0.0.1/32 --ports=443 --i-consent-to-scan
 ```
 
@@ -76,6 +78,19 @@ go run ./cmd/clm-scan --cidrs=127.0.0.1/32 --ports=443 --i-consent-to-scan
 Only scan networks you own or have explicit permission to test. The API and CLI require explicit consent before scanning.
 
 Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVATE_RANGES=true`.
+
+## Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | (required) | PostgreSQL connection string |
+| `LOG_LEVEL` | `info` | Structured log verbosity: `info`, `debug`, `trace`, `warn`, `error` |
+| `ALLOW_PRIVATE_RANGES` | `false` | Allow scanning RFC1918/loopback ranges |
+| `SCAN_TIMEOUT` | `5s` | Per-target TLS probe timeout |
+| `DEFAULT_CONCURRENCY` | `50` | Default scan worker concurrency |
+| `EXPIRING_SOON_DAYS` | `30` | Days before expiry for `expiring_soon` status |
+
+Both `clm-discovery` and `clm-scan` emit JSON logs to stdout. Set `LOG_LEVEL=debug` to see target expansion summaries; `trace` adds per-target probe outcomes.
 
 ## Architecture
 

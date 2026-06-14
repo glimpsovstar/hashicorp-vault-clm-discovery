@@ -46,6 +46,15 @@ export type Observation = {
   observed_at: string;
 };
 
+export type TargetFailureSample = {
+  ip: string;
+  port: number;
+  hostname?: string;
+  sni?: string;
+  reason: string;
+  kind: "probe" | "upsert";
+};
+
 export type Scan = {
   id: string;
   status: string;
@@ -55,7 +64,12 @@ export type Scan = {
   concurrency: number;
   targets_total: number;
   targets_scanned: number;
+  targets_succeeded: number;
+  targets_failed: number;
   certs_found: number;
+  upsert_failures: number;
+  expansion_warnings?: string[];
+  failure_samples?: TargetFailureSample[];
   started_at?: string;
   finished_at?: string;
   error?: string;

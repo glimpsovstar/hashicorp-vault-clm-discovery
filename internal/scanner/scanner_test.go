@@ -58,8 +58,46 @@ func TestExpandHostnames(t *testing.T) {
 }
 
 func TestExpandScanTargetsRequiresInput(t *testing.T) {
-	_, err := ExpandScanTargets(nil, nil, []int{443}, true)
+	_, _, err := ExpandScanTargets(nil, nil, []int{443}, true)
 	if err == nil {
 		t.Fatal("expected error for empty input")
+	}
+}
+
+func TestExpandHostnamesPartialSkipsUnresolvable(t *testing.T) {
+	targets, warnings, err := ExpandHostnamesPartial(
+		[]string{"example.com", "this-host-should-not-resolve.invalid"},
+		[]int{443},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) == 0 {
+		t.Fatal("expected targets from example.com")
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("expected 1 warning, got %d: %v", len(warnings), warnings)
+	}
+	foundExample := false
+	for _, tg := range targets {
+		if tg.Hostname == "example.com" && tg.Port == 443 {
+			foundExample = true
+		}
+	}
+	if !foundExample {
+		t.Fatalf("expected example.com target, got %+v", targets)
+	}
+}
+
+func TestExpandHostnamesPartialAllFail(t *testing.T) {
+	_, warnings, err := ExpandHostnamesPartial(
+		[]string{"this-host-should-not-resolve.invalid"},
+		[]int{443},
+	)
+	if err == nil {
+		t.Fatal("expected error when no hostnames resolve")
+	}
+	if len(warnings) == 0 {
+		t.Fatal("expected warnings")
 	}
 }

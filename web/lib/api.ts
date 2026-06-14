@@ -129,6 +129,19 @@ export function listIssuers() {
   return fetchJSON<{ items: Issuer[] }>("/api/v1/issuers");
 }
 
+export function scanStatusBadgeClass(status: string): string {
+  switch (status) {
+    case "completed":
+      return "badge badge-success";
+    case "running":
+      return "badge badge-warning";
+    case "failed":
+      return "badge badge-critical";
+    default:
+      return "badge badge-neutral";
+  }
+}
+
 export function statusBadgeClass(status: string): string {
   switch (status) {
     case "valid":

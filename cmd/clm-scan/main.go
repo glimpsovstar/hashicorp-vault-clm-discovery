@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -61,10 +62,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-	targets, err := scanner.ExpandScanTargets(cidrList, hostnameList, portList, cfg.AllowPrivateRanges)
+	targets, warnings, err := scanner.ExpandScanTargets(cidrList, hostnameList, portList, cfg.AllowPrivateRanges)
 	if err != nil {
 		_ = st.FailScan(ctx, scan.ID, err.Error())
 		log.Fatal(err)
+	}
+	for _, w := range warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 	}
 
 	if err := st.UpdateScanRunning(ctx, scan.ID, len(targets)); err != nil {
@@ -106,7 +110,12 @@ func main() {
 	}
 
 	wg.Wait()
-	_ = st.CompleteScan(ctx, scan.ID, scanned, certsFound)
+	var warnMsg *string
+	if len(warnings) > 0 {
+		msg := strings.Join(warnings, "; ")
+		warnMsg = &msg
+	}
+	_ = st.CompleteScan(ctx, scan.ID, scanned, certsFound, warnMsg)
 	fmt.Printf("scan complete: %d targets, %d certificates found\n", scanned, certsFound)
 }
 

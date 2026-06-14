@@ -64,7 +64,15 @@ func ExpandTargets(cidrs []string, ports []int, allowPrivate bool) ([]Target, er
 }
 
 func ExpandHostnames(hostnames []string, ports []int) ([]Target, error) {
+	targets, _, err := ExpandHostnamesPartial(hostnames, ports)
+	return targets, err
+}
+
+// ExpandHostnamesPartial resolves hostnames to scan targets. Unresolvable names
+// are skipped and returned as warnings so other hostnames can still be scanned.
+func ExpandHostnamesPartial(hostnames []string, ports []int) ([]Target, []string, error) {
 	var targets []Target
+	var warnings []string
 	for _, host := range hostnames {
 		host = strings.TrimSpace(host)
 		if host == "" {
@@ -72,47 +80,59 @@ func ExpandHostnames(hostnames []string, ports []int) ([]Target, error) {
 		}
 		ips, err := net.LookupIP(host)
 		if err != nil {
-			return nil, fmt.Errorf("lookup %q: %w", host, err)
+			warnings = append(warnings, fmt.Sprintf("skipped %q: %v", host, err))
+			continue
 		}
 		if len(ips) == 0 {
-			return nil, fmt.Errorf("no addresses for %q", host)
+			warnings = append(warnings, fmt.Sprintf("skipped %q: no addresses", host))
+			continue
 		}
+		added := false
 		for _, ip := range ips {
 			ip4 := ip.To4()
 			if ip4 == nil {
 				continue
 			}
+			added = true
 			for _, port := range ports {
 				targets = append(targets, Target{IP: ip4.String(), Port: port, Hostname: host})
 			}
 		}
+		if !added {
+			warnings = append(warnings, fmt.Sprintf("skipped %q: no IPv4 addresses", host))
+		}
 	}
 	if len(targets) == 0 {
-		return nil, fmt.Errorf("no targets from hostnames")
+		if len(warnings) > 0 {
+			return nil, warnings, fmt.Errorf("no resolvable hostnames (%s)", strings.Join(warnings, "; "))
+		}
+		return nil, warnings, fmt.Errorf("no targets from hostnames")
 	}
-	return targets, nil
+	return targets, warnings, nil
 }
 
-func ExpandScanTargets(cidrs, hostnames []string, ports []int, allowPrivate bool) ([]Target, error) {
+func ExpandScanTargets(cidrs, hostnames []string, ports []int, allowPrivate bool) ([]Target, []string, error) {
 	var targets []Target
+	var warnings []string
 	if len(cidrs) > 0 {
 		fromCIDR, err := ExpandTargets(cidrs, ports, allowPrivate)
 		if err != nil {
-			return nil, err
+			return nil, warnings, err
 		}
 		targets = append(targets, fromCIDR...)
 	}
 	if len(hostnames) > 0 {
-		fromHost, err := ExpandHostnames(hostnames, ports)
+		fromHost, hostWarnings, err := ExpandHostnamesPartial(hostnames, ports)
+		warnings = append(warnings, hostWarnings...)
 		if err != nil {
-			return nil, err
+			return nil, warnings, err
 		}
 		targets = append(targets, fromHost...)
 	}
 	if len(targets) == 0 {
-		return nil, fmt.Errorf("no scan targets: provide cidrs and/or hostnames")
+		return nil, warnings, fmt.Errorf("no scan targets: provide cidrs and/or hostnames")
 	}
-	return targets, nil
+	return targets, warnings, nil
 }
 
 func isPrivatePrefix(p netip.Prefix) bool {

@@ -84,7 +84,8 @@ export default function ScanForm() {
 
       <p className="help-text">
         Use hostnames for HTTPS sites (correct SNI). CIDR scans use the IP as SNI — fine for
-        dedicated IPs, wrong for shared hosting.
+        dedicated IPs, wrong for shared hosting. Unresolvable hostnames are skipped with a warning;
+        the scan still runs for names that resolve.
       </p>
     </form>
   );

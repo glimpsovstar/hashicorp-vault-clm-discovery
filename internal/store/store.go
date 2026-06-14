@@ -167,11 +167,11 @@ func (s *Store) UpdateScanProgress(ctx context.Context, id uuid.UUID, scanned, c
 	return err
 }
 
-func (s *Store) CompleteScan(ctx context.Context, id uuid.UUID, scanned, certsFound int) error {
+func (s *Store) CompleteScan(ctx context.Context, id uuid.UUID, scanned, certsFound int, warning *string) error {
 	now := time.Now().UTC()
 	_, err := s.pool.Exec(ctx, `
-		UPDATE scans SET status = 'completed', finished_at = $2, targets_scanned = $3, certs_found = $4 WHERE id = $1
-	`, id, now, scanned, certsFound)
+		UPDATE scans SET status = 'completed', finished_at = $2, targets_scanned = $3, certs_found = $4, error = $5 WHERE id = $1
+	`, id, now, scanned, certsFound, warning)
 	return err
 }
 

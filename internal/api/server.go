@@ -42,7 +42,7 @@ func (s *Server) Router() http.Handler {
 
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   s.cfg.CORSOrigins,
-		AllowedMethods:   []string{"GET", "POST", "PATCH", "OPTIONS"},
+		AllowedMethods:   []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: true,
 	}))
@@ -53,13 +53,17 @@ func (s *Server) Router() http.Handler {
 		r.Post("/scans", s.handleCreateScan)
 		r.Get("/scans", s.handleListScans)
 		r.Get("/scans/{id}", s.handleGetScan)
+		r.Get("/scans/{id}/certificates", s.handleListScanCertificates)
+		r.Delete("/scans/{id}", s.handleDeleteScan)
 
 		r.Get("/certificates", s.handleListCertificates)
 		r.Get("/certificates/{id}", s.handleGetCertificate)
 		r.Get("/certificates/{id}/pem", s.handleGetCertificatePEM)
 		r.Patch("/certificates/{id}", s.handlePatchCertificate)
+		r.Delete("/certificates/{id}", s.handleDeleteCertificate)
 
 		r.Get("/issuers", s.handleListIssuers)
+		r.Delete("/issuers/{id}", s.handleDeleteIssuer)
 	})
 
 	return r
@@ -137,6 +141,68 @@ func (s *Server) handleGetScan(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, scan)
 }
 
+func (s *Server) handleListScanCertificates(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid scan id")
+		return
+	}
+	if _, err := s.store.GetScan(r.Context(), id); err != nil {
+		writeError(w, http.StatusNotFound, "scan not found")
+		return
+	}
+	limit, offset := pagination(r)
+	certs, total, err := s.store.ListCertificates(r.Context(), store.CertificateFilter{
+		ScanID: id,
+		Limit:  limit,
+		Offset: offset,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list scan certificates")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": certs, "total": total, "limit": limit, "offset": offset})
+}
+
+func (s *Server) handleDeleteScan(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid scan id")
+		return
+	}
+	if err := s.store.DeleteScan(r.Context(), id); err != nil {
+		writeError(w, http.StatusNotFound, "scan not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleDeleteCertificate(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid certificate id")
+		return
+	}
+	if err := s.store.DeleteCertificate(r.Context(), id); err != nil {
+		writeError(w, http.StatusNotFound, "certificate not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleDeleteIssuer(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid issuer id")
+		return
+	}
+	if err := s.store.DeleteIssuer(r.Context(), id); err != nil {
+		writeError(w, http.StatusNotFound, "issuer not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleListCertificates(w http.ResponseWriter, r *http.Request) {
 	limit, offset := pagination(r)
 	filter := store.CertificateFilter{
@@ -145,6 +211,14 @@ func (s *Server) handleListCertificates(w http.ResponseWriter, r *http.Request) 
 		Search:      r.URL.Query().Get("search"),
 		Limit:       limit,
 		Offset:      offset,
+	}
+	if scanID := r.URL.Query().Get("scan_id"); scanID != "" {
+		id, err := uuid.Parse(scanID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid scan_id")
+			return
+		}
+		filter.ScanID = id
 	}
 	certs, total, err := s.store.ListCertificates(r.Context(), filter)
 	if err != nil {
@@ -308,28 +382,36 @@ func (w *ScanWorker) execute(job scanJob) {
 			result := w.srv.scanner.Probe(ctx, t)
 			mu.Lock()
 			scanned++
-			if result.Error == nil {
-				certsFound++
-			}
-			curScanned, curCerts := scanned, certsFound
+			curScanned := scanned
 			mu.Unlock()
 
 			if result.Error == nil {
 				if _, err := w.srv.store.UpsertCertificate(ctx, job.ID, result.Certificate, result.Observation); err != nil {
 					w.srv.log.Error("upsert certificate", "err", err)
-				}
-				for _, ca := range result.Chain {
-					if ca.IsCA {
-						chainPEMs := make([]string, len(result.Chain))
-						for i, c := range result.Chain {
-							chainPEMs[i] = c.PEM
+				} else {
+					mu.Lock()
+					certsFound++
+					curCerts := certsFound
+					mu.Unlock()
+
+					for _, ca := range result.Chain {
+						if ca.IsCA {
+							chainPEMs := make([]string, len(result.Chain))
+							for i, c := range result.Chain {
+								chainPEMs[i] = c.PEM
+							}
+							_ = w.srv.store.UpsertIssuer(ctx, ca, chainPEMs)
 						}
-						_ = w.srv.store.UpsertIssuer(ctx, ca, chainPEMs)
+					}
+
+					if curScanned%10 == 0 || curScanned == len(targets) {
+						_ = w.srv.store.UpdateScanProgress(ctx, job.ID, curScanned, curCerts)
 					}
 				}
-			}
-
-			if curScanned%10 == 0 || curScanned == len(targets) {
+			} else if curScanned%10 == 0 || curScanned == len(targets) {
+				mu.Lock()
+				curCerts := certsFound
+				mu.Unlock()
 				_ = w.srv.store.UpdateScanProgress(ctx, job.ID, curScanned, curCerts)
 			}
 		}(target)

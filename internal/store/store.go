@@ -120,6 +120,7 @@ type CertificateFilter struct {
 	Status      string
 	ChainStatus string
 	Search      string
+	ScanID      uuid.UUID
 	Limit       int
 	Offset      int
 }
@@ -258,8 +259,8 @@ func (s *Store) UpsertCertificate(ctx context.Context, scanID uuid.UUID, parsed 
 		parsed.SerialNumber, parsed.FingerprintSHA256, nullStr(parsed.SubjectCN), sansJSON,
 		parsed.IssuerDN, nullStr(parsed.AuthorityKeyID), parsed.NotBefore, parsed.NotAfter,
 		parsed.KeyType, parsed.KeyBits, parsed.SignatureAlgorithm, parsed.IsCA,
-		parsed.KeyUsage, parsed.ExtKeyUsage, parsed.PEM, days, string(status),
-		parsed.CRLDistributionPoints, parsed.OCSPServers, parsed.HostnameMatchesSAN,
+		stringSliceForPG(parsed.KeyUsage), stringSliceForPG(parsed.ExtKeyUsage), parsed.PEM, days, string(status),
+		stringSliceForPG(parsed.CRLDistributionPoints), stringSliceForPG(parsed.OCSPServers), parsed.HostnameMatchesSAN,
 		string(parsed.ChainStatus), obs.ObservedAt,
 	).Scan(&certID)
 	if err != nil {
@@ -294,7 +295,8 @@ func (s *Store) UpsertIssuer(ctx context.Context, parsed cert.ParsedCertificate,
 	`, parsed.FingerprintSHA256, parsed.SerialNumber, nullStr(parsed.SubjectCN), sansJSON,
 		parsed.IssuerDN, nullStr(parsed.AuthorityKeyID), parsed.NotBefore, parsed.NotAfter,
 		parsed.KeyType, parsed.KeyBits, parsed.SignatureAlgorithm, parsed.IsCA,
-		parsed.KeyUsage, parsed.ExtKeyUsage, parsed.PEM, days, string(status), caChain)
+		stringSliceForPG(parsed.KeyUsage), stringSliceForPG(parsed.ExtKeyUsage), parsed.PEM, days, string(status),
+		stringSliceForPG(caChain))
 	return err
 }
 
@@ -320,6 +322,11 @@ func (s *Store) ListCertificates(ctx context.Context, f CertificateFilter) ([]Ce
 	if f.Search != "" {
 		where += fmt.Sprintf(" AND (c.subject_cn ILIKE $%d OR c.fingerprint_sha256 ILIKE $%d OR c.subject_alt_names::text ILIKE $%d)", argN, argN, argN)
 		args = append(args, "%"+f.Search+"%")
+		argN++
+	}
+	if f.ScanID != uuid.Nil {
+		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM certificate_observations o WHERE o.certificate_id = c.id AND o.scan_id = $%d)", argN)
+		args = append(args, f.ScanID)
 		argN++
 	}
 
@@ -449,6 +456,46 @@ func (s *Store) ListIssuers(ctx context.Context, limit, offset int) ([]Issuer, e
 		issuers = []Issuer{}
 	}
 	return issuers, rows.Err()
+}
+
+func (s *Store) DeleteScan(ctx context.Context, id uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM scans WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("scan not found")
+	}
+	return nil
+}
+
+func (s *Store) DeleteCertificate(ctx context.Context, id uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM certificates WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("certificate not found")
+	}
+	return nil
+}
+
+func (s *Store) DeleteIssuer(ctx context.Context, id uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM issuers WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("issuer not found")
+	}
+	return nil
+}
+
+func stringSliceForPG(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }
 
 func nullStr(s string) *string {

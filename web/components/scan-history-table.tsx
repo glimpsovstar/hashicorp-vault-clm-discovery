@@ -1,8 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { listScans, scanStatusBadgeClass, type Scan } from "@/lib/api";
+import DeleteButton from "@/components/delete-button";
+import { deleteScan, listScans, scanStatusBadgeClass, type Scan } from "@/lib/api";
 
 function hasActiveScans(items: Scan[]) {
   return items.some((s) => s.status === "pending" || s.status === "running");
@@ -49,6 +51,7 @@ export default function ScanHistoryTable({ initialItems }: { initialItems: Scan[
           <th>Certs</th>
           <th>Started</th>
           <th>Details</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -70,14 +73,27 @@ export default function ScanHistoryTable({ initialItems }: { initialItems: Scan[
             </td>
             <td>{scan.certs_found}</td>
             <td>{scan.started_at ? new Date(scan.started_at).toLocaleString() : "—"}</td>
-            <td className="muted" style={{ maxWidth: 280 }}>
+            <td className="muted" style={{ maxWidth: 240 }}>
               {scan.error || "—"}
+            </td>
+            <td>
+              <div className="table-actions">
+                {(scan.status === "completed" || scan.status === "failed") && (
+                  <Link className="button button-secondary button-compact" href={`/scans/${scan.id}`}>
+                    View results
+                  </Link>
+                )}
+                <DeleteButton
+                  label={`scan ${scan.id.slice(0, 8)}`}
+                  onDelete={() => deleteScan(scan.id)}
+                />
+              </div>
             </td>
           </tr>
         ))}
         {items.length === 0 && (
           <tr>
-            <td colSpan={7} className="muted">
+            <td colSpan={8} className="muted">
               No scans yet.
             </td>
           </tr>

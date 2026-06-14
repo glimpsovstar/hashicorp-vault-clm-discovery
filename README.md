@@ -4,6 +4,8 @@ Network TLS certificate discovery service that runs alongside HashiCorp Vault or
 
 Vault PKI reconciliation is planned for v1.1.
 
+**New here?** See [docs/program-context.md](docs/program-context.md) — how this repo fits Vault PKI, HCP Certificates Inventory, and the Discover → Choose → Import → Manage lifecycle.
+
 ## Features (v1)
 
 - Concurrent TLS probing across CIDR ranges and ports
@@ -141,6 +143,9 @@ Mozilla Public License 2.0 — see [LICENSE](LICENSE).
 
 ## Roadmap
 
-- **v1.1:** Vault PKI reconciliation (`managed_in_vault`, issuer mapping, import bundle workflow)
-- **v1.1:** OCSP/CRL revocation checks
+- **v1.1:** Vault PKI reconciliation (`managed_in_vault`, issuer mapping) — [plan](docs/superpowers/plans/2026-06-14-clm-lifecycle-v1.1.md)
+- **v1.1b:** OCSP/CRL revocation checks
+- **v1.2:** CA import/bundle, vault-agent/AAP integration hooks, optional HCP reporting ingest
 - **v2:** Cloud provider certificate sources (AWS ACM, etc.)
+
+Lifecycle and HCP positioning: [docs/program-context.md](docs/program-context.md) · [lifecycle spec](docs/superpowers/specs/2026-06-14-clm-lifecycle-workflow-design.md)

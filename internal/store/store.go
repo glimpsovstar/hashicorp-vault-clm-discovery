@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/cert"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/governance"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/lifecycle"
 )
 
@@ -71,6 +72,7 @@ type Certificate struct {
 	HostnameMatchesSAN   bool      `json:"hostname_matches_san"`
 	ChainStatus          string    `json:"chain_status"`
 	ManagedStatus        string    `json:"managed_status"`
+	CertScope            string    `json:"cert_scope"`
 	VaultIssuerRef       *string   `json:"vault_issuer_ref"`
 	VaultPKIMount        *string   `json:"vault_pki_mount"`
 	Owner                *string   `json:"owner"`
@@ -237,6 +239,12 @@ func (s *Store) UpsertCertificate(ctx context.Context, scanID uuid.UUID, parsed 
 		return uuid.Nil, err
 	}
 
+	hostname := obs.Hostname
+	if hostname == "" {
+		hostname = obs.SNI
+	}
+	certScope := governance.ClassifyScope(string(parsed.ChainStatus), parsed.IssuerDN, hostname, "")
+
 	var certID uuid.UUID
 	err = s.pool.QueryRow(ctx, `
 		INSERT INTO certificates (
@@ -244,15 +252,16 @@ func (s *Store) UpsertCertificate(ctx context.Context, scanID uuid.UUID, parsed 
 			authority_key_id, not_before, not_after, key_type, key_bits, signature_algorithm,
 			is_ca, key_usage, ext_key_usage, pem, days_until_expiry, status,
 			crl_distribution_points, ocsp_servers, hostname_matches_san, chain_status,
-			first_discovered, last_seen
+			cert_scope, first_discovered, last_seen
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-			$18, $19, $20, $21, $22, $22
+			$18, $19, $20, $21, $22, $23, $23
 		)
 		ON CONFLICT (fingerprint_sha256) DO UPDATE SET
 			last_seen = EXCLUDED.last_seen,
 			days_until_expiry = EXCLUDED.days_until_expiry,
 			status = EXCLUDED.status,
+			cert_scope = EXCLUDED.cert_scope,
 			updated_at = NOW()
 		RETURNING id
 	`,
@@ -261,7 +270,7 @@ func (s *Store) UpsertCertificate(ctx context.Context, scanID uuid.UUID, parsed 
 		parsed.KeyType, parsed.KeyBits, parsed.SignatureAlgorithm, parsed.IsCA,
 		stringSliceForPG(parsed.KeyUsage), stringSliceForPG(parsed.ExtKeyUsage), parsed.PEM, days, string(status),
 		stringSliceForPG(parsed.CRLDistributionPoints), stringSliceForPG(parsed.OCSPServers), parsed.HostnameMatchesSAN,
-		string(parsed.ChainStatus), obs.ObservedAt,
+		string(parsed.ChainStatus), certScope, obs.ObservedAt,
 	).Scan(&certID)
 	if err != nil {
 		return uuid.Nil, err
@@ -342,7 +351,7 @@ func (s *Store) ListCertificates(ctx context.Context, f CertificateFilter) ([]Ce
 			c.signature_algorithm, c.is_ca, c.key_usage, c.ext_key_usage, c.pem,
 			c.days_until_expiry, c.status::text, c.revocation_status, c.revocation_checked_at,
 			c.crl_distribution_points, c.ocsp_servers, c.first_discovered, c.last_seen,
-			c.hostname_matches_san, c.chain_status::text, c.managed_status::text,
+			c.hostname_matches_san, c.chain_status::text, c.managed_status::text, c.cert_scope::text,
 			c.vault_issuer_ref, c.vault_pki_mount, c.owner, c.team, c.environment, c.tags,
 			c.risk_score, c.remediation_state::text, c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM certificate_observations o WHERE o.certificate_id = c.id) AS obs_count
@@ -377,7 +386,7 @@ func (s *Store) GetCertificate(ctx context.Context, id uuid.UUID) (Certificate, 
 			c.signature_algorithm, c.is_ca, c.key_usage, c.ext_key_usage, c.pem,
 			c.days_until_expiry, c.status::text, c.revocation_status, c.revocation_checked_at,
 			c.crl_distribution_points, c.ocsp_servers, c.first_discovered, c.last_seen,
-			c.hostname_matches_san, c.chain_status::text, c.managed_status::text,
+			c.hostname_matches_san, c.chain_status::text, c.managed_status::text, c.cert_scope::text,
 			c.vault_issuer_ref, c.vault_pki_mount, c.owner, c.team, c.environment, c.tags,
 			c.risk_score, c.remediation_state::text, c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM certificate_observations o WHERE o.certificate_id = c.id)
@@ -518,7 +527,7 @@ func scanCertificate(scan func(dest ...any) error) (Certificate, error) {
 		&c.SignatureAlgorithm, &c.IsCA, &c.KeyUsage, &c.ExtKeyUsage, &c.PEM,
 		&c.DaysUntilExpiry, &c.Status, &c.RevocationStatus, &c.RevocationCheckedAt,
 		&c.CRLDistributionPoints, &c.OCSPServers, &c.FirstDiscovered, &c.LastSeen,
-		&c.HostnameMatchesSAN, &c.ChainStatus, &c.ManagedStatus,
+		&c.HostnameMatchesSAN, &c.ChainStatus, &c.ManagedStatus, &c.CertScope,
 		&c.VaultIssuerRef, &c.VaultPKIMount, &c.Owner, &c.Team, &c.Environment, &c.Tags,
 		&c.RiskScore, &c.RemediationState, &c.CreatedAt, &c.UpdatedAt, &c.ObservationCount,
 	)

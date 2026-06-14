@@ -56,7 +56,7 @@ GitHub: [#20](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issu
 | **v1** | Network scan, inventory, observations, governance columns, Helios UI, demo reset | **Shipped** |
 | **v1.1** | `internal/vault/` client, PKI reconcile, `POST /api/v1/reconcile`, Vault column live | Planned — [implementation plan](superpowers/plans/2026-06-14-clm-lifecycle-v1.1.md) |
 | **v1.1b** | OCSP/CRL revocation alignment | Planned |
-| **v1.2** | CA import/bundle, Choose wizard, vault-agent/AAP hooks, optional HCP reporting ingest | Planned |
+| **v1.2** | Environment scan report, catalog/CA import workflows, Choose wizard, vault-agent/AAP hooks, optional HCP reporting ingest | Planned — [reporting architecture](reporting-architecture.md), [scan report & import spec](superpowers/specs/2026-06-14-scan-report-and-vault-import-design.md) |
 | **v2** | Cloud CA sources (ACM, etc.) | Planned |
 
 ## Demo vs production

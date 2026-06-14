@@ -4,8 +4,8 @@
 **Date:** 2026-06-14  
 **Issue:** [#20](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/20) (lifecycle design; complements [#17](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/17))  
 **Repo:** [glimpsovstar/hashicorp-vault-clm-discovery](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery)  
-**Related specs:** [HCP Vault Dedicated cert inventory integration](2026-06-14-hcp-vault-cert-inventory-integration-design.md), [v1 product design](2026-06-14-vault-clm-discovery-v1-design.md)  
-**Related docs:** `docs/architecture.md`, `docs/data-model.md`, `README.md`
+**Related specs:** [HCP Vault Dedicated cert inventory integration](2026-06-14-hcp-vault-cert-inventory-integration-design.md), [v1 product design](2026-06-14-vault-clm-discovery-v1-design.md), [scan report & Vault import workflow](2026-06-14-scan-report-and-vault-import-design.md)  
+**Related docs:** `docs/architecture.md`, `docs/data-model.md`, `docs/reporting-architecture.md`, `README.md`
 
 ## Problem statement & user value
 
@@ -154,6 +154,10 @@ flowchart TD
 - Pushing discovered rows into HCP Certificates Inventory
 - Automatic CA import without operator consent
 - Scanning without explicit consent
+
+### Post-scan report (v1.2+)
+
+Completed scans can produce a **certificate-only environment report** (Radar-style sections: executive summary, cert health, expiry risk, issuer trust, scope, recommendations). Pipeline and formats: [`docs/reporting-architecture.md`](../../reporting-architecture.md). Design and import workflow: [scan report & Vault import spec](2026-06-14-scan-report-and-vault-import-design.md). Builds on scan diagnostics from [#14](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/14).
 
 ---
 

@@ -28,20 +28,25 @@ func (s *Store) Ping(ctx context.Context) error {
 }
 
 type Scan struct {
-	ID              uuid.UUID `json:"id"`
-	Source          string    `json:"source"`
-	Status          string    `json:"status"`
-	CIDRs           []string  `json:"cidrs"`
-	Hostnames       []string  `json:"hostnames"`
-	Ports           []int     `json:"ports"`
-	Concurrency     int       `json:"concurrency"`
-	StartedAt       *time.Time `json:"started_at,omitempty"`
-	FinishedAt      *time.Time `json:"finished_at,omitempty"`
-	TargetsTotal    int       `json:"targets_total"`
-	TargetsScanned  int       `json:"targets_scanned"`
-	CertsFound      int       `json:"certs_found"`
-	Error           *string   `json:"error,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
+	ID                uuid.UUID              `json:"id"`
+	Source            string                 `json:"source"`
+	Status            string                 `json:"status"`
+	CIDRs             []string               `json:"cidrs"`
+	Hostnames         []string               `json:"hostnames"`
+	Ports             []int                  `json:"ports"`
+	Concurrency       int                    `json:"concurrency"`
+	StartedAt         *time.Time             `json:"started_at,omitempty"`
+	FinishedAt        *time.Time             `json:"finished_at,omitempty"`
+	TargetsTotal      int                    `json:"targets_total"`
+	TargetsScanned    int                    `json:"targets_scanned"`
+	TargetsSucceeded  int                    `json:"targets_succeeded"`
+	TargetsFailed     int                    `json:"targets_failed"`
+	CertsFound        int                    `json:"certs_found"`
+	UpsertFailures    int                    `json:"upsert_failures"`
+	ExpansionWarnings []string               `json:"expansion_warnings"`
+	FailureSamples    []TargetFailureSample  `json:"failure_samples"`
+	Error             *string                `json:"error,omitempty"`
+	CreatedAt         time.Time              `json:"created_at"`
 }
 
 type Certificate struct {
@@ -142,15 +147,18 @@ func (s *Store) CreateScan(ctx context.Context, cidrs, hostnames []string, ports
 		hostnames = []string{}
 	}
 	var scan Scan
+	samplesScanner := failureSamplesArg(&scan.FailureSamples)
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO scans (cidrs, hostnames, ports, concurrency, targets_total)
 		VALUES ($1, $2, $3, $4, 0)
 		RETURNING id, source, status::text, cidrs, hostnames, ports, concurrency,
-			started_at, finished_at, targets_total, targets_scanned, certs_found, error, created_at
+			started_at, finished_at, targets_total, targets_scanned, targets_succeeded, targets_failed,
+			certs_found, upsert_failures, expansion_warnings, failure_samples, error, created_at
 	`, cidrs, hostnames, ports, concurrency).Scan(
 		&scan.ID, &scan.Source, &scan.Status, &scan.CIDRs, &scan.Hostnames, &scan.Ports, &scan.Concurrency,
 		&scan.StartedAt, &scan.FinishedAt, &scan.TargetsTotal, &scan.TargetsScanned,
-		&scan.CertsFound, &scan.Error, &scan.CreatedAt,
+		&scan.TargetsSucceeded, &scan.TargetsFailed, &scan.CertsFound, &scan.UpsertFailures,
+		&scan.ExpansionWarnings, &samplesScanner, &scan.Error, &scan.CreatedAt,
 	)
 	return scan, err
 }
@@ -170,11 +178,31 @@ func (s *Store) UpdateScanProgress(ctx context.Context, id uuid.UUID, scanned, c
 	return err
 }
 
-func (s *Store) CompleteScan(ctx context.Context, id uuid.UUID, scanned, certsFound int, warning *string) error {
+func (s *Store) CompleteScan(ctx context.Context, id uuid.UUID, summary ScanSummary) error {
 	now := time.Now().UTC()
-	_, err := s.pool.Exec(ctx, `
-		UPDATE scans SET status = 'completed', finished_at = $2, targets_scanned = $3, certs_found = $4, error = $5 WHERE id = $1
-	`, id, now, scanned, certsFound, warning)
+	samplesJSON, err := failureSamplesJSON(summary.FailureSamples)
+	if err != nil {
+		return err
+	}
+	warnings := summary.ExpansionWarnings
+	if warnings == nil {
+		warnings = []string{}
+	}
+	_, err = s.pool.Exec(ctx, `
+		UPDATE scans SET
+			status = 'completed',
+			finished_at = $2,
+			targets_scanned = $3,
+			targets_succeeded = $4,
+			targets_failed = $5,
+			certs_found = $6,
+			upsert_failures = $7,
+			expansion_warnings = $8,
+			failure_samples = $9,
+			error = NULL
+		WHERE id = $1
+	`, id, now, summary.TargetsScanned, summary.TargetsSucceeded, summary.TargetsFailed,
+		summary.CertsFound, summary.UpsertFailures, warnings, samplesJSON)
 	return err
 }
 
@@ -188,14 +216,17 @@ func (s *Store) FailScan(ctx context.Context, id uuid.UUID, errMsg string) error
 
 func (s *Store) GetScan(ctx context.Context, id uuid.UUID) (Scan, error) {
 	var scan Scan
+	samplesScanner := failureSamplesArg(&scan.FailureSamples)
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, source, status::text, cidrs, hostnames, ports, concurrency,
-			started_at, finished_at, targets_total, targets_scanned, certs_found, error, created_at
+			started_at, finished_at, targets_total, targets_scanned, targets_succeeded, targets_failed,
+			certs_found, upsert_failures, expansion_warnings, failure_samples, error, created_at
 		FROM scans WHERE id = $1
 	`, id).Scan(
 		&scan.ID, &scan.Source, &scan.Status, &scan.CIDRs, &scan.Hostnames, &scan.Ports, &scan.Concurrency,
 		&scan.StartedAt, &scan.FinishedAt, &scan.TargetsTotal, &scan.TargetsScanned,
-		&scan.CertsFound, &scan.Error, &scan.CreatedAt,
+		&scan.TargetsSucceeded, &scan.TargetsFailed, &scan.CertsFound, &scan.UpsertFailures,
+		&scan.ExpansionWarnings, &samplesScanner, &scan.Error, &scan.CreatedAt,
 	)
 	return scan, err
 }
@@ -206,7 +237,8 @@ func (s *Store) ListScans(ctx context.Context, limit, offset int) ([]Scan, error
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, source, status::text, cidrs, hostnames, ports, concurrency,
-			started_at, finished_at, targets_total, targets_scanned, certs_found, error, created_at
+			started_at, finished_at, targets_total, targets_scanned, targets_succeeded, targets_failed,
+			certs_found, upsert_failures, expansion_warnings, failure_samples, error, created_at
 		FROM scans ORDER BY created_at DESC LIMIT $1 OFFSET $2
 	`, limit, offset)
 	if err != nil {
@@ -217,10 +249,12 @@ func (s *Store) ListScans(ctx context.Context, limit, offset int) ([]Scan, error
 	var scans []Scan
 	for rows.Next() {
 		var scan Scan
+		samplesScanner := failureSamplesArg(&scan.FailureSamples)
 		if err := rows.Scan(
 			&scan.ID, &scan.Source, &scan.Status, &scan.CIDRs, &scan.Hostnames, &scan.Ports, &scan.Concurrency,
 			&scan.StartedAt, &scan.FinishedAt, &scan.TargetsTotal, &scan.TargetsScanned,
-			&scan.CertsFound, &scan.Error, &scan.CreatedAt,
+			&scan.TargetsSucceeded, &scan.TargetsFailed, &scan.CertsFound, &scan.UpsertFailures,
+			&scan.ExpansionWarnings, &samplesScanner, &scan.Error, &scan.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

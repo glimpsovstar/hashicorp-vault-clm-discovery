@@ -14,6 +14,7 @@ type Config struct {
 	DefaultConcurrency int          `envconfig:"DEFAULT_CONCURRENCY" default:"50"`
 	AllowPrivateRanges bool         `envconfig:"ALLOW_PRIVATE_RANGES" default:"false"`
 	CORSOrigins       []string      `envconfig:"CORS_ORIGINS" default:"http://localhost:3000"`
+	LogLevel          string        `envconfig:"LOG_LEVEL" default:"info"`
 }
 
 func Load() (Config, error) {

@@ -60,6 +60,17 @@ flowchart TB
 - Chi HTTP router with CORS for dashboard
 - Background scan worker with bounded concurrency
 - Consent gate on scan creation
+- Request ID propagated into structured logs and JSON error responses
+- Scan diagnostics exposed on `GET /api/v1/scans/{id}`
+
+### Observability
+
+- JSON `slog` in `clm-discovery` and `clm-scan`; verbosity via `LOG_LEVEL`
+- Scan worker logs include `scan_id`, target (`ip:port`), `hostname`, `sni`, and cert identifiers on upsert errors
+- Persisted scan diagnostics on `scans`: `expansion_warnings`, probe/upsert aggregate counts, capped `failure_samples` JSON
+- Scan completion emits a summary log line with targets succeeded/failed, certs found, and upsert failures
+
+- Scan completion emits a summary log line with targets succeeded/failed, certs found, and upsert failures
 
 ### Dashboard (`web/`)
 

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,17 +12,19 @@ import (
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/api"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/config"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/logging"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := logging.New(os.Getenv("LOG_LEVEL"))
 	cfg, err := config.Load()
 	if err != nil {
 		logger.Error("load config", "err", err)
 		os.Exit(1)
 	}
+	logger = logging.New(cfg.LogLevel)
 
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)

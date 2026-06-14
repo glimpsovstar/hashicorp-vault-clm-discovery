@@ -36,27 +36,33 @@ export default function EnrichmentForm({ cert }: { cert: Certificate }) {
 
   return (
     <form onSubmit={onSubmit}>
-      <h3>Governance</h3>
+      <h3 style={{ marginTop: 0 }}>Governance</h3>
       <div className="form-row">
-        <label>
-          Owner
-          <input value={owner} onChange={(e) => setOwner(e.target.value)} />
-        </label>
-        <label>
-          Team
-          <input value={team} onChange={(e) => setTeam(e.target.value)} />
-        </label>
-        <label>
-          Environment
-          <input value={environment} onChange={(e) => setEnvironment(e.target.value)} />
-        </label>
+        <div className="form-field">
+          <label htmlFor="owner">Owner</label>
+          <input id="owner" value={owner} onChange={(e) => setOwner(e.target.value)} />
+        </div>
+        <div className="form-field">
+          <label htmlFor="team">Team</label>
+          <input id="team" value={team} onChange={(e) => setTeam(e.target.value)} />
+        </div>
+        <div className="form-field">
+          <label htmlFor="environment">Environment</label>
+          <input
+            id="environment"
+            value={environment}
+            onChange={(e) => setEnvironment(e.target.value)}
+          />
+        </div>
       </div>
-      <label style={{ display: "block", marginBottom: 12 }}>
-        Tags (comma-separated)
-        <input value={tags} onChange={(e) => setTags(e.target.value)} style={{ width: "100%" }} />
-      </label>
-      <button type="submit" disabled={saving}>{saving ? "Saving..." : "Save"}</button>
-      {message && <p className="muted">{message}</p>}
+      <div className="form-field" style={{ marginBottom: 12 }}>
+        <label htmlFor="tags">Tags (comma-separated)</label>
+        <input id="tags" value={tags} onChange={(e) => setTags(e.target.value)} />
+      </div>
+      <button type="submit" className="button button-primary" disabled={saving}>
+        {saving ? "Saving..." : "Save"}
+      </button>
+      {message && <p className="help-text">{message}</p>}
     </form>
   );
 }

@@ -8,7 +8,7 @@ export default function ScanForm() {
   const router = useRouter();
   const [cidrs, setCidrs] = useState("");
   const [hostnames, setHostnames] = useState(
-    "aap.david-joo.sbx.hashicorp.io,coffeesnob.withdevo.net"
+    "aap.david-joo.sbx.hashidemos.io,coffeesnob.withdevo.net"
   );
   const [ports, setPorts] = useState("443");
   const [consent, setConsent] = useState(false);

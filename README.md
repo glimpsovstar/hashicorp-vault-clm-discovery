@@ -32,7 +32,7 @@ Start a scan from the **Scans** page using **hostnames** (recommended for HTTPS 
 **Demo hostnames:**
 
 ```text
-aap.david-joo.sbx.hashicorp.io,coffeesnob.withdevo.net
+aap.david-joo.sbx.hashidemos.io,coffeesnob.withdevo.net
 ```
 
 Port `443`, consent checked. Hostname scans resolve DNS and send the correct TLS SNI (required on shared IPs like Vercel).

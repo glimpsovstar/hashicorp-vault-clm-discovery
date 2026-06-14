@@ -1,6 +1,17 @@
 import Link from "next/link";
 import PageHeader from "@/components/page-header";
-import { getCertificate, statusBadgeClass } from "@/lib/api";
+import {
+  certScopeBadgeClass,
+  certScopeLabel,
+  expiryBadgeClass,
+  expiryLabel,
+  getCertificate,
+  statusBadgeClass,
+  vaultConnectedBadgeClass,
+  vaultConnectedLabel,
+  vaultImportedBadgeClass,
+  vaultImportedLabel,
+} from "@/lib/api";
 import EnrichmentForm from "./enrichment-form";
 
 export default async function CertificateDetailPage({
@@ -34,9 +45,18 @@ export default async function CertificateDetailPage({
       <section className="panel">
         <div className="panel-body">
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+            <span className={expiryBadgeClass(cert.status)}>{expiryLabel(cert.status)}</span>
             <span className={statusBadgeClass(cert.status)}>{cert.status}</span>
             <span className="badge badge-neutral">{cert.chain_status}</span>
-            <span className="badge badge-neutral">{cert.managed_status}</span>
+            <span className={vaultConnectedBadgeClass(cert.managed_status)}>
+              {vaultConnectedLabel(cert.managed_status)}
+            </span>
+            <span className={vaultImportedBadgeClass(cert.managed_status)}>
+              {vaultImportedLabel(cert.managed_status)}
+            </span>
+            <span className={certScopeBadgeClass(cert.cert_scope || "external")}>
+              {certScopeLabel(cert.cert_scope || "external")}
+            </span>
           </div>
           <div className="grid-2">
             <div className="detail-list">

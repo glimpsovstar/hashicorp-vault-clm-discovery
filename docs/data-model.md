@@ -56,6 +56,7 @@ Net-new; where/when the cert was seen.
 | Field | Type | v1 default | Description |
 |-------|------|------------|-------------|
 | `managed_status` | enum | `unmanaged` | `managed_in_vault`, `unmanaged`, `imported` |
+| `cert_scope` | enum | `external` | `internal`, `external` — derived at scan from chain, issuer, hostname |
 | `vault_issuer_ref` | text | null | Vault issuer ref if managed |
 | `vault_pki_mount` | text | null | PKI mount path |
 | `owner` | text | null | Asset owner |

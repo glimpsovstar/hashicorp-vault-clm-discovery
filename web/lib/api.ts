@@ -25,6 +25,7 @@ export type Certificate = {
   chain_status: string;
   hostname_matches_san: boolean;
   managed_status: string;
+  cert_scope: string;
   observation_count?: number;
   last_seen: string;
   pem?: string;
@@ -184,4 +185,42 @@ export function statusBadgeClass(status: string): string {
     default:
       return "badge badge-neutral";
   }
+}
+
+export function expiryBadgeClass(status: string): string {
+  if (status === "expired" || status === "revoked") {
+    return "badge badge-critical";
+  }
+  return "badge badge-success";
+}
+
+export function expiryLabel(status: string): string {
+  if (status === "expired" || status === "revoked") {
+    return "Expired";
+  }
+  return "Active";
+}
+
+export function vaultConnectedBadgeClass(managedStatus: string): string {
+  return managedStatus === "managed_in_vault" ? "badge badge-success" : "badge badge-neutral";
+}
+
+export function vaultConnectedLabel(managedStatus: string): string {
+  return managedStatus === "managed_in_vault" ? "Connected" : "Not connected";
+}
+
+export function vaultImportedBadgeClass(managedStatus: string): string {
+  return managedStatus === "imported" ? "badge badge-warning" : "badge badge-neutral";
+}
+
+export function vaultImportedLabel(managedStatus: string): string {
+  return managedStatus === "imported" ? "Imported" : "Not imported";
+}
+
+export function certScopeBadgeClass(scope: string): string {
+  return scope === "internal" ? "badge badge-neutral" : "badge badge-success";
+}
+
+export function certScopeLabel(scope: string): string {
+  return scope === "internal" ? "Internal" : "External";
 }

@@ -2,7 +2,19 @@
 
 import Link from "next/link";
 import DeleteButton from "@/components/delete-button";
-import { deleteCertificate, statusBadgeClass, type Certificate } from "@/lib/api";
+import {
+  certScopeBadgeClass,
+  certScopeLabel,
+  deleteCertificate,
+  expiryBadgeClass,
+  expiryLabel,
+  statusBadgeClass,
+  vaultConnectedBadgeClass,
+  vaultConnectedLabel,
+  vaultImportedBadgeClass,
+  vaultImportedLabel,
+  type Certificate,
+} from "@/lib/api";
 
 export default function InventoryTable({ items }: { items: Certificate[] }) {
   return (
@@ -10,6 +22,10 @@ export default function InventoryTable({ items }: { items: Certificate[] }) {
       <thead>
         <tr>
           <th>Subject CN</th>
+          <th>Vault</th>
+          <th>Imported</th>
+          <th>Scope</th>
+          <th>Expiry</th>
           <th>Status</th>
           <th>Days left</th>
           <th>Chain</th>
@@ -33,6 +49,24 @@ export default function InventoryTable({ items }: { items: Certificate[] }) {
               )}
             </td>
             <td>
+              <span className={vaultConnectedBadgeClass(cert.managed_status)}>
+                {vaultConnectedLabel(cert.managed_status)}
+              </span>
+            </td>
+            <td>
+              <span className={vaultImportedBadgeClass(cert.managed_status)}>
+                {vaultImportedLabel(cert.managed_status)}
+              </span>
+            </td>
+            <td>
+              <span className={certScopeBadgeClass(cert.cert_scope || "external")}>
+                {certScopeLabel(cert.cert_scope || "external")}
+              </span>
+            </td>
+            <td>
+              <span className={expiryBadgeClass(cert.status)}>{expiryLabel(cert.status)}</span>
+            </td>
+            <td>
               <span className={statusBadgeClass(cert.status)}>{cert.status}</span>
             </td>
             <td>{cert.days_until_expiry}</td>
@@ -49,7 +83,7 @@ export default function InventoryTable({ items }: { items: Certificate[] }) {
         ))}
         {items.length === 0 && (
           <tr>
-            <td colSpan={7} className="muted">
+            <td colSpan={11} className="muted">
               No certificates discovered yet. Run a scan from the Scans page.
             </td>
           </tr>

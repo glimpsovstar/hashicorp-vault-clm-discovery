@@ -4,7 +4,7 @@
 **Date:** 2026-06-14  
 **Issue:** [#17](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/17)  
 **Repo:** [glimpsovstar/hashicorp-vault-clm-discovery](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery)  
-**Related:** v1.1 Vault PKI reconciliation (`docs/architecture.md`), `managed_status` / `cert_scope` (`docs/data-model.md`)
+**Related:** [CLM lifecycle workflow (Discover → Choose → Import → Manage)](2026-06-14-clm-lifecycle-workflow-design.md), v1.1 Vault PKI reconciliation (`docs/architecture.md`), `managed_status` / `cert_scope` (`docs/data-model.md`)
 
 ## Problem statement & user value
 
@@ -410,6 +410,8 @@ Separate policy for `pki/issuers/import/bundle` (write) — import workflow only
 ---
 
 ## Open questions (for user)
+
+> **Consolidated list:** Lifecycle-specific questions (Choose/Import/Manage, vault-agent, AAP) plus the items below are merged in [CLM lifecycle workflow spec § Open questions](2026-06-14-clm-lifecycle-workflow-design.md#open-questions).
 
 1. **Vault access:** Can CLM Discovery reach the `djoo-test-vault` Vault API from its deployment network (public endpoint vs private link)? Which auth method is preferred (AppRole vs AWS IAM)?
 2. **PKI mounts:** Which mount paths matter beyond `pki/`? Multi-mount clusters need allowlist vs auto-discover policy.

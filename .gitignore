@@ -1,0 +1,26 @@
+# Go
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.out
+
+# Node
+web/node_modules/
+web/.next/
+web/out/
+web/.env*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Env
+.env
+.env.local
+
+# Docker
+*.log

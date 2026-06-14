@@ -1,0 +1,13 @@
+FROM golang:1.22-alpine AS builder
+WORKDIR /src
+RUN apk add --no-cache git ca-certificates
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /clm-discovery ./cmd/clm-discovery
+
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /clm-discovery /usr/local/bin/clm-discovery
+EXPOSE 8080
+CMD ["clm-discovery"]

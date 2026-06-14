@@ -1,0 +1,92 @@
+# Architecture
+
+## Overview
+
+Vault CLM Discovery is an **external service** that complements HashiCorp Vault PKI. It does not run as a Vault secrets-engine plugin. Instead, it:
+
+1. Scans network targets for TLS certificates
+2. Persists a normalized certificate inventory in PostgreSQL
+3. Serves a REST API and Next.js dashboard
+4. (v1.1) Reconciles discovered certs against Vault PKI mounts
+
+```mermaid
+flowchart TB
+  subgraph clients [Clients]
+    Dashboard[Next.js Dashboard]
+    CLI[clm-scan CLI]
+  end
+
+  subgraph service [CLM Discovery Service]
+    API[Go REST API]
+    Worker[Scan Worker Pool]
+    Scanner[TLS Scanner]
+  end
+
+  DB[(PostgreSQL)]
+  Network[Network Targets]
+
+  Dashboard --> API
+  CLI --> DB
+  API --> Worker
+  Worker --> Scanner
+  Scanner --> Network
+  Worker --> DB
+  API --> DB
+```
+
+## Components
+
+### TLS Scanner (`internal/scanner`)
+
+- Expands CIDR ranges into IP:port targets
+- Performs TCP connect + TLS handshake with `InsecureSkipVerify` to capture presented certificates
+- Parses peer certificate chains via `crypto/x509`
+- Blocks private ranges by default
+
+### Certificate Parser (`internal/cert`)
+
+- Extracts identity fields aligned with Vault PKI cert objects
+- Computes `chain_status` and `hostname_matches_san`
+- SHA-256 fingerprint as cross-scan dedup key
+
+### Store (`internal/store`)
+
+- PostgreSQL persistence with upsert-by-fingerprint
+- Normalized observations table for `found_at[]` semantics
+- Lifecycle fields computed on write
+
+### API (`internal/api`)
+
+- Chi HTTP router with CORS for dashboard
+- Background scan worker with bounded concurrency
+- Consent gate on scan creation
+
+### Dashboard (`web/`)
+
+- Next.js App Router SPA
+- Inventory, certificate detail, scan management, issuer views
+
+## Deployment
+
+Recommended: Docker Compose or Kubernetes Deployment alongside Vault infrastructure.
+
+The service needs outbound network access to scan targets and inbound access to its API from the dashboard. It does not require co-location with Vault for v1.
+
+## Vault integration (v1.1)
+
+A separate `internal/vault` client will:
+
+- Authenticate via AppRole or Kubernetes JWT
+- List PKI mounts, issuers, and stored certificates
+- Match by `fingerprint_sha256` to set `managed_status`
+- Optionally import discovered CA bundles via `pki/issuers/import/bundle`
+
+HCP Vault Dedicated uses the same HTTP API with namespace headers.
+
+## Security considerations
+
+- Scan consent required at API and CLI
+- Private range scanning disabled by default
+- Maximum IPv4 scan size: /16
+- Store PEM material in PostgreSQL — protect database access accordingly
+- Use read-only Vault policies for reconciliation; separate policy for CA import

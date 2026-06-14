@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS certificate_observations;
+DROP TABLE IF EXISTS issuers;
+DROP TABLE IF EXISTS certificates;
+DROP TABLE IF EXISTS scans;
+DROP TYPE IF EXISTS scan_status;
+DROP TYPE IF EXISTS remediation_state;
+DROP TYPE IF EXISTS managed_status;
+DROP TYPE IF EXISTS chain_status;
+DROP TYPE IF EXISTS cert_status;

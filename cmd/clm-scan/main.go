@@ -1,0 +1,122 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"log"
+	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/config"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanner"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
+)
+
+func main() {
+	cidrs := flag.String("cidrs", "", "comma-separated CIDR ranges")
+	ports := flag.String("ports", "443,8443,6443,993,465", "comma-separated ports")
+	concurrency := flag.Int("concurrency", 50, "scan concurrency")
+	consent := flag.Bool("i-consent-to-scan", false, "confirm authorized scanning")
+	flag.Parse()
+
+	if !*consent {
+		log.Fatal("scanning requires --i-consent-to-scan flag confirming authorized use")
+	}
+	if *cidrs == "" {
+		log.Fatal("--cidrs required")
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer pool.Close()
+
+	cidrList := strings.Split(*cidrs, ",")
+	portList, err := parsePorts(*ports)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	st := store.New(pool, cfg.ExpiringSoonDays)
+	sc := scanner.New(scanner.Config{
+		Timeout:            cfg.ScanTimeout,
+		AllowPrivateRanges: cfg.AllowPrivateRanges,
+	})
+
+	scan, err := st.CreateScan(ctx, cidrList, portList, *concurrency)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	targets, err := scanner.ExpandTargets(cidrList, portList, cfg.AllowPrivateRanges)
+	if err != nil {
+		_ = st.FailScan(ctx, scan.ID, err.Error())
+		log.Fatal(err)
+	}
+
+	if err := st.UpdateScanRunning(ctx, scan.ID, len(targets)); err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("scan %s: probing %d targets\n", scan.ID, len(targets))
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, *concurrency)
+	var mu sync.Mutex
+	scanned, certsFound := 0, 0
+
+	for _, target := range targets {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(t scanner.Target) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			result := sc.Probe(ctx, t)
+			mu.Lock()
+			scanned++
+			if result.Error == nil {
+				if _, err := st.UpsertCertificate(ctx, scan.ID, result.Certificate, result.Observation); err != nil {
+					log.Printf("upsert error: %v", err)
+				} else {
+					certsFound++
+				}
+			}
+			curScanned, curCerts := scanned, certsFound
+			mu.Unlock()
+
+			if curScanned%50 == 0 {
+				fmt.Printf("progress: %d/%d, certs=%d\n", curScanned, len(targets), curCerts)
+				_ = st.UpdateScanProgress(ctx, scan.ID, curScanned, curCerts)
+			}
+		}(target)
+	}
+
+	wg.Wait()
+	_ = st.CompleteScan(ctx, scan.ID, scanned, certsFound)
+	fmt.Printf("scan complete: %d targets, %d certificates found\n", scanned, certsFound)
+}
+
+func parsePorts(s string) ([]int, error) {
+	parts := strings.Split(s, ",")
+	var ports []int
+	for _, p := range parts {
+		n, err := strconv.Atoi(strings.TrimSpace(p))
+		if err != nil {
+			return nil, err
+		}
+		ports = append(ports, n)
+	}
+	return ports, nil
+}

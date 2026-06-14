@@ -1,0 +1,16 @@
+---
+description: Vault CLM Discovery — tests required for behavior changes
+alwaysApply: true
+---
+
+# Tests (hashicorp-vault-clm-discovery)
+
+When you add or change Go behavior:
+
+1. Add or update tests in the same change (`internal/**`).
+2. Run `go test ./...` before considering work done.
+3. For scanner/cert parsing, use table tests and local TLS fixtures where practical.
+
+Docs-only changes do not require tests.
+
+Org SDLC: verify with `go test ./...` and `go build ./...` before PR. Docker: `docker compose -f deploy/docker-compose.yml build`.

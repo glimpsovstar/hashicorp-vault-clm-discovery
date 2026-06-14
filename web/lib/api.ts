@@ -1,4 +1,15 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+function getApiBaseUrl(): string {
+  // Server components (Docker): reach API via compose service name.
+  if (typeof window === "undefined") {
+    return (
+      process.env.API_INTERNAL_URL ||
+      process.env.NEXT_PUBLIC_API_URL ||
+      "http://localhost:8080"
+    );
+  }
+  // Browser: use host-mapped API port.
+  return process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+}
 
 export type Certificate = {
   id: string;
@@ -38,6 +49,7 @@ export type Scan = {
   id: string;
   status: string;
   cidrs: string[];
+  hostnames?: string[];
   ports: number[];
   concurrency: number;
   targets_total: number;
@@ -61,7 +73,7 @@ export type Issuer = {
 };
 
 async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetch(`${getApiBaseUrl()}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -93,7 +105,13 @@ export function getScan(id: string) {
   return fetchJSON<Scan>(`/api/v1/scans/${id}`);
 }
 
-export function createScan(body: { cidrs: string[]; ports?: number[]; concurrency?: number; consent: boolean }) {
+export function createScan(body: {
+  cidrs?: string[];
+  hostnames?: string[];
+  ports?: number[];
+  concurrency?: number;
+  consent: boolean;
+}) {
   return fetchJSON<Scan>("/api/v1/scans", {
     method: "POST",
     body: JSON.stringify(body),

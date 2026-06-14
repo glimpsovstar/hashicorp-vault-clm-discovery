@@ -6,7 +6,10 @@ import { createScan } from "@/lib/api";
 
 export default function ScanForm() {
   const router = useRouter();
-  const [cidrs, setCidrs] = useState("127.0.0.1/32");
+  const [cidrs, setCidrs] = useState("");
+  const [hostnames, setHostnames] = useState(
+    "aap.david-joo.sbx.hashicorp.io,coffeesnob.withdevo.net"
+  );
   const [ports, setPorts] = useState("443");
   const [consent, setConsent] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -18,11 +21,18 @@ export default function ScanForm() {
       setError("You must confirm authorized scanning");
       return;
     }
+    const cidrList = cidrs.split(",").map((c) => c.trim()).filter(Boolean);
+    const hostnameList = hostnames.split(",").map((h) => h.trim()).filter(Boolean);
+    if (cidrList.length === 0 && hostnameList.length === 0) {
+      setError("Provide at least one CIDR or hostname");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
       await createScan({
-        cidrs: cidrs.split(",").map((c) => c.trim()).filter(Boolean),
+        cidrs: cidrList,
+        hostnames: hostnameList,
         ports: ports.split(",").map((p) => parseInt(p.trim(), 10)).filter((n) => !Number.isNaN(n)),
         consent: true,
       });
@@ -38,8 +48,17 @@ export default function ScanForm() {
     <form onSubmit={onSubmit}>
       <div className="form-row">
         <label>
-          CIDR ranges (comma-separated)
-          <input value={cidrs} onChange={(e) => setCidrs(e.target.value)} style={{ minWidth: 280 }} />
+          Hostnames (comma-separated)
+          <input
+            value={hostnames}
+            onChange={(e) => setHostnames(e.target.value)}
+            placeholder="app.example.com,api.example.com"
+            style={{ minWidth: 320 }}
+          />
+        </label>
+        <label>
+          CIDR ranges (optional)
+          <input value={cidrs} onChange={(e) => setCidrs(e.target.value)} placeholder="1.1.1.1/32" />
         </label>
         <label>
           Ports
@@ -52,7 +71,9 @@ export default function ScanForm() {
       </label>
       <button type="submit" disabled={loading}>{loading ? "Starting..." : "Start scan"}</button>
       {error && <p style={{ color: "#f87171" }}>{error}</p>}
-      <p className="muted">Private ranges require ALLOW_PRIVATE_RANGES=true on the API server.</p>
+      <p className="muted">
+        Use hostnames for HTTPS sites (correct SNI). CIDR scans use the IP as SNI — fine for dedicated IPs, wrong for shared hosting.
+      </p>
     </form>
   );
 }

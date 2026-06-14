@@ -25,7 +25,26 @@ docker compose -f deploy/docker-compose.yml up --build
 - Dashboard: http://localhost:3000
 - API: http://localhost:8080/api/v1/health
 
-Start a scan from the **Scans** page (e.g. `127.0.0.1/32` on port `443` with consent checked). The API container sets `ALLOW_PRIVATE_RANGES=true` for local testing.
+In Docker, the web container calls the API at `http://api:8080` during server rendering (`API_INTERNAL_URL`); your browser still uses `http://localhost:8080`.
+
+Start a scan from the **Scans** page using **hostnames** (recommended for HTTPS sites) or CIDR ranges.
+
+**Demo hostnames:**
+
+```text
+aap.david-joo.sbx.hashicorp.io,coffeesnob.withdevo.net
+```
+
+Port `443`, consent checked. Hostname scans resolve DNS and send the correct TLS SNI (required on shared IPs like Vercel).
+
+**CIDR fallback** (only if you know the IP and the cert is served for that IP):
+
+```bash
+dig +short coffeesnob.withdevo.net
+# use each IP as x.x.x.x/32 — may show wrong cert without hostname/SNI
+```
+
+The API container sets `ALLOW_PRIVATE_RANGES=true` for local testing.
 
 ### Local development
 
@@ -81,6 +100,12 @@ See [docs/data-model.md](docs/data-model.md).
 ## License
 
 Mozilla Public License 2.0 — see [LICENSE](LICENSE).
+
+## Cursor rules
+
+- **Org:** [glimpsovstar/cursor-org-rules](https://github.com/glimpsovstar/cursor-org-rules) — SDLC, Superpowers, commit policy (`~/.cursor/rules/org-*.mdc` or Team Rules dashboard)
+- **Project:** `.cursor/rules/` — tests, docs, SDLC demo, architecture context
+- **Workflow:** [CONTRIBUTING.md](CONTRIBUTING.md) · [docs/demo-flow.md](docs/demo-flow.md) · [.prompts-history.md](.prompts-history.md)
 
 ## Roadmap
 

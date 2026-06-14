@@ -1,0 +1,15 @@
+---
+description: Vault CLM Discovery — docs required for user/operator-visible changes
+alwaysApply: true
+---
+
+# Docs (hashicorp-vault-clm-discovery)
+
+When you add or change **API behavior**, **scan policy**, **deployment**, or **data model**:
+
+1. **README.md** — quickstart, env vars, authorized scanning policy.
+2. **docs/architecture.md** — component or deployment changes.
+3. **docs/data-model.md** — schema or field semantics changes.
+4. **docs/superpowers/specs/** — new features before implementation (org workflow).
+
+Internal refactors with no operator impact: docs optional.

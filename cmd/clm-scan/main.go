@@ -18,6 +18,7 @@ import (
 
 func main() {
 	cidrs := flag.String("cidrs", "", "comma-separated CIDR ranges")
+	hostnames := flag.String("hostnames", "", "comma-separated hostnames (uses correct TLS SNI)")
 	ports := flag.String("ports", "443,8443,6443,993,465", "comma-separated ports")
 	concurrency := flag.Int("concurrency", 50, "scan concurrency")
 	consent := flag.Bool("i-consent-to-scan", false, "confirm authorized scanning")
@@ -26,8 +27,8 @@ func main() {
 	if !*consent {
 		log.Fatal("scanning requires --i-consent-to-scan flag confirming authorized use")
 	}
-	if *cidrs == "" {
-		log.Fatal("--cidrs required")
+	if *cidrs == "" && *hostnames == "" {
+		log.Fatal("--cidrs and/or --hostnames required")
 	}
 
 	cfg, err := config.Load()
@@ -42,7 +43,8 @@ func main() {
 	}
 	defer pool.Close()
 
-	cidrList := strings.Split(*cidrs, ",")
+	cidrList := splitCSV(*cidrs)
+	hostnameList := splitCSV(*hostnames)
 	portList, err := parsePorts(*ports)
 	if err != nil {
 		log.Fatal(err)
@@ -54,12 +56,12 @@ func main() {
 		AllowPrivateRanges: cfg.AllowPrivateRanges,
 	})
 
-	scan, err := st.CreateScan(ctx, cidrList, portList, *concurrency)
+	scan, err := st.CreateScan(ctx, cidrList, hostnameList, portList, *concurrency)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	targets, err := scanner.ExpandTargets(cidrList, portList, cfg.AllowPrivateRanges)
+	targets, err := scanner.ExpandScanTargets(cidrList, hostnameList, portList, cfg.AllowPrivateRanges)
 	if err != nil {
 		_ = st.FailScan(ctx, scan.ID, err.Error())
 		log.Fatal(err)
@@ -119,4 +121,17 @@ func parsePorts(s string) ([]int, error) {
 		ports = append(ports, n)
 	}
 	return ports, nil
+}
+
+func splitCSV(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if v := strings.TrimSpace(part); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }

@@ -74,6 +74,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 type createScanRequest struct {
 	CIDRs       []string `json:"cidrs"`
+	Hostnames   []string `json:"hostnames"`
 	Ports       []int    `json:"ports"`
 	Concurrency int      `json:"concurrency"`
 	Consent     bool     `json:"consent"`
@@ -89,8 +90,8 @@ func (s *Server) handleCreateScan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "scan consent required; set consent=true to confirm authorized scanning")
 		return
 	}
-	if len(req.CIDRs) == 0 {
-		writeError(w, http.StatusBadRequest, "cidrs required")
+	if len(req.CIDRs) == 0 && len(req.Hostnames) == 0 {
+		writeError(w, http.StatusBadRequest, "cidrs or hostnames required")
 		return
 	}
 	if len(req.Ports) == 0 {
@@ -100,14 +101,14 @@ func (s *Server) handleCreateScan(w http.ResponseWriter, r *http.Request) {
 		req.Concurrency = s.cfg.DefaultConcurrency
 	}
 
-	scan, err := s.store.CreateScan(r.Context(), req.CIDRs, req.Ports, req.Concurrency)
+	scan, err := s.store.CreateScan(r.Context(), req.CIDRs, req.Hostnames, req.Ports, req.Concurrency)
 	if err != nil {
 		s.log.Error("create scan", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to create scan")
 		return
 	}
 
-	s.worker.Enqueue(scan.ID, req.CIDRs, req.Ports, req.Concurrency)
+	s.worker.Enqueue(scan.ID, req.CIDRs, req.Hostnames, req.Ports, req.Concurrency)
 	writeJSON(w, http.StatusAccepted, scan)
 }
 
@@ -250,6 +251,7 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 type scanJob struct {
 	ID          uuid.UUID
 	CIDRs       []string
+	Hostnames   []string
 	Ports       []int
 	Concurrency int
 }
@@ -266,8 +268,8 @@ func NewScanWorker(srv *Server) *ScanWorker {
 	return w
 }
 
-func (w *ScanWorker) Enqueue(id uuid.UUID, cidrs []string, ports []int, concurrency int) {
-	w.jobs <- scanJob{ID: id, CIDRs: cidrs, Ports: ports, Concurrency: concurrency}
+func (w *ScanWorker) Enqueue(id uuid.UUID, cidrs, hostnames []string, ports []int, concurrency int) {
+	w.jobs <- scanJob{ID: id, CIDRs: cidrs, Hostnames: hostnames, Ports: ports, Concurrency: concurrency}
 }
 
 func (w *ScanWorker) run() {
@@ -278,7 +280,7 @@ func (w *ScanWorker) run() {
 
 func (w *ScanWorker) execute(job scanJob) {
 	ctx := context.Background()
-	targets, err := scanner.ExpandTargets(job.CIDRs, job.Ports, w.srv.cfg.AllowPrivateRanges)
+	targets, err := scanner.ExpandScanTargets(job.CIDRs, job.Hostnames, job.Ports, w.srv.cfg.AllowPrivateRanges)
 	if err != nil {
 		_ = w.srv.store.FailScan(ctx, job.ID, err.Error())
 		return

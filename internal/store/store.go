@@ -31,6 +31,7 @@ type Scan struct {
 	Source          string    `json:"source"`
 	Status          string    `json:"status"`
 	CIDRs           []string  `json:"cidrs"`
+	Hostnames       []string  `json:"hostnames"`
 	Ports           []int     `json:"ports"`
 	Concurrency     int       `json:"concurrency"`
 	StartedAt       *time.Time `json:"started_at,omitempty"`
@@ -130,15 +131,21 @@ type EnrichmentUpdate struct {
 	Tags        []string
 }
 
-func (s *Store) CreateScan(ctx context.Context, cidrs []string, ports []int, concurrency int) (Scan, error) {
+func (s *Store) CreateScan(ctx context.Context, cidrs, hostnames []string, ports []int, concurrency int) (Scan, error) {
+	if cidrs == nil {
+		cidrs = []string{}
+	}
+	if hostnames == nil {
+		hostnames = []string{}
+	}
 	var scan Scan
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO scans (cidrs, ports, concurrency, targets_total)
-		VALUES ($1, $2, $3, 0)
-		RETURNING id, source, status::text, cidrs, ports, concurrency,
+		INSERT INTO scans (cidrs, hostnames, ports, concurrency, targets_total)
+		VALUES ($1, $2, $3, $4, 0)
+		RETURNING id, source, status::text, cidrs, hostnames, ports, concurrency,
 			started_at, finished_at, targets_total, targets_scanned, certs_found, error, created_at
-	`, cidrs, ports, concurrency).Scan(
-		&scan.ID, &scan.Source, &scan.Status, &scan.CIDRs, &scan.Ports, &scan.Concurrency,
+	`, cidrs, hostnames, ports, concurrency).Scan(
+		&scan.ID, &scan.Source, &scan.Status, &scan.CIDRs, &scan.Hostnames, &scan.Ports, &scan.Concurrency,
 		&scan.StartedAt, &scan.FinishedAt, &scan.TargetsTotal, &scan.TargetsScanned,
 		&scan.CertsFound, &scan.Error, &scan.CreatedAt,
 	)
@@ -179,11 +186,11 @@ func (s *Store) FailScan(ctx context.Context, id uuid.UUID, errMsg string) error
 func (s *Store) GetScan(ctx context.Context, id uuid.UUID) (Scan, error) {
 	var scan Scan
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, source, status::text, cidrs, ports, concurrency,
+		SELECT id, source, status::text, cidrs, hostnames, ports, concurrency,
 			started_at, finished_at, targets_total, targets_scanned, certs_found, error, created_at
 		FROM scans WHERE id = $1
 	`, id).Scan(
-		&scan.ID, &scan.Source, &scan.Status, &scan.CIDRs, &scan.Ports, &scan.Concurrency,
+		&scan.ID, &scan.Source, &scan.Status, &scan.CIDRs, &scan.Hostnames, &scan.Ports, &scan.Concurrency,
 		&scan.StartedAt, &scan.FinishedAt, &scan.TargetsTotal, &scan.TargetsScanned,
 		&scan.CertsFound, &scan.Error, &scan.CreatedAt,
 	)
@@ -195,7 +202,7 @@ func (s *Store) ListScans(ctx context.Context, limit, offset int) ([]Scan, error
 		limit = 50
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, source, status::text, cidrs, ports, concurrency,
+		SELECT id, source, status::text, cidrs, hostnames, ports, concurrency,
 			started_at, finished_at, targets_total, targets_scanned, certs_found, error, created_at
 		FROM scans ORDER BY created_at DESC LIMIT $1 OFFSET $2
 	`, limit, offset)
@@ -208,13 +215,16 @@ func (s *Store) ListScans(ctx context.Context, limit, offset int) ([]Scan, error
 	for rows.Next() {
 		var scan Scan
 		if err := rows.Scan(
-			&scan.ID, &scan.Source, &scan.Status, &scan.CIDRs, &scan.Ports, &scan.Concurrency,
+			&scan.ID, &scan.Source, &scan.Status, &scan.CIDRs, &scan.Hostnames, &scan.Ports, &scan.Concurrency,
 			&scan.StartedAt, &scan.FinishedAt, &scan.TargetsTotal, &scan.TargetsScanned,
 			&scan.CertsFound, &scan.Error, &scan.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
 		scans = append(scans, scan)
+	}
+	if scans == nil {
+		scans = []Scan{}
 	}
 	return scans, rows.Err()
 }
@@ -347,6 +357,9 @@ func (s *Store) ListCertificates(ctx context.Context, f CertificateFilter) ([]Ce
 		}
 		certs = append(certs, c)
 	}
+	if certs == nil {
+		certs = []Certificate{}
+	}
 	return certs, total, rows.Err()
 }
 
@@ -384,6 +397,9 @@ func (s *Store) GetCertificateObservations(ctx context.Context, certID uuid.UUID
 			return nil, err
 		}
 		obs = append(obs, o)
+	}
+	if obs == nil {
+		obs = []Observation{}
 	}
 	return obs, rows.Err()
 }
@@ -428,6 +444,9 @@ func (s *Store) ListIssuers(ctx context.Context, limit, offset int) ([]Issuer, e
 			return nil, err
 		}
 		issuers = append(issuers, i)
+	}
+	if issuers == nil {
+		issuers = []Issuer{}
 	}
 	return issuers, rows.Err()
 }

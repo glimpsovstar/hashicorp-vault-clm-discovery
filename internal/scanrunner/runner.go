@@ -23,14 +23,14 @@ type Job struct {
 }
 
 type Runner struct {
-	store     *store.Store
-	scanner   *scanner.Scanner
+	store     scanStore
+	scanner   prober
 	log       *slog.Logger
 	logLevel  string
 	allowPriv bool
 }
 
-func New(st *store.Store, sc *scanner.Scanner, log *slog.Logger, logLevel string, allowPrivate bool) *Runner {
+func New(st scanStore, sc prober, log *slog.Logger, logLevel string, allowPrivate bool) *Runner {
 	return &Runner{
 		store:     st,
 		scanner:   sc,

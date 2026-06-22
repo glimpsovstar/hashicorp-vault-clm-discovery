@@ -92,8 +92,28 @@ func TestExpandHostnamesPartialSkipsUnresolvable(t *testing.T) {
 	}
 }
 
+func TestExpandScanTargetsPartialSkipsBadHostnamesWhenCIDRsPresent(t *testing.T) {
+	targets, warnings, err := ExpandScanTargets(
+		[]string{"127.0.0.1/32"},
+		[]string{"this-host-should-not-resolve.invalid"},
+		[]int{443},
+		true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("expected 1 CIDR target, got %d", len(targets))
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("expected 1 hostname warning, got %d: %v", len(warnings), warnings)
+	}
+}
+
 func TestExpandScanTargetsPartialDemoMix(t *testing.T) {
-	wrongAAP := "aap.david-joo.sbx.hashicorp.io"
+	// Legacy wrong AAP domain used hashicorp.io; demo uses hashidemos.io (demo.ScanHostnames).
+	// Append .invalid so the test does not depend on hashicorp.io DNS (that name now resolves).
+	wrongAAP := "aap.david-joo.sbx.hashicorp.io.invalid"
 	good := demo.ScanHostnames[1] // coffeesnob.withdevo.net
 
 	targets, warnings, err := ExpandScanTargets(nil, []string{wrongAAP, good}, []int{443}, true)

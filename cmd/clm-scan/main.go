@@ -5,11 +5,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strconv"
-	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/cli"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/config"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/logging"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanrunner"
@@ -51,9 +50,9 @@ func main() {
 	}
 	defer pool.Close()
 
-	cidrList := splitCSV(*cidrs)
-	hostnameList := splitCSV(*hostnames)
-	portList, err := parsePorts(*ports)
+	cidrList := cli.SplitCSV(*cidrs)
+	hostnameList := cli.SplitCSV(*hostnames)
+	portList, err := cli.ParsePorts(*ports)
 	if err != nil {
 		logger.Error("parse ports", "err", err)
 		os.Exit(1)
@@ -99,30 +98,4 @@ func main() {
 		completed.UpsertFailures,
 		len(completed.ExpansionWarnings),
 	)
-}
-
-func parsePorts(s string) ([]int, error) {
-	parts := strings.Split(s, ",")
-	var ports []int
-	for _, p := range parts {
-		n, err := strconv.Atoi(strings.TrimSpace(p))
-		if err != nil {
-			return nil, err
-		}
-		ports = append(ports, n)
-	}
-	return ports, nil
-}
-
-func splitCSV(s string) []string {
-	if strings.TrimSpace(s) == "" {
-		return nil
-	}
-	var out []string
-	for _, part := range strings.Split(s, ",") {
-		if v := strings.TrimSpace(part); v != "" {
-			out = append(out, v)
-		}
-	}
-	return out
 }

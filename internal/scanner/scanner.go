@@ -124,7 +124,7 @@ func ExpandScanTargets(cidrs, hostnames []string, ports []int, allowPrivate bool
 	if len(hostnames) > 0 {
 		fromHost, hostWarnings, err := ExpandHostnamesPartial(hostnames, ports)
 		warnings = append(warnings, hostWarnings...)
-		if err != nil {
+		if err != nil && len(fromHost) == 0 && len(targets) == 0 {
 			return nil, warnings, err
 		}
 		targets = append(targets, fromHost...)

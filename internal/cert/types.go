@@ -31,6 +31,7 @@ type ParsedCertificate struct {
 	OCSPServers           []string
 	ChainStatus           ChainStatus
 	HostnameMatchesSAN    bool
+	Notes                 string `json:"notes"`
 }
 
 type Observation struct {

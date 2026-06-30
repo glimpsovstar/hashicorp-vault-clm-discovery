@@ -7,7 +7,7 @@ Vault CLM Discovery is an **external service** that complements HashiCorp Vault 
 1. Scans network targets for TLS certificates
 2. Persists a normalized certificate inventory in PostgreSQL
 3. Serves a REST API and Next.js dashboard
-4. (v1.1) Reconciles discovered certs against Vault PKI mounts
+4. Reconciles discovered certs against Vault PKI mounts (Phase 1 read-only)
 
 ```mermaid
 flowchart TB
@@ -65,6 +65,8 @@ flowchart TB
 - `GET /api/v1/scans/{id}` — scan detail and diagnostics
 - `GET /api/v1/scans/{id}/certificates` — certificates discovered in that scan
 - `DELETE` on scans, certificates, and issuers (204 No Content) for demo reset
+- `POST /api/v1/reconcile` — trigger Vault PKI reconcile (503 when `VAULT_ADDR` unset)
+- `GET /api/v1/scans/{id}/blindspot` and `GET /api/v1/blindspot` — blind-spot counts
 - Request ID propagated into structured logs and JSON error responses
 
 ### Governance classification (`internal/governance`)
@@ -81,6 +83,7 @@ At certificate upsert, `ClassifyScope` assigns `cert_scope`:
 3. Increment `certs_found` only after a successful certificate upsert (not on probe alone)
 4. Track `targets_succeeded` / `targets_failed`, `upsert_failures`, and capped `failure_samples`
 5. On completion, persist summary counts on the `scans` row
+6. When `RECONCILE_ON_SCAN_COMPLETE=true`, run Vault PKI reconcile (errors logged, scan still succeeds)
 
 ### Observability
 
@@ -105,16 +108,18 @@ Recommended: Docker Compose or Kubernetes Deployment alongside Vault infrastruct
 
 The service needs outbound network access to scan targets and inbound access to its API from the dashboard. It does not require co-location with Vault for v1.
 
-## Vault integration (v1.1)
+## Vault integration (Phase 1)
 
-A separate `internal/vault` client will:
+`internal/vault` provides a read-only PKI client and reconciler:
 
-- Authenticate via AppRole or Kubernetes JWT
-- List PKI mounts, issuers, and stored certificates
-- Match by `fingerprint_sha256` to set `managed_status`
-- Optionally import discovered CA bundles via `pki/issuers/import/bundle`
+- Authenticate via token (AppRole/AWS deferred)
+- List PKI mounts, serials, and stored certificates
+- Match by `fingerprint_sha256` to set `managed_status`, `vault_pki_mount`, `vault_issuer_ref`, `serial_number`
+- `POST /api/v1/reconcile` or optional post-scan hook (`RECONCILE_ON_SCAN_COMPLETE`)
 
 HCP Vault Dedicated uses the same HTTP API with namespace headers.
+
+Future: CA bundle import via `pki/issuers/import/bundle`, AppRole/K8s auth.
 
 ## Security considerations
 

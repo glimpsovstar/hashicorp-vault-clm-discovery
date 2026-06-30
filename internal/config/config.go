@@ -19,6 +19,7 @@ type Config struct {
 	VaultNamespace    string        `envconfig:"VAULT_NAMESPACE" default:""`
 	VaultToken        string        `envconfig:"VAULT_TOKEN" default:""`
 	VaultAuthMethod   string        `envconfig:"VAULT_AUTH_METHOD" default:"token"` // token | approle | aws (only token impl required now)
+	ReconcileOnScanComplete bool      `envconfig:"RECONCILE_ON_SCAN_COMPLETE" default:"false"`
 }
 
 func Load() (Config, error) {

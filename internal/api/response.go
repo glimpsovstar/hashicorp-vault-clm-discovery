@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 )
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -19,6 +21,17 @@ func writeError(w http.ResponseWriter, r *http.Request, status int, msg string) 
 		body["request_id"] = reqID
 	}
 	writeJSON(w, status, body)
+}
+
+// parseScanID parses the "id" URL parameter as a scan UUID. On failure it writes
+// a 400 response and returns ok=false so the caller can simply return.
+func parseScanID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid scan id")
+		return uuid.Nil, false
+	}
+	return id, true
 }
 
 func (s *Server) writeServerError(w http.ResponseWriter, r *http.Request, err error, msg string) {

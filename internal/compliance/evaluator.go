@@ -78,13 +78,19 @@ func EvaluateScan(ctx context.Context, st CertStore, scanID *uuid.UUID) (Complia
 	return summary, nil
 }
 
-// CountSC081Violations returns the number of SC-081 pack findings.
+// CountSC081Violations returns the number of SC-081 pack findings. It runs only
+// the SC-081 pack — callers that need a single count should not pay for the PCI
+// and crypto packs, algorithm inventory, and finding sort that EvaluateScan does.
 func CountSC081Violations(ctx context.Context, st CertStore, scanID *uuid.UUID) (int, error) {
-	summary, err := EvaluateScan(ctx, st, scanID)
+	certs, err := loadAllCertificates(ctx, st, scanID)
 	if err != nil {
 		return 0, err
 	}
-	return summary.SC081ViolationCount, nil
+	count := 0
+	for _, cert := range certs {
+		count += len(EvaluateSC081(CertInputFromStore(cert)))
+	}
+	return count, nil
 }
 
 func loadAllCertificates(ctx context.Context, st CertStore, scanID *uuid.UUID) ([]store.Certificate, error) {

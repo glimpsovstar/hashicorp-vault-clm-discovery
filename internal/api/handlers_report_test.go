@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -125,6 +126,26 @@ func TestHandleGetScanReport_NotCompleted(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestHandleGetScanReport_StoreErrorReturns500(t *testing.T) {
+	t.Parallel()
+
+	scanID := uuid.New()
+	srv := NewServer(config.Config{}, &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv.report = &fakeReportStore{scanErr: errors.New("connection refused")}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/scans/"+scanID.String()+"/report", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", scanID.String())
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	rec := httptest.NewRecorder()
+	srv.handleGetScanReport(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (a DB error must not be masked as 404)", rec.Code)
 	}
 }
 

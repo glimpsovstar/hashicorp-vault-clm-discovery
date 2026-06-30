@@ -50,7 +50,14 @@ export default function BlindSpotCard({ scanId, scanStatus }: Props) {
       const result = await triggerReconcile();
       setVaultConfigured(true);
       setMessage(`Reconcile complete: ${result.matched} matched, ${result.unmatched_clm} unmatched in CLM`);
-      await loadSummary();
+      // Refresh the metrics, but keep the reconcile success message even if the
+      // follow-up read fails — the reconcile itself succeeded.
+      try {
+        const data = await fetchBlindSpot(scanId);
+        setSummary(data);
+      } catch {
+        // best-effort refresh; leave the success message in place
+      }
     } catch (err) {
       const text = err instanceof Error ? err.message : "Reconcile failed";
       if (text.toLowerCase().includes("vault not configured")) {

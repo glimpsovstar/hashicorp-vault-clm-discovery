@@ -1,13 +1,12 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
-
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/report"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
 )
 
 type reportStore interface {
@@ -15,19 +14,21 @@ type reportStore interface {
 }
 
 func (s *Server) handleGetScanReport(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid scan id")
+	id, ok := parseScanID(w, r)
+	if !ok {
 		return
 	}
 
 	doc, err := report.BuildForScan(r.Context(), s.report, id)
 	if err != nil {
-		if err.Error() == "scan not completed" {
+		switch {
+		case errors.Is(err, report.ErrScanNotCompleted):
 			writeError(w, r, http.StatusNotFound, "scan not completed")
-			return
+		case errors.Is(err, store.ErrScanNotFound):
+			writeError(w, r, http.StatusNotFound, "scan not found")
+		default:
+			s.writeServerError(w, r, err, "failed to build report")
 		}
-		writeError(w, r, http.StatusNotFound, "scan not found")
 		return
 	}
 

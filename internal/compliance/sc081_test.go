@@ -1,6 +1,7 @@
 package compliance
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -156,6 +157,65 @@ func TestEvaluateSC081_ExpirySeverity(t *testing.T) {
 				t.Fatalf("severity = %q, want %q", got.Severity, tt.wantSev)
 			}
 		})
+	}
+}
+
+func TestEvaluateSC081_ExpiredCertificate(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	cert := CertInput{
+		ID:              uuid.New(),
+		Fingerprint:     "fp",
+		SubjectCN:       "example.com",
+		NotBefore:       now.AddDate(-1, 0, 0),
+		NotAfter:        now.AddDate(0, 0, -100),
+		CertScope:       "external",
+		DaysUntilExpiry: -100,
+	}
+
+	findings := EvaluateSC081(cert)
+
+	var got *Finding
+	for i := range findings {
+		if strings.HasPrefix(findings[i].RuleID, "sc081.expiry") {
+			got = &findings[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("expected an expiry finding for expired cert, got %+v", findings)
+	}
+	if got.RuleID != "sc081.expiry.expired" {
+		t.Fatalf("rule = %q, want sc081.expiry.expired", got.RuleID)
+	}
+	if got.Severity != "critical" {
+		t.Fatalf("severity = %q, want critical", got.Severity)
+	}
+	if strings.Contains(got.Title, "expires within") {
+		t.Fatalf("title must not claim 'expires within' for an already-expired cert: %q", got.Title)
+	}
+	if strings.Contains(got.Detail, "-") {
+		t.Fatalf("detail must not contain a negative day count: %q", got.Detail)
+	}
+}
+
+func TestEvaluateSC081_ValidityFractionalExceedsCeiling(t *testing.T) {
+	t.Parallel()
+
+	notBefore := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC) // subject to 199d ceiling
+	cert := CertInput{
+		ID:          uuid.New(),
+		Fingerprint: "fp",
+		SubjectCN:   "example.com",
+		NotBefore:   notBefore,
+		NotAfter:    notBefore.AddDate(0, 0, 199).Add(18 * time.Hour), // 199d 18h > 199d
+		CertScope:   "external",
+	}
+
+	findings := EvaluateSC081(cert)
+	if got := ruleIDForPack(findings, "sc081.validity"); got != "sc081.validity.199d" {
+		t.Fatalf("validity rule = %q, want sc081.validity.199d for a 199d18h cert (truncation must not let it pass)", got)
 	}
 }
 

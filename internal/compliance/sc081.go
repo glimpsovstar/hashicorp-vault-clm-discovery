@@ -2,6 +2,7 @@ package compliance
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/governance"
@@ -39,10 +40,11 @@ func sc081ValidityFinding(cert CertInput) *Finding {
 		return nil
 	}
 
-	validityDays := validityDays(cert.NotBefore, cert.NotAfter)
-	if validityDays <= ceiling.maxDays {
+	maxValidity := time.Duration(ceiling.maxDays) * 24 * time.Hour
+	if cert.NotAfter.Sub(cert.NotBefore) <= maxValidity {
 		return nil
 	}
+	validityDays := validityDays(cert.NotBefore, cert.NotAfter)
 
 	return &Finding{
 		RuleID:      ceiling.ruleID,
@@ -58,20 +60,24 @@ func sc081ValidityFinding(cert CertInput) *Finding {
 
 func sc081ExpiryFinding(cert CertInput) *Finding {
 	days := cert.DaysUntilExpiry
-	if days < 0 {
-		days = int(cert.NotAfter.Sub(time.Now().UTC()).Hours() / 24)
-	}
 
-	var ruleID, title string
+	var ruleID, title, detail string
 	var baseSeverity string
 	switch {
+	case days < 0:
+		ruleID = "sc081.expiry.expired"
+		title = "Certificate has expired"
+		detail = fmt.Sprintf("Certificate expired %d day(s) ago", -days)
+		baseSeverity = "critical"
 	case days <= 14:
 		ruleID = "sc081.expiry.critical"
 		title = "Certificate expires within 14 days"
+		detail = fmt.Sprintf("Certificate expires in %d days", days)
 		baseSeverity = "critical"
 	case days <= 60:
 		ruleID = "sc081.expiry.warning"
 		title = "Certificate expires within 60 days"
+		detail = fmt.Sprintf("Certificate expires in %d days", days)
 		baseSeverity = "warning"
 	default:
 		return nil
@@ -83,7 +89,7 @@ func sc081ExpiryFinding(cert CertInput) *Finding {
 		Pack:        "sc081",
 		Severity:    severity,
 		Title:       title,
-		Detail:      fmt.Sprintf("Certificate expires in %d days", days),
+		Detail:      detail,
 		CertID:      cert.ID,
 		Fingerprint: cert.Fingerprint,
 		SubjectCN:   cert.SubjectCN,
@@ -108,7 +114,10 @@ func sc081CeilingFor(notBefore time.Time) *sc081Ceiling {
 }
 
 func validityDays(notBefore, notAfter time.Time) int {
-	return int(notAfter.Sub(notBefore).Hours() / 24)
+	// Round up so a certificate whose validity exceeds a whole-day ceiling by
+	// any fraction is reported (and counted) as exceeding it, never truncated
+	// back down to the compliant boundary.
+	return int(math.Ceil(notAfter.Sub(notBefore).Hours() / 24))
 }
 
 func isProd(env *string) bool {

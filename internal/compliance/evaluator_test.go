@@ -106,6 +106,50 @@ func (f *fakeCertStore) ListCertificates(_ context.Context, filter store.Certifi
 	return f.certs[filter.Offset:end], len(f.certs), nil
 }
 
+func TestCountSC081Violations_CountsOnlySC081Pack(t *testing.T) {
+	t.Parallel()
+
+	st := &fakeCertStore{
+		certs: []store.Certificate{
+			{
+				// Exceeds the 199-day ceiling -> one sc081 finding.
+				ID:                 uuid.New(),
+				FingerprintSHA256:  "over-ceiling",
+				SubjectCN:          strPtr("a.example.com"),
+				NotBefore:          time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+				NotAfter:           time.Date(2027, 6, 1, 0, 0, 0, 0, time.UTC),
+				KeyType:            "RSA",
+				KeyBits:            2048,
+				SignatureAlgorithm: "SHA256-RSA",
+				CertScope:          governance.ScopeExternal,
+				DaysUntilExpiry:    300,
+			},
+			{
+				// Weak key + missing owner trigger crypto/pci findings, but the
+				// 180-day validity and far-off expiry mean zero sc081 findings.
+				ID:                 uuid.New(),
+				FingerprintSHA256:  "no-sc081",
+				SubjectCN:          strPtr("b.example.com"),
+				NotBefore:          time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+				NotAfter:           time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, 180),
+				KeyType:            "RSA",
+				KeyBits:            1024,
+				SignatureAlgorithm: "SHA1-RSA",
+				CertScope:          governance.ScopeExternal,
+				DaysUntilExpiry:    300,
+			},
+		},
+	}
+
+	count, err := CountSC081Violations(context.Background(), st, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("sc081 violations = %d, want 1", count)
+	}
+}
+
 func TestEvaluateScan_WithScanFilter(t *testing.T) {
 	t.Parallel()
 

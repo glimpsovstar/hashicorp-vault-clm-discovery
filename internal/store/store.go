@@ -3,16 +3,22 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/cert"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/governance"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/lifecycle"
 )
+
+// ErrScanNotFound is returned when a scan does not exist, letting callers
+// distinguish a genuine not-found from an underlying database/IO failure.
+var ErrScanNotFound = errors.New("scan not found")
 
 type Store struct {
 	pool             *pgxpool.Pool
@@ -228,6 +234,9 @@ func (s *Store) GetScan(ctx context.Context, id uuid.UUID) (Scan, error) {
 		&scan.TargetsSucceeded, &scan.TargetsFailed, &scan.CertsFound, &scan.UpsertFailures,
 		&scan.ExpansionWarnings, &samplesScanner, &scan.Error, &scan.CreatedAt,
 	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return scan, ErrScanNotFound
+	}
 	return scan, err
 }
 

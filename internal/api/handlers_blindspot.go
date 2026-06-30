@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/compliance"
@@ -51,9 +50,8 @@ func (s *Server) blindSpotSummary(ctx context.Context, scanID *uuid.UUID) (Blind
 }
 
 func (s *Server) handleGetScanBlindSpot(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid scan id")
+	id, ok := parseScanID(w, r)
+	if !ok {
 		return
 	}
 	if _, err := s.blindSpot.GetScan(r.Context(), id); err != nil {

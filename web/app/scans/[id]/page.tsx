@@ -1,4 +1,5 @@
 import Link from "next/link";
+import BlindSpotCard from "@/components/blind-spot-card";
 import PageHeader from "@/components/page-header";
 import InventoryTable from "@/components/inventory-table";
 import { getScan, listScanCertificates, scanStatusBadgeClass } from "@/lib/api";
@@ -31,6 +32,8 @@ export default async function ScanDetailPage({
           </Link>
         }
       />
+
+      <BlindSpotCard scanId={scan.id} scanStatus={scan.status} />
 
       <section className="panel">
         <div className="panel-body">

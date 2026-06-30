@@ -94,6 +94,10 @@ Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVA
 | `SCAN_TIMEOUT` | `5s` | Per-target TLS probe timeout |
 | `DEFAULT_CONCURRENCY` | `50` | Default scan worker concurrency |
 | `EXPIRING_SOON_DAYS` | `30` | Days before expiry for `expiring_soon` status |
+| `VAULT_ADDR` | (empty) | HashiCorp Vault API address; empty disables Vault integration |
+| `VAULT_NAMESPACE` | (empty) | Vault enterprise namespace header (`X-Vault-Namespace`) |
+| `VAULT_TOKEN` | (empty) | Vault token for `token` auth (`X-Vault-Token`) |
+| `VAULT_AUTH_METHOD` | `token` | Auth method: `token`, `approle`, or `aws` (Phase 1 implements `token` only) |
 
 Both `clm-discovery` and `clm-scan` emit JSON logs to stdout. Set `LOG_LEVEL=debug` to see target expansion summaries; `trace` adds per-target probe outcomes.
 

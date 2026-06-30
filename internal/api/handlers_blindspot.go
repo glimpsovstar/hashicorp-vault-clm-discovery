@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/compliance"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
 )
 
@@ -21,9 +22,10 @@ type BlindSpotSummary struct {
 type blindSpotStore interface {
 	CountByManagedStatus(ctx context.Context, scanID *uuid.UUID) (managed, discovered int, err error)
 	GetScan(ctx context.Context, id uuid.UUID) (store.Scan, error)
+	compliance.CertStore
 }
 
-func buildBlindSpotSummary(managed, discovered int) BlindSpotSummary {
+func buildBlindSpotSummary(managed, discovered, sc081Violations int) BlindSpotSummary {
 	shadow := discovered - managed
 	if shadow < 0 {
 		shadow = 0
@@ -32,7 +34,7 @@ func buildBlindSpotSummary(managed, discovered int) BlindSpotSummary {
 		VaultManaged:    managed,
 		Discovered:      discovered,
 		Shadow:          shadow,
-		SC081Violations: 0, // wired in Task 9 when compliance package ships
+		SC081Violations: sc081Violations,
 	}
 }
 
@@ -41,7 +43,11 @@ func (s *Server) blindSpotSummary(ctx context.Context, scanID *uuid.UUID) (Blind
 	if err != nil {
 		return BlindSpotSummary{}, err
 	}
-	return buildBlindSpotSummary(managed, discovered), nil
+	sc081Count, err := compliance.CountSC081Violations(ctx, s.blindSpot, scanID)
+	if err != nil {
+		return BlindSpotSummary{}, err
+	}
+	return buildBlindSpotSummary(managed, discovered, sc081Count), nil
 }
 
 func (s *Server) handleGetScanBlindSpot(w http.ResponseWriter, r *http.Request) {

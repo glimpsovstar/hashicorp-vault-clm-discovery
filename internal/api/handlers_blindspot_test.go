@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -23,6 +24,18 @@ type fakeBlindSpotStore struct {
 	scan                store.Scan
 	scanErr             error
 	countErr            error
+	certs               []store.Certificate
+}
+
+func (f *fakeBlindSpotStore) ListCertificates(_ context.Context, filter store.CertificateFilter) ([]store.Certificate, int, error) {
+	if filter.Offset >= len(f.certs) {
+		return nil, len(f.certs), nil
+	}
+	end := filter.Offset + filter.Limit
+	if end > len(f.certs) {
+		end = len(f.certs)
+	}
+	return f.certs[filter.Offset:end], len(f.certs), nil
 }
 
 func (f *fakeBlindSpotStore) CountByManagedStatus(_ context.Context, scanID *uuid.UUID) (int, int, error) {
@@ -59,7 +72,7 @@ func TestBuildBlindSpotSummary(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := buildBlindSpotSummary(tt.managed, tt.discovered)
+			got := buildBlindSpotSummary(tt.managed, tt.discovered, 0)
 			if got.VaultManaged != tt.managed {
 				t.Fatalf("vault_managed = %d, want %d", got.VaultManaged, tt.managed)
 			}
@@ -76,11 +89,25 @@ func TestBuildBlindSpotSummary(t *testing.T) {
 	}
 }
 
-func TestHandleGetBlindSpot_EstateWide(t *testing.T) {
+func TestHandleGetBlindSpot_WithSC081Violations(t *testing.T) {
 	t.Parallel()
 
 	srv := NewServer(config.Config{}, &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	srv.blindSpot = &fakeBlindSpotStore{managed: 12, discovered: 47}
+	srv.blindSpot = &fakeBlindSpotStore{
+		managed:    2,
+		discovered: 5,
+		certs: []store.Certificate{
+			{
+				ID:                uuid.New(),
+				FingerprintSHA256: "fp-long",
+				SubjectCN:         strPtr("long.example.com"),
+				NotBefore:         time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+				NotAfter:          time.Date(2027, 6, 1, 0, 0, 0, 0, time.UTC),
+				CertScope:         "external",
+				DaysUntilExpiry:   300,
+			},
+		},
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/blindspot", nil)
 	rec := httptest.NewRecorder()
@@ -94,8 +121,8 @@ func TestHandleGetBlindSpot_EstateWide(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&summary); err != nil {
 		t.Fatal(err)
 	}
-	if summary.VaultManaged != 12 || summary.Discovered != 47 || summary.Shadow != 35 {
-		t.Fatalf("summary = %+v", summary)
+	if summary.SC081Violations < 1 {
+		t.Fatalf("sc081_violations = %d, want >= 1", summary.SC081Violations)
 	}
 }
 
@@ -150,6 +177,31 @@ func TestHandleGetScanBlindSpot_NotFound(t *testing.T) {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }
+
+func TestHandleGetBlindSpot_EstateWide(t *testing.T) {
+	t.Parallel()
+
+	srv := NewServer(config.Config{}, &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv.blindSpot = &fakeBlindSpotStore{managed: 12, discovered: 47}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/blindspot", nil)
+	rec := httptest.NewRecorder()
+	srv.handleGetBlindSpot(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var summary BlindSpotSummary
+	if err := json.NewDecoder(rec.Body).Decode(&summary); err != nil {
+		t.Fatal(err)
+	}
+	if summary.VaultManaged != 12 || summary.Discovered != 47 || summary.Shadow != 35 {
+		t.Fatalf("summary = %+v", summary)
+	}
+}
+
+func strPtr(s string) *string { return &s }
 
 func TestHandleGetBlindSpot_RouteRegistered(t *testing.T) {
 	t.Parallel()

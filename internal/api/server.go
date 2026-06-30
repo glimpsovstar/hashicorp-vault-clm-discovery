@@ -27,10 +27,11 @@ type Server struct {
 	log        *slog.Logger
 	worker     *ScanWorker
 	reconciler reconcileRunner
+	blindSpot  blindSpotStore
 }
 
 func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, store: st, scanner: sc, log: log}
+	s := &Server{cfg: cfg, store: st, scanner: sc, log: log, blindSpot: st}
 	if cfg.VaultAddr != "" {
 		if vc, err := vault.NewClient(vault.Config{
 			Address:    cfg.VaultAddr,
@@ -68,6 +69,7 @@ func (s *Server) Router() http.Handler {
 		r.Post("/scans", s.handleCreateScan)
 		r.Get("/scans", s.handleListScans)
 		r.Get("/scans/{id}", s.handleGetScan)
+		r.Get("/scans/{id}/blindspot", s.handleGetScanBlindSpot)
 		r.Get("/scans/{id}/certificates", s.handleListScanCertificates)
 		r.Delete("/scans/{id}", s.handleDeleteScan)
 
@@ -81,6 +83,8 @@ func (s *Server) Router() http.Handler {
 		r.Delete("/issuers/{id}", s.handleDeleteIssuer)
 
 		r.Post("/reconcile", s.handleReconcile)
+
+		r.Get("/blindspot", s.handleGetBlindSpot)
 	})
 
 	return r

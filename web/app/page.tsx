@@ -1,5 +1,6 @@
 import PageHeader from "@/components/page-header";
 import InventoryTable from "@/components/inventory-table";
+import ReconcileButton from "@/components/reconcile-button";
 import { listCertificates } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -58,6 +59,7 @@ export default async function InventoryPage({
             </button>
           </form>
           <p className="count-text">{total} certificate(s)</p>
+          <ReconcileButton />
         </div>
 
         <div className="panel-body panel-body-flush data-table-wrap">

@@ -30,8 +30,8 @@ End-to-end story: **Discover → Choose → Import → Manage**. Mapped to versi
 
 | Phase | Purpose | Shipped | Planned |
 |-------|---------|---------|---------|
-| **Discover** | TLS scan, dedup by `fingerprint_sha256`, where/when seen | **v1** | Post-scan reconcile hook (v1.1) |
-| **Choose** | Public vs private (`cert_scope`), CA in Vault?, root vs intermediate | Heuristics at scan (v1) | Reconcile-informed (v1.1); wizard (v1.2) |
+| **Discover** | TLS scan, dedup by `fingerprint_sha256`, where/when seen | **v1** | Post-scan reconcile hook (**Phase 1**) |
+| **Choose** | Public vs private (`cert_scope`), CA in Vault?, root vs intermediate | Heuristics at scan (v1) | Reconcile-informed (**Phase 1**); wizard (v1.2) |
 | **Import** | CA/leaf material into Vault PKI | Issuer table from chains (v1) | `pki/issuers/import/bundle` (v1.2) |
 | **Manage** | Expiry, drift, renewal orchestration | Dashboard + governance PATCH (v1) | PKI reconcile (v1.1), OCSP/CRL (v1.1b), vault-agent/AAP links (v1.2) |
 
@@ -54,9 +54,9 @@ GitHub: [#20](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issu
 | Version | Scope | Status |
 |---------|-------|--------|
 | **v1** | Network scan, inventory, observations, governance columns, Helios UI, demo reset | **Shipped** |
-| **v1.1** | `internal/vault/` client, PKI reconcile, `POST /api/v1/reconcile`, Vault column live | Planned — [implementation plan](superpowers/plans/2026-06-14-clm-lifecycle-v1.1.md) |
+| **Phase 1** | Vault PKI reconcile, blind-spot API + dashboard, SC-081/PCI evaluators, scan report v0 | **In progress** — [#27](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/27) · [design](superpowers/specs/2026-06-30-blind-spot-reveal-design.md) · [plan](superpowers/plans/2026-06-30-phase-1-blind-spot-reveal-demo.md) · [demo flow](demo-flow.md) |
 | **v1.1b** | OCSP/CRL revocation alignment | Planned |
-| **v1.2** | Environment scan report, catalog/CA import workflows, Choose wizard, vault-agent/AAP hooks, optional HCP reporting ingest | Planned — [reporting architecture](reporting-architecture.md), [scan report & import spec](superpowers/specs/2026-06-14-scan-report-and-vault-import-design.md) |
+| **v1.2** | Environment scan report (full v1.2), catalog/CA import workflows, Choose wizard, vault-agent/AAP hooks, optional HCP reporting ingest | Planned — [reporting architecture](reporting-architecture.md), [scan report & import spec](superpowers/specs/2026-06-14-scan-report-and-vault-import-design.md) |
 | **v2** | Cloud CA sources (ACM, etc.) | Planned |
 
 ## Demo vs production
@@ -64,7 +64,7 @@ GitHub: [#20](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issu
 | Aspect | Demo (today) | Production intent |
 |--------|--------------|-------------------|
 | Deployment | Docker Compose on laptop | K8s / VM alongside Vault infra; outbound scan access |
-| Vault link | Vault column shows **Not connected** until v1.1 reconcile | AppRole/K8s JWT read-only PKI policy |
+| Vault link | Vault column + reconcile when `VAULT_ADDR` set — [demo flow](demo-flow.md) | AppRole/K8s JWT read-only PKI policy |
 | Data reset | DELETE APIs + UI for clean demos | Retain history; scheduled rescans for drift |
 | Scan targets | Public demo hostnames (`docs/demo-flow.md`) | Customer-owned CIDRs/hostnames + consent |
 | Narrative | Cursor SDLC demo (`.prompts-history.md`, `CONTRIBUTING.md`) | Operator lifecycle per specs above |
@@ -78,10 +78,10 @@ GitHub: [#20](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issu
 
 ## Where to read next (this repo)
 
-1. **Run it:** `README.md` quick start, `docs/demo-flow.md`
+1. **Run it:** `README.md` quick start, `docs/demo-flow.md` (POV script)
 2. **How it works:** `docs/architecture.md`, `docs/data-model.md`
-3. **What to build next:** `docs/superpowers/plans/2026-06-14-clm-lifecycle-v1.1.md`
-4. **Design depth:** `docs/superpowers/specs/` (lifecycle, HCP, v1 product)
+3. **What to build next:** [Phase 1 blind-spot plan](superpowers/plans/2026-06-30-phase-1-blind-spot-reveal-demo.md), [v1.1 lifecycle plan](superpowers/plans/2026-06-14-clm-lifecycle-v1.1.md)
+4. **Design depth:** `docs/superpowers/specs/` — [blind-spot reveal](superpowers/specs/2026-06-30-blind-spot-reveal-design.md), [compliance packs](superpowers/specs/2026-06-30-compliance-standards-packs-design.md), lifecycle, HCP, v1 product
 5. **SDLC / demo arc:** `CONTRIBUTING.md`, `.prompts-history.md`
 
 Before changing schema or API fields, read `docs/data-model.md` and the lifecycle/HCP specs — governance columns and reconcile fields are designed for the full CLM story, not only v1.

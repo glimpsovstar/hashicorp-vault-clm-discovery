@@ -147,9 +147,9 @@ Mozilla Public License 2.0 — see [LICENSE](LICENSE).
 
 ## Roadmap
 
-- **v1.1:** Vault PKI reconciliation (`managed_in_vault`, issuer mapping) — [plan](docs/superpowers/plans/2026-06-14-clm-lifecycle-v1.1.md)
+- **Phase 1 (v1.1 + report v0):** Vault PKI reconcile, blind-spot dashboard, SC-081/PCI compliance, scan report download — [plan](docs/superpowers/plans/2026-06-30-phase-1-blind-spot-reveal-demo.md) · [demo flow](docs/demo-flow.md)
 - **v1.1b:** OCSP/CRL revocation checks
-- **v1.2:** CA import/bundle, vault-agent/AAP integration hooks, optional HCP reporting ingest
+- **v1.2:** CA import/bundle, vault-agent/AAP integration hooks, optional HCP reporting ingest, baseline/delta reports
 - **v2:** Cloud provider certificate sources (AWS ACM, etc.)
 
 Lifecycle and HCP positioning: [docs/program-context.md](docs/program-context.md) · [lifecycle spec](docs/superpowers/specs/2026-06-14-clm-lifecycle-workflow-design.md)

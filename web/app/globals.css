@@ -233,6 +233,18 @@ a:hover {
 .panel-toolbar {
   padding: 16px 20px;
   border-bottom: 1px solid var(--token-color-border-faint);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.reconcile-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
 }
 
 .data-table-wrap {
@@ -452,6 +464,36 @@ a.button:hover {
   gap: 20px;
 }
 
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.stat-grid-single {
+  grid-template-columns: minmax(0, 280px);
+}
+
+.stat-tile {
+  padding: 12px 16px;
+  border: 1px solid var(--token-color-border-faint);
+  border-radius: var(--token-border-radius-x-small);
+  background: var(--token-color-surface-faint);
+}
+
+.stat-tile-label {
+  font-size: var(--token-typography-body-100-font-size);
+  color: var(--token-color-foreground-faint);
+  margin-bottom: 4px;
+}
+
+.stat-tile-value {
+  font-size: 28px;
+  font-weight: var(--token-typography-font-weight-semibold);
+  color: var(--token-color-foreground-strong);
+  line-height: 1.2;
+}
+
 .detail-list p {
   margin: 0 0 10px;
 }
@@ -499,6 +541,10 @@ a.button:hover {
 
   .grid-2 {
     grid-template-columns: 1fr;
+  }
+
+  .stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .page-header-row {

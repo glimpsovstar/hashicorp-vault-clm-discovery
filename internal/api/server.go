@@ -17,18 +17,35 @@ import (
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanrunner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/vault"
 )
 
 type Server struct {
-	cfg     config.Config
-	store   *store.Store
-	scanner *scanner.Scanner
-	log     *slog.Logger
-	worker  *ScanWorker
+	cfg        config.Config
+	store      *store.Store
+	scanner    *scanner.Scanner
+	log        *slog.Logger
+	worker     *ScanWorker
+	reconciler reconcileRunner
+	blindSpot  blindSpotStore
+	compliance complianceStore
+	report     reportStore
 }
 
 func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, store: st, scanner: sc, log: log}
+	s := &Server{cfg: cfg, store: st, scanner: sc, log: log, blindSpot: st, compliance: st, report: st}
+	if cfg.VaultAddr != "" {
+		if vc, err := vault.NewClient(vault.Config{
+			Address:    cfg.VaultAddr,
+			Namespace:  cfg.VaultNamespace,
+			Token:      cfg.VaultToken,
+			AuthMethod: cfg.VaultAuthMethod,
+		}); err == nil {
+			s.reconciler = vault.NewReconciler(vc, st)
+		} else {
+			log.Warn("vault client init failed", "err", err)
+		}
+	}
 	s.worker = NewScanWorker(s)
 	return s
 }
@@ -54,6 +71,9 @@ func (s *Server) Router() http.Handler {
 		r.Post("/scans", s.handleCreateScan)
 		r.Get("/scans", s.handleListScans)
 		r.Get("/scans/{id}", s.handleGetScan)
+		r.Get("/scans/{id}/blindspot", s.handleGetScanBlindSpot)
+		r.Get("/scans/{id}/compliance", s.handleGetScanCompliance)
+		r.Get("/scans/{id}/report", s.handleGetScanReport)
 		r.Get("/scans/{id}/certificates", s.handleListScanCertificates)
 		r.Delete("/scans/{id}", s.handleDeleteScan)
 
@@ -65,6 +85,11 @@ func (s *Server) Router() http.Handler {
 
 		r.Get("/issuers", s.handleListIssuers)
 		r.Delete("/issuers/{id}", s.handleDeleteIssuer)
+
+		r.Post("/reconcile", s.handleReconcile)
+
+		r.Get("/blindspot", s.handleGetBlindSpot)
+		r.Get("/compliance/summary", s.handleGetComplianceSummary)
 	})
 
 	return r
@@ -347,11 +372,14 @@ func (w *ScanWorker) run() {
 func (w *ScanWorker) execute(job scanJob) {
 	ctx := context.Background()
 	runner := scanrunner.New(w.srv.store, w.srv.scanner, w.srv.log, w.srv.cfg.LogLevel, w.srv.cfg.AllowPrivateRanges)
-	_ = runner.Run(ctx, scanrunner.Job{
+	err := runner.Run(ctx, scanrunner.Job{
 		ScanID:      job.ID,
 		CIDRs:       job.CIDRs,
 		Hostnames:   job.Hostnames,
 		Ports:       job.Ports,
 		Concurrency: job.Concurrency,
 	})
+	if err == nil {
+		w.srv.maybeReconcileAfterScan(ctx, job.ID)
+	}
 }

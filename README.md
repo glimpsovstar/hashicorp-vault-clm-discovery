@@ -94,6 +94,10 @@ Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVA
 | `SCAN_TIMEOUT` | `5s` | Per-target TLS probe timeout |
 | `DEFAULT_CONCURRENCY` | `50` | Default scan worker concurrency |
 | `EXPIRING_SOON_DAYS` | `30` | Days before expiry for `expiring_soon` status |
+| `VAULT_ADDR` | (empty) | HashiCorp Vault API address; empty disables Vault integration |
+| `VAULT_NAMESPACE` | (empty) | Vault enterprise namespace header (`X-Vault-Namespace`) |
+| `VAULT_TOKEN` | (empty) | Vault token for `token` auth (`X-Vault-Token`) |
+| `VAULT_AUTH_METHOD` | `token` | Auth method: `token`, `approle`, or `aws` (Phase 1 implements `token` only) |
 
 Both `clm-discovery` and `clm-scan` emit JSON logs to stdout. Set `LOG_LEVEL=debug` to see target expansion summaries; `trace` adds per-target probe outcomes.
 
@@ -143,9 +147,9 @@ Mozilla Public License 2.0 — see [LICENSE](LICENSE).
 
 ## Roadmap
 
-- **v1.1:** Vault PKI reconciliation (`managed_in_vault`, issuer mapping) — [plan](docs/superpowers/plans/2026-06-14-clm-lifecycle-v1.1.md)
+- **Phase 1 (v1.1 + report v0):** Vault PKI reconcile, blind-spot dashboard, SC-081/PCI compliance, scan report download — [plan](docs/superpowers/plans/2026-06-30-phase-1-blind-spot-reveal-demo.md) · [demo flow](docs/demo-flow.md)
 - **v1.1b:** OCSP/CRL revocation checks
-- **v1.2:** CA import/bundle, vault-agent/AAP integration hooks, optional HCP reporting ingest
+- **v1.2:** CA import/bundle, vault-agent/AAP integration hooks, optional HCP reporting ingest, baseline/delta reports
 - **v2:** Cloud provider certificate sources (AWS ACM, etc.)
 
 Lifecycle and HCP positioning: [docs/program-context.md](docs/program-context.md) · [lifecycle spec](docs/superpowers/specs/2026-06-14-clm-lifecycle-workflow-design.md)

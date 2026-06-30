@@ -76,6 +76,21 @@ export type Scan = {
   created_at: string;
 };
 
+export type BlindSpotSummary = {
+  vault_managed: number;
+  discovered: number;
+  shadow: number;
+  sc081_violations: number;
+};
+
+export type ReconcileSummary = {
+  mounts_scanned: number;
+  vault_certs_read: number;
+  matched: number;
+  unmatched_clm: number;
+  errors: string[];
+};
+
 export type Issuer = {
   id: string;
   fingerprint_sha256: string;
@@ -172,6 +187,34 @@ export function patchCertificate(id: string, body: Partial<Pick<Certificate, "ow
 
 export function listIssuers() {
   return fetchJSON<{ items: Issuer[] }>("/api/v1/issuers");
+}
+
+export function fetchBlindSpot(scanId: string) {
+  return fetchJSON<BlindSpotSummary>(`/api/v1/scans/${scanId}/blindspot`);
+}
+
+export function triggerReconcile() {
+  return fetchJSON<ReconcileSummary>("/api/v1/reconcile", { method: "POST" });
+}
+
+export async function downloadReport(scanId: string, format: "markdown" | "json" = "markdown") {
+  const res = await fetch(
+    `${getApiBaseUrl()}/api/v1/scans/${scanId}/report?format=${format}`,
+    { cache: "no-store" }
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || res.statusText);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `scan-${scanId.slice(0, 8)}-report.${format === "json" ? "json" : "md"}`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 export function scanStatusBadgeClass(status: string): string {

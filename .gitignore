@@ -24,3 +24,6 @@ web/.env*.local
 
 # Docker
 *.log
+
+# Git worktrees (Superpowers isolated development)
+.worktrees/

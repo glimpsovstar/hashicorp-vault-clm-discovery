@@ -19,11 +19,20 @@ import (
 type fakeResourceStore struct {
 	scan            store.Scan
 	scanErr         error
+	cert            store.Certificate
+	certErr         error
 	certs           []store.Certificate
 	listErr         error
 	deleteScanErr   error
 	deleteCertErr   error
 	deleteIssuerErr error
+}
+
+func (f *fakeResourceStore) GetCertificate(_ context.Context, _ uuid.UUID) (store.Certificate, error) {
+	if f.certErr != nil {
+		return store.Certificate{}, f.certErr
+	}
+	return f.cert, nil
 }
 
 func (f *fakeResourceStore) GetScan(_ context.Context, id uuid.UUID) (store.Scan, error) {
@@ -109,6 +118,57 @@ func TestHandleListScanCertificates_Statuses(t *testing.T) {
 			t.Parallel()
 			rec := httptest.NewRecorder()
 			newResourceServer(tt.res).handleListScanCertificates(rec, idRequest(http.MethodGet, uuid.New().String()))
+			if rec.Code != tt.want {
+				t.Fatalf("status = %d, want %d", rec.Code, tt.want)
+			}
+		})
+	}
+}
+
+func TestHandleGetCertificatePEM_Statuses(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		res  *fakeResourceStore
+		want int
+	}{
+		{name: "not found", res: &fakeResourceStore{certErr: store.ErrCertificateNotFound}, want: http.StatusNotFound},
+		{name: "db error", res: &fakeResourceStore{certErr: context.Canceled}, want: http.StatusInternalServerError},
+		{name: "success", res: &fakeResourceStore{cert: store.Certificate{PEM: "-----BEGIN CERTIFICATE-----"}}, want: http.StatusOK},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rec := httptest.NewRecorder()
+			newResourceServer(tt.res).handleGetCertificatePEM(rec, idRequest(http.MethodGet, uuid.New().String()))
+			if rec.Code != tt.want {
+				t.Fatalf("status = %d, want %d", rec.Code, tt.want)
+			}
+		})
+	}
+}
+
+// handleGetCertificate's success path also reads observations from the concrete
+// store, so only the lookup error paths are unit-testable via the seam.
+func TestHandleGetCertificate_ErrorStatuses(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		res  *fakeResourceStore
+		want int
+	}{
+		{name: "not found", res: &fakeResourceStore{certErr: store.ErrCertificateNotFound}, want: http.StatusNotFound},
+		{name: "db error", res: &fakeResourceStore{certErr: context.Canceled}, want: http.StatusInternalServerError},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rec := httptest.NewRecorder()
+			newResourceServer(tt.res).handleGetCertificate(rec, idRequest(http.MethodGet, uuid.New().String()))
 			if rec.Code != tt.want {
 				t.Fatalf("status = %d, want %d", rec.Code, tt.want)
 			}

@@ -132,10 +132,3 @@ func issuerRefFromMeta(meta map[string]interface{}) *string {
 	}
 	return nil
 }
-
-func vaultSerial(meta map[string]interface{}, fallback string) string {
-	if v, ok := meta["serial_number"].(string); ok && v != "" {
-		return v
-	}
-	return fallback
-}

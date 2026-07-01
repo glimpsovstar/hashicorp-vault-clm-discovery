@@ -14,8 +14,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/config"
-	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanrunner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanner"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanrunner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/vault"
 )
@@ -25,6 +25,7 @@ import (
 // (including the not-found vs. DB-error paths) without a database.
 type resourceStore interface {
 	GetScan(ctx context.Context, id uuid.UUID) (store.Scan, error)
+	GetCertificate(ctx context.Context, id uuid.UUID) (store.Certificate, error)
 	ListCertificates(ctx context.Context, f store.CertificateFilter) ([]store.Certificate, int, error)
 	DeleteScan(ctx context.Context, id uuid.UUID) error
 	DeleteCertificate(ctx context.Context, id uuid.UUID) error
@@ -272,9 +273,9 @@ func (s *Server) handleGetCertificate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid certificate id")
 		return
 	}
-	cert, err := s.store.GetCertificate(r.Context(), id)
+	cert, err := s.resources.GetCertificate(r.Context(), id)
 	if err != nil {
-		writeError(w, r, http.StatusNotFound, "certificate not found")
+		s.writeLookupError(w, r, err, store.ErrCertificateNotFound, "certificate not found", "failed to load certificate")
 		return
 	}
 	obs, err := s.store.GetCertificateObservations(r.Context(), id)
@@ -291,9 +292,9 @@ func (s *Server) handleGetCertificatePEM(w http.ResponseWriter, r *http.Request)
 		writeError(w, r, http.StatusBadRequest, "invalid certificate id")
 		return
 	}
-	cert, err := s.store.GetCertificate(r.Context(), id)
+	cert, err := s.resources.GetCertificate(r.Context(), id)
 	if err != nil {
-		writeError(w, r, http.StatusNotFound, "certificate not found")
+		s.writeLookupError(w, r, err, store.ErrCertificateNotFound, "certificate not found", "failed to load certificate")
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-pem-file")

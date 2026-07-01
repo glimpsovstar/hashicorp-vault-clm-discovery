@@ -39,80 +39,80 @@ func (s *Store) Ping(ctx context.Context) error {
 }
 
 type Scan struct {
-	ID                uuid.UUID              `json:"id"`
-	Source            string                 `json:"source"`
-	Status            string                 `json:"status"`
-	CIDRs             []string               `json:"cidrs"`
-	Hostnames         []string               `json:"hostnames"`
-	Ports             []int                  `json:"ports"`
-	Concurrency       int                    `json:"concurrency"`
-	StartedAt         *time.Time             `json:"started_at,omitempty"`
-	FinishedAt        *time.Time             `json:"finished_at,omitempty"`
-	TargetsTotal      int                    `json:"targets_total"`
-	TargetsScanned    int                    `json:"targets_scanned"`
-	TargetsSucceeded  int                    `json:"targets_succeeded"`
-	TargetsFailed     int                    `json:"targets_failed"`
-	CertsFound        int                    `json:"certs_found"`
-	UpsertFailures    int                    `json:"upsert_failures"`
-	ExpansionWarnings []string               `json:"expansion_warnings"`
-	FailureSamples    []TargetFailureSample  `json:"failure_samples"`
-	Error             *string                `json:"error,omitempty"`
-	CreatedAt         time.Time              `json:"created_at"`
+	ID                uuid.UUID             `json:"id"`
+	Source            string                `json:"source"`
+	Status            string                `json:"status"`
+	CIDRs             []string              `json:"cidrs"`
+	Hostnames         []string              `json:"hostnames"`
+	Ports             []int                 `json:"ports"`
+	Concurrency       int                   `json:"concurrency"`
+	StartedAt         *time.Time            `json:"started_at,omitempty"`
+	FinishedAt        *time.Time            `json:"finished_at,omitempty"`
+	TargetsTotal      int                   `json:"targets_total"`
+	TargetsScanned    int                   `json:"targets_scanned"`
+	TargetsSucceeded  int                   `json:"targets_succeeded"`
+	TargetsFailed     int                   `json:"targets_failed"`
+	CertsFound        int                   `json:"certs_found"`
+	UpsertFailures    int                   `json:"upsert_failures"`
+	ExpansionWarnings []string              `json:"expansion_warnings"`
+	FailureSamples    []TargetFailureSample `json:"failure_samples"`
+	Error             *string               `json:"error,omitempty"`
+	CreatedAt         time.Time             `json:"created_at"`
 }
 
 type Certificate struct {
-	ID                   uuid.UUID `json:"id"`
-	SerialNumber         string    `json:"serial_number"`
-	FingerprintSHA256    string    `json:"fingerprint_sha256"`
-	SubjectCN            *string   `json:"subject_cn"`
-	SubjectAltNames      []string  `json:"subject_alt_names"`
-	IssuerDN             string    `json:"issuer_dn"`
-	AuthorityKeyID       *string   `json:"authority_key_id"`
-	NotBefore            time.Time `json:"not_before"`
-	NotAfter             time.Time `json:"not_after"`
-	KeyType              string    `json:"key_type"`
-	KeyBits              int       `json:"key_bits"`
-	SignatureAlgorithm   string    `json:"signature_algorithm"`
-	IsCA                 bool      `json:"is_ca"`
-	KeyUsage             []string  `json:"key_usage"`
-	ExtKeyUsage          []string  `json:"ext_key_usage"`
-	PEM                  string    `json:"pem"`
-	DaysUntilExpiry      int       `json:"days_until_expiry"`
-	Status               string    `json:"status"`
-	RevocationStatus     *string   `json:"revocation_status"`
-	RevocationCheckedAt  *time.Time `json:"revocation_checked_at"`
-	CRLDistributionPoints []string `json:"crl_distribution_points"`
-	OCSPServers          []string  `json:"ocsp_servers"`
-	FirstDiscovered      time.Time `json:"first_discovered"`
-	LastSeen             time.Time `json:"last_seen"`
-	HostnameMatchesSAN   bool      `json:"hostname_matches_san"`
-	ChainStatus          string    `json:"chain_status"`
-	ManagedStatus        string    `json:"managed_status"`
-	CertScope            string    `json:"cert_scope"`
-	VaultIssuerRef       *string   `json:"vault_issuer_ref"`
-	VaultPKIMount        *string   `json:"vault_pki_mount"`
-	Owner                *string   `json:"owner"`
-	Team                 *string   `json:"team"`
-	Environment          *string   `json:"environment"`
-	Tags                 []string  `json:"tags"`
-	RiskScore            int       `json:"risk_score"`
-	RemediationState     string    `json:"remediation_state"`
-	ObservationCount     int       `json:"observation_count,omitempty"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	ID                    uuid.UUID  `json:"id"`
+	SerialNumber          string     `json:"serial_number"`
+	FingerprintSHA256     string     `json:"fingerprint_sha256"`
+	SubjectCN             *string    `json:"subject_cn"`
+	SubjectAltNames       []string   `json:"subject_alt_names"`
+	IssuerDN              string     `json:"issuer_dn"`
+	AuthorityKeyID        *string    `json:"authority_key_id"`
+	NotBefore             time.Time  `json:"not_before"`
+	NotAfter              time.Time  `json:"not_after"`
+	KeyType               string     `json:"key_type"`
+	KeyBits               int        `json:"key_bits"`
+	SignatureAlgorithm    string     `json:"signature_algorithm"`
+	IsCA                  bool       `json:"is_ca"`
+	KeyUsage              []string   `json:"key_usage"`
+	ExtKeyUsage           []string   `json:"ext_key_usage"`
+	PEM                   string     `json:"pem"`
+	DaysUntilExpiry       int        `json:"days_until_expiry"`
+	Status                string     `json:"status"`
+	RevocationStatus      *string    `json:"revocation_status"`
+	RevocationCheckedAt   *time.Time `json:"revocation_checked_at"`
+	CRLDistributionPoints []string   `json:"crl_distribution_points"`
+	OCSPServers           []string   `json:"ocsp_servers"`
+	FirstDiscovered       time.Time  `json:"first_discovered"`
+	LastSeen              time.Time  `json:"last_seen"`
+	HostnameMatchesSAN    bool       `json:"hostname_matches_san"`
+	ChainStatus           string     `json:"chain_status"`
+	ManagedStatus         string     `json:"managed_status"`
+	CertScope             string     `json:"cert_scope"`
+	VaultIssuerRef        *string    `json:"vault_issuer_ref"`
+	VaultPKIMount         *string    `json:"vault_pki_mount"`
+	Owner                 *string    `json:"owner"`
+	Team                  *string    `json:"team"`
+	Environment           *string    `json:"environment"`
+	Tags                  []string   `json:"tags"`
+	RiskScore             int        `json:"risk_score"`
+	RemediationState      string     `json:"remediation_state"`
+	ObservationCount      int        `json:"observation_count,omitempty"`
+	CreatedAt             time.Time  `json:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at"`
 }
 
 type Observation struct {
-	ID           uuid.UUID `json:"id"`
+	ID            uuid.UUID `json:"id"`
 	CertificateID uuid.UUID `json:"certificate_id"`
-	ScanID       uuid.UUID `json:"scan_id"`
-	IP           string    `json:"ip"`
-	Port         int       `json:"port"`
-	Hostname     *string   `json:"hostname"`
-	SNI          *string   `json:"sni"`
-	TLSVersion   *string   `json:"tls_version"`
-	CipherSuite  *string   `json:"cipher_suite"`
-	ObservedAt   time.Time `json:"observed_at"`
+	ScanID        uuid.UUID `json:"scan_id"`
+	IP            string    `json:"ip"`
+	Port          int       `json:"port"`
+	Hostname      *string   `json:"hostname"`
+	SNI           *string   `json:"sni"`
+	TLSVersion    *string   `json:"tls_version"`
+	CipherSuite   *string   `json:"cipher_suite"`
+	ObservedAt    time.Time `json:"observed_at"`
 }
 
 type Issuer struct {
@@ -440,7 +440,11 @@ func (s *Store) GetCertificate(ctx context.Context, id uuid.UUID) (Certificate, 
 			(SELECT COUNT(*) FROM certificate_observations o WHERE o.certificate_id = c.id)
 		FROM certificates c WHERE c.id = $1
 	`, id)
-	return scanCertificate(row.Scan)
+	cert, err := scanCertificate(row.Scan)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Certificate{}, ErrCertificateNotFound
+	}
+	return cert, err
 }
 
 func (s *Store) GetCertificateObservations(ctx context.Context, certID uuid.UUID) ([]Observation, error) {

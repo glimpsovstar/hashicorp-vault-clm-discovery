@@ -1,12 +1,14 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -28,6 +30,31 @@ func (s *stubReconciler) Reconcile(ctx context.Context) (vault.Summary, error) {
 	s.called = true
 	_, s.hadDeadline = ctx.Deadline()
 	return s.summary, s.err
+}
+
+func TestMaybeReconcileAfterScan_LogsFailureNotComplete(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	// Every mount failed: Reconcile returns status=failed with a nil error. The
+	// background path must not log this as a completed reconcile.
+	stub := &stubReconciler{summary: vault.Summary{Status: vault.StatusFailed, Errors: []string{"pki/: 403"}}}
+	srv := NewServer(config.Config{VaultAddr: "http://vault.example:8200", ReconcileOnScanComplete: true}, &store.Store{}, scanner.New(scanner.Config{}), logger)
+	srv.reconciler = stub
+
+	srv.maybeReconcileAfterScan(context.Background(), uuid.New())
+
+	logs := buf.String()
+	if strings.Contains(logs, "reconcile after scan complete") {
+		t.Fatalf("failed reconcile must not log 'complete':\n%s", logs)
+	}
+	if !strings.Contains(logs, "status=failed") {
+		t.Fatalf("log should record status=failed:\n%s", logs)
+	}
+	if !strings.Contains(logs, "level=WARN") {
+		t.Fatalf("failed reconcile should log at WARN:\n%s", logs)
+	}
 }
 
 func TestMaybeReconcileAfterScan_BoundsContext(t *testing.T) {

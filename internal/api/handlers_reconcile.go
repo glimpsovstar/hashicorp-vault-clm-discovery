@@ -49,8 +49,21 @@ func (s *Server) maybeReconcileAfterScan(ctx context.Context, scanID uuid.UUID) 
 		s.log.Warn("reconcile after scan failed", "scan_id", scanID, "err", err)
 		return
 	}
+	// Reconcile returns a nil error even when individual mount/cert reads failed;
+	// the outcome is carried by summary.Status. Do not log a partial/total
+	// failure as a completed reconcile.
+	if summary.Status != vault.StatusOK {
+		s.log.Warn("reconcile after scan did not fully succeed",
+			"scan_id", scanID,
+			"status", summary.Status,
+			"matched", summary.Matched,
+			"errors", len(summary.Errors),
+		)
+		return
+	}
 	s.log.Info("reconcile after scan complete",
 		"scan_id", scanID,
+		"status", summary.Status,
 		"matched", summary.Matched,
 		"unmatched_clm", summary.UnmatchedCLM,
 	)

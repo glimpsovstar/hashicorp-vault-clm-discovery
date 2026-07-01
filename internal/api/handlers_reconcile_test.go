@@ -55,6 +55,7 @@ func TestHandleReconcile_Success(t *testing.T) {
 			VaultCertsRead: 15,
 			Matched:        12,
 			UnmatchedCLM:   35,
+			Status:         vault.StatusOK,
 			Errors:         []string{},
 		},
 	}
@@ -81,6 +82,9 @@ func TestHandleReconcile_Success(t *testing.T) {
 	}
 	if summary.UnmatchedCLM != 35 {
 		t.Fatalf("unmatched_clm = %d, want 35", summary.UnmatchedCLM)
+	}
+	if summary.Status != vault.StatusOK {
+		t.Fatalf("status = %q, want ok", summary.Status)
 	}
 }
 

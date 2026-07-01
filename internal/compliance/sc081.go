@@ -59,28 +59,40 @@ func sc081ValidityFinding(cert CertInput) *Finding {
 }
 
 func sc081ExpiryFinding(cert CertInput) *Finding {
-	days := cert.DaysUntilExpiry
+	return sc081ExpiryFindingAt(cert, time.Now().UTC())
+}
 
+// sc081ExpiryFindingAt evaluates expiry against a caller-supplied clock so the
+// finding reflects the certificate's live NotAfter at evaluation time, not a
+// day count frozen at scan time. Expiry is keyed off the NotAfter timestamp
+// (not a truncated day count) so a certificate that expired within the last day
+// is reported as expired rather than "expires in 0 days".
+func sc081ExpiryFindingAt(cert CertInput, now time.Time) *Finding {
 	var ruleID, title, detail string
 	var baseSeverity string
 	switch {
-	case days < 0:
+	case cert.NotAfter.Before(now):
+		daysAgo := int(now.Sub(cert.NotAfter).Hours() / 24)
 		ruleID = "sc081.expiry.expired"
 		title = "Certificate has expired"
-		detail = fmt.Sprintf("Certificate expired %d day(s) ago", -days)
+		detail = fmt.Sprintf("Certificate expired %d day(s) ago", daysAgo)
 		baseSeverity = "critical"
-	case days <= 14:
-		ruleID = "sc081.expiry.critical"
-		title = "Certificate expires within 14 days"
-		detail = fmt.Sprintf("Certificate expires in %d days", days)
-		baseSeverity = "critical"
-	case days <= 60:
-		ruleID = "sc081.expiry.warning"
-		title = "Certificate expires within 60 days"
-		detail = fmt.Sprintf("Certificate expires in %d days", days)
-		baseSeverity = "warning"
 	default:
-		return nil
+		days := int(cert.NotAfter.Sub(now).Hours() / 24)
+		switch {
+		case days <= 14:
+			ruleID = "sc081.expiry.critical"
+			title = "Certificate expires within 14 days"
+			detail = fmt.Sprintf("Certificate expires in %d days", days)
+			baseSeverity = "critical"
+		case days <= 60:
+			ruleID = "sc081.expiry.warning"
+			title = "Certificate expires within 60 days"
+			detail = fmt.Sprintf("Certificate expires in %d days", days)
+			baseSeverity = "warning"
+		default:
+			return nil
+		}
 	}
 
 	severity := sc081ExpirySeverity(cert, baseSeverity)

@@ -6,7 +6,19 @@ import {
   fetchBlindSpot,
   triggerReconcile,
   type BlindSpotSummary,
+  type ReconcileSummary,
 } from "@/lib/api";
+
+function reconcileMessage(result: ReconcileSummary): string {
+  if (result.status === "failed") {
+    return `Reconcile failed: could not read any certificates from ${result.mounts_scanned} PKI mount(s). ${result.errors[0] ?? ""}`.trim();
+  }
+  const base = `Reconcile complete: ${result.matched} matched, ${result.unmatched_clm} unmatched in CLM`;
+  if (result.status === "partial") {
+    return `${base} — ${result.errors.length} error(s), some certificates could not be read`;
+  }
+  return base;
+}
 
 const README_VAULT_URL =
   "https://github.com/glimpsovstar/hashicorp-vault-clm-discovery#environment-variables";
@@ -49,14 +61,17 @@ export default function BlindSpotCard({ scanId, scanStatus }: Props) {
     try {
       const result = await triggerReconcile();
       setVaultConfigured(true);
-      setMessage(`Reconcile complete: ${result.matched} matched, ${result.unmatched_clm} unmatched in CLM`);
-      // Refresh the metrics, but keep the reconcile success message even if the
-      // follow-up read fails — the reconcile itself succeeded.
-      try {
-        const data = await fetchBlindSpot(scanId);
-        setSummary(data);
-      } catch {
-        // best-effort refresh; leave the success message in place
+      setMessage(reconcileMessage(result));
+      // A fully failed reconcile changed nothing, so skip the metrics refresh.
+      if (result.status !== "failed") {
+        // Refresh the metrics, but keep the reconcile message even if the
+        // follow-up read fails — the reconcile itself ran.
+        try {
+          const data = await fetchBlindSpot(scanId);
+          setSummary(data);
+        } catch {
+          // best-effort refresh; leave the message in place
+        }
       }
     } catch (err) {
       const text = err instanceof Error ? err.message : "Reconcile failed";

@@ -7,7 +7,12 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
+
+// httpTimeout bounds every Vault request so an unresponsive Vault cannot wedge
+// the caller (notably the single post-scan reconcile goroutine).
+const httpTimeout = 30 * time.Second
 
 type Config struct {
 	Address    string
@@ -27,7 +32,7 @@ func NewClient(cfg Config) (*Client, error) {
 	}
 	return &Client{
 		cfg:  cfg,
-		http: http.DefaultClient,
+		http: &http.Client{Timeout: httpTimeout},
 	}, nil
 }
 

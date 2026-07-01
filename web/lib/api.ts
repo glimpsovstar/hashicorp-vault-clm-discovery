@@ -88,6 +88,7 @@ export type ReconcileSummary = {
   vault_certs_read: number;
   matched: number;
   unmatched_clm: number;
+  status: "ok" | "partial" | "failed";
   errors: string[];
 };
 

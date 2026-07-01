@@ -144,7 +144,7 @@ func TestHandleGetScanCompliance_NotFound(t *testing.T) {
 
 	scanID := uuid.New()
 	srv := NewServer(config.Config{}, &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	srv.compliance = &fakeComplianceStore{scanErr: context.Canceled}
+	srv.compliance = &fakeComplianceStore{scanErr: store.ErrScanNotFound}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/scans/"+scanID.String()+"/compliance", nil)
 	rctx := chi.NewRouteContext()
@@ -156,6 +156,28 @@ func TestHandleGetScanCompliance_NotFound(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestHandleGetScanCompliance_DBError(t *testing.T) {
+	t.Parallel()
+
+	scanID := uuid.New()
+	srv := NewServer(config.Config{}, &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// A DB/IO failure (not ErrScanNotFound) must surface as 500, not be masked
+	// as a 404 "scan not found".
+	srv.compliance = &fakeComplianceStore{scanErr: context.Canceled}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/scans/"+scanID.String()+"/compliance", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", scanID.String())
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	rec := httptest.NewRecorder()
+	srv.handleGetScanCompliance(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
 	}
 }
 

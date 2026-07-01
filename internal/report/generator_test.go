@@ -108,6 +108,39 @@ func TestRenderMarkdown_NoFullPEM(t *testing.T) {
 	}
 }
 
+func TestRenderMarkdown_EscapesTableCells(t *testing.T) {
+	t.Parallel()
+
+	// A scanned endpoint controls its own certificate Subject CN, so it must
+	// not be able to break out of / inject into the markdown findings table.
+	maliciousCN := "evil | row\n# Injected heading"
+	scan := store.Scan{ID: uuid.New(), Status: "completed"}
+	doc := Generate(GenerateInput{
+		Scan:      scan,
+		BlindSpot: BlindSpotSummary{},
+		Compliance: compliance.ComplianceSummary{
+			Findings: []compliance.Finding{
+				{
+					RuleID:      "sc081.validity.199d",
+					Pack:        "sc081",
+					Severity:    "critical",
+					Fingerprint: "abc123def456",
+					SubjectCN:   maliciousCN,
+				},
+			},
+		},
+	})
+
+	md := RenderMarkdown(doc)
+
+	if !strings.Contains(md, `evil \| row`) {
+		t.Fatalf("pipe in Subject CN must be escaped as \\|\n%s", md)
+	}
+	if strings.Contains(md, "\n# Injected heading") {
+		t.Fatalf("newline in Subject CN must be neutralized so it cannot inject a heading/row\n%s", md)
+	}
+}
+
 func TestRenderJSON_Structure(t *testing.T) {
 	t.Parallel()
 

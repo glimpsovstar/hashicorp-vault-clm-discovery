@@ -219,6 +219,48 @@ func TestEvaluateSC081_ValidityFractionalExceedsCeiling(t *testing.T) {
 	}
 }
 
+func TestEvaluateSC081_ExpiryUsesLiveNotAfter(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	// Stored DaysUntilExpiry is stale (frozen at an earlier scan); the cert
+	// actually expires in 10 days. The evaluation must reflect NotAfter now.
+	cert := CertInput{
+		ID:              uuid.New(),
+		Fingerprint:     "fp",
+		SubjectCN:       "example.com",
+		NotBefore:       now.AddDate(0, -3, 0),
+		NotAfter:        now.AddDate(0, 0, 10),
+		CertScope:       "external",
+		DaysUntilExpiry: 70,
+	}
+
+	if got := ruleIDForPack(EvaluateSC081(cert), "sc081.expiry"); got != "sc081.expiry.critical" {
+		t.Fatalf("expiry rule = %q, want sc081.expiry.critical (must use live NotAfter, not stale DaysUntilExpiry)", got)
+	}
+}
+
+func TestEvaluateSC081_ExpiredWithinLastDay(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	// Expired 12h ago. Truncating remaining time toward zero yields days == 0,
+	// which must NOT be classified as "expires in 0 days"; it is expired.
+	cert := CertInput{
+		ID:              uuid.New(),
+		Fingerprint:     "fp",
+		SubjectCN:       "example.com",
+		NotBefore:       now.AddDate(-1, 0, 0),
+		NotAfter:        now.Add(-12 * time.Hour),
+		CertScope:       "external",
+		DaysUntilExpiry: 0,
+	}
+
+	if got := ruleIDForPack(EvaluateSC081(cert), "sc081.expiry"); got != "sc081.expiry.expired" {
+		t.Fatalf("expiry rule = %q, want sc081.expiry.expired for a cert expired <24h ago", got)
+	}
+}
+
 func ruleIDForPack(findings []Finding, prefix string) string {
 	for _, f := range findings {
 		if len(f.RuleID) >= len(prefix) && f.RuleID[:len(prefix)] == prefix {

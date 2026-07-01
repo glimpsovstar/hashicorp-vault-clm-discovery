@@ -182,6 +182,85 @@ func TestReconcile_Idempotent(t *testing.T) {
 	}
 }
 
+func TestReconcile_AllMountsFail_StatusFailed(t *testing.T) {
+	t.Parallel()
+
+	// Mount discovery succeeds, but every mount's cert-list returns an error and
+	// nothing is read. This must NOT look like a successful "0 matched" run.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/sys/mounts":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"pki/": map[string]interface{}{"type": "pki"},
+			})
+		case "/v1/pki/certs":
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"errors": []string{"unsupported operation"}})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewClient(Config{Address: srv.URL, Token: "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reconciler := NewReconciler(client, &mockCertStore{})
+	summary, err := reconciler.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	if summary.VaultCertsRead != 0 {
+		t.Fatalf("vault_certs_read = %d, want 0", summary.VaultCertsRead)
+	}
+	if len(summary.Errors) == 0 {
+		t.Fatal("expected per-mount errors to be recorded")
+	}
+	if summary.Status != "failed" {
+		t.Fatalf("status = %q, want failed when nothing could be read", summary.Status)
+	}
+}
+
+func TestReconcile_NoErrors_StatusOK(t *testing.T) {
+	t.Parallel()
+
+	pemA, fpA := testCertWithCN(t, "ok.local")
+	const serial = "03:aa:bb:cc"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/sys/mounts":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"pki/": map[string]interface{}{"type": "pki"}})
+		case "/v1/pki/certs":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": map[string]interface{}{"keys": []string{serial}}})
+		case "/v1/pki/cert/" + serial:
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": map[string]interface{}{"certificate": pemA, "serial_number": serial}})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewClient(Config{Address: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := &mockCertStore{certs: map[string]store.ManagedStatusUpdate{fpA: {ManagedStatus: "unmanaged"}}}
+
+	summary, err := NewReconciler(client, st).Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if summary.Status != "ok" {
+		t.Fatalf("status = %q, want ok", summary.Status)
+	}
+}
+
 func testCertWithCN(t *testing.T, cn string) (string, string) {
 	t.Helper()
 

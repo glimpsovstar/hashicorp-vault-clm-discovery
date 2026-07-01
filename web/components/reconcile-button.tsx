@@ -2,7 +2,18 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { triggerReconcile } from "@/lib/api";
+import { triggerReconcile, type ReconcileSummary } from "@/lib/api";
+
+function reconcileMessage(result: ReconcileSummary): string {
+  if (result.status === "failed") {
+    return `Reconcile failed: could not read any certificates from ${result.mounts_scanned} PKI mount(s). ${result.errors[0] ?? ""}`.trim();
+  }
+  const base = `Reconcile complete: ${result.matched} matched across ${result.mounts_scanned} PKI mount(s)`;
+  if (result.status === "partial") {
+    return `${base} — ${result.errors.length} error(s), some certificates could not be read`;
+  }
+  return base;
+}
 
 const README_VAULT_URL =
   "https://github.com/glimpsovstar/hashicorp-vault-clm-discovery#environment-variables";
@@ -17,9 +28,7 @@ export default function ReconcileButton() {
     setMessage(null);
     try {
       const result = await triggerReconcile();
-      setMessage(
-        `Reconcile complete: ${result.matched} matched across ${result.mounts_scanned} PKI mount(s)`
-      );
+      setMessage(reconcileMessage(result));
       router.refresh();
     } catch (err) {
       const text = err instanceof Error ? err.message : "Reconcile failed";

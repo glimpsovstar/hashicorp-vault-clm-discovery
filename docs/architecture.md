@@ -65,7 +65,7 @@ flowchart TB
 - `GET /api/v1/scans/{id}` — scan detail and diagnostics
 - `GET /api/v1/scans/{id}/certificates` — certificates discovered in that scan
 - `DELETE` on scans, certificates, and issuers (204 No Content) for demo reset
-- `POST /api/v1/reconcile` — trigger Vault PKI reconcile (503 when `VAULT_ADDR` unset)
+- `POST /api/v1/reconcile` — trigger Vault PKI reconcile (503 when `VAULT_ADDR` unset); response includes a `status` of `ok`/`partial`/`failed` alongside `errors`
 - `GET /api/v1/scans/{id}/blindspot` and `GET /api/v1/blindspot` — blind-spot counts
 - Request ID propagated into structured logs and JSON error responses
 
@@ -83,7 +83,7 @@ At certificate upsert, `ClassifyScope` assigns `cert_scope`:
 3. Increment `certs_found` only after a successful certificate upsert (not on probe alone)
 4. Track `targets_succeeded` / `targets_failed`, `upsert_failures`, and capped `failure_samples`
 5. On completion, persist summary counts on the `scans` row
-6. When `RECONCILE_ON_SCAN_COMPLETE=true`, run Vault PKI reconcile (errors logged, scan still succeeds)
+6. When `RECONCILE_ON_SCAN_COMPLETE=true`, run Vault PKI reconcile (errors logged, scan still succeeds; the reconcile is bounded by a timeout so an unresponsive Vault cannot block subsequent scans)
 
 ### Observability
 
@@ -113,9 +113,10 @@ The service needs outbound network access to scan targets and inbound access to 
 `internal/vault` provides a read-only PKI client and reconciler:
 
 - Authenticate via token (AppRole/AWS deferred)
-- List PKI mounts, serials, and stored certificates
+- List PKI mounts, serials (via Vault's `LIST` cert operation), and stored certificates
 - Match by `fingerprint_sha256` to set `managed_status`, `vault_pki_mount`, `vault_issuer_ref`, `serial_number`
-- `POST /api/v1/reconcile` or optional post-scan hook (`RECONCILE_ON_SCAN_COMPLETE`)
+- All Vault HTTP calls use a bounded client timeout
+- `POST /api/v1/reconcile` or optional post-scan hook (`RECONCILE_ON_SCAN_COMPLETE`); reconcile summary carries a `status` (`ok`/`partial`/`failed`)
 
 HCP Vault Dedicated uses the same HTTP API with namespace headers.
 

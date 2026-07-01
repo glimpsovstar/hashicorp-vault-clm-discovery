@@ -3,16 +3,13 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { triggerReconcile, type ReconcileSummary } from "@/lib/api";
+import { reconcileStatusMessage } from "@/lib/reconcile";
 
 function reconcileMessage(result: ReconcileSummary): string {
-  if (result.status === "failed") {
-    return `Reconcile failed: could not read any certificates from ${result.mounts_scanned} PKI mount(s). ${result.errors[0] ?? ""}`.trim();
-  }
-  const base = `Reconcile complete: ${result.matched} matched across ${result.mounts_scanned} PKI mount(s)`;
-  if (result.status === "partial") {
-    return `${base} — ${result.errors.length} error(s), some certificates could not be read`;
-  }
-  return base;
+  return reconcileStatusMessage(
+    result,
+    `Reconcile complete: ${result.matched} matched across ${result.mounts_scanned} PKI mount(s)`
+  );
 }
 
 const README_VAULT_URL =

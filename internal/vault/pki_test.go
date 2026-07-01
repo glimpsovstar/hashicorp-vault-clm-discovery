@@ -156,6 +156,12 @@ func TestClient_ListCertSerials(t *testing.T) {
 				if r.URL.Path != tt.wantPath {
 					t.Errorf("path = %q, want %q", r.URL.Path, tt.wantPath)
 				}
+				// Vault's PKI cert-list endpoint only answers a LIST operation:
+				// either the LIST verb or a GET with ?list=true. A plain GET
+				// returns 405, so assert the request carries list semantics.
+				if r.Method != "LIST" && r.URL.Query().Get("list") != "true" {
+					t.Errorf("method = %q, query list = %q; want LIST verb or ?list=true", r.Method, r.URL.Query().Get("list"))
+				}
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(map[string]interface{}{
 					"data": map[string]interface{}{

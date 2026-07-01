@@ -46,6 +46,9 @@ func (c *Client) ListCertSerials(ctx context.Context, mount string) ([]string, e
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
+	// Vault's PKI cert-list endpoint only supports the LIST operation; a plain
+	// GET returns 405. GET with ?list=true is the documented equivalent.
+	req.URL.RawQuery = "list=true"
 	c.setVaultHeaders(req)
 
 	resp, err := c.http.Do(req)
@@ -59,6 +62,11 @@ func (c *Client) ListCertSerials(ctx context.Context, mount string) ([]string, e
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
+	// Vault's LIST convention returns 404 when a mount has no stored certs; that
+	// is an empty list, not an error.
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%scerts: status %d: %s", mount, resp.StatusCode, strings.TrimSpace(string(body)))
 	}

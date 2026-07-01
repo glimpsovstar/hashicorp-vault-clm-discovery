@@ -2,7 +2,15 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { triggerReconcile } from "@/lib/api";
+import { triggerReconcile, type ReconcileSummary } from "@/lib/api";
+import { reconcileStatusMessage } from "@/lib/reconcile";
+
+function reconcileMessage(result: ReconcileSummary): string {
+  return reconcileStatusMessage(
+    result,
+    `Reconcile complete: ${result.matched} matched across ${result.mounts_scanned} PKI mount(s)`
+  );
+}
 
 const README_VAULT_URL =
   "https://github.com/glimpsovstar/hashicorp-vault-clm-discovery#environment-variables";
@@ -17,9 +25,7 @@ export default function ReconcileButton() {
     setMessage(null);
     try {
       const result = await triggerReconcile();
-      setMessage(
-        `Reconcile complete: ${result.matched} matched across ${result.mounts_scanned} PKI mount(s)`
-      );
+      setMessage(reconcileMessage(result));
       router.refresh();
     } catch (err) {
       const text = err instanceof Error ? err.message : "Reconcile failed";

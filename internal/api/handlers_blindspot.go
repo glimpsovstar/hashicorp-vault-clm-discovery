@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -55,7 +56,11 @@ func (s *Server) handleGetScanBlindSpot(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if _, err := s.blindSpot.GetScan(r.Context(), id); err != nil {
-		writeError(w, r, http.StatusNotFound, "scan not found")
+		if errors.Is(err, store.ErrScanNotFound) {
+			writeError(w, r, http.StatusNotFound, "scan not found")
+		} else {
+			s.writeServerError(w, r, err, "failed to load scan")
+		}
 		return
 	}
 

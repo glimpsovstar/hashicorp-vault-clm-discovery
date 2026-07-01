@@ -97,9 +97,16 @@ Reconcile response:
   "vault_certs_read": 15,
   "matched": 12,
   "unmatched_clm": 35,
+  "status": "ok",
   "errors": []
 }
 ```
+
+`status` classifies the run so a total failure is never presented as a
+successful "0 matched": `ok` (no errors), `partial` (some certs read, some
+mount/cert reads failed), or `failed` (errors occurred and no certificate could
+be read at all). Per-mount/per-cert failures are listed in `errors`. The
+dashboard surfaces `partial`/`failed` explicitly rather than showing success.
 
 ---
 

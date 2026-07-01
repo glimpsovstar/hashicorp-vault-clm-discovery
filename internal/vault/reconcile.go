@@ -9,12 +9,21 @@ import (
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
 )
 
+// Reconcile status values distinguish a clean run from one where some or all
+// Vault reads failed, so callers never mistake a total failure for "0 matched".
+const (
+	StatusOK      = "ok"
+	StatusPartial = "partial"
+	StatusFailed  = "failed"
+)
+
 // Summary captures Vault PKI reconciliation results.
 type Summary struct {
 	MountsScanned  int      `json:"mounts_scanned"`
 	VaultCertsRead int      `json:"vault_certs_read"`
 	Matched        int      `json:"matched"`
 	UnmatchedCLM   int      `json:"unmatched_clm"`
+	Status         string   `json:"status"`
 	Errors         []string `json:"errors"`
 }
 
@@ -76,7 +85,6 @@ func (r *Reconciler) Reconcile(ctx context.Context) (Summary, error) {
 				ManagedStatus:  "managed_in_vault",
 				VaultPKIMount:  normalizeMount(mount),
 				VaultIssuerRef: issuerRef,
-				SerialNumber:   vaultSerial(meta, serial),
 			})
 			if err != nil {
 				summary.Errors = append(summary.Errors, fmt.Sprintf("%s cert %s: update store: %v", mount, serial, err))
@@ -100,7 +108,20 @@ func (r *Reconciler) Reconcile(ctx context.Context) (Summary, error) {
 	if summary.Errors == nil {
 		summary.Errors = []string{}
 	}
+	summary.Status = reconcileStatus(summary.VaultCertsRead, summary.Errors)
 	return summary, nil
+}
+
+// reconcileStatus classifies a run: ok when nothing failed, failed when errors
+// occurred and not a single Vault certificate could be read, partial otherwise.
+func reconcileStatus(vaultCertsRead int, errs []string) string {
+	if len(errs) == 0 {
+		return StatusOK
+	}
+	if vaultCertsRead == 0 {
+		return StatusFailed
+	}
+	return StatusPartial
 }
 
 func issuerRefFromMeta(meta map[string]interface{}) *string {
@@ -110,11 +131,4 @@ func issuerRefFromMeta(meta map[string]interface{}) *string {
 		}
 	}
 	return nil
-}
-
-func vaultSerial(meta map[string]interface{}, fallback string) string {
-	if v, ok := meta["serial_number"].(string); ok && v != "" {
-		return v
-	}
-	return fallback
 }

@@ -116,9 +116,6 @@ func TestReconcile_OneMatchOneShadow(t *testing.T) {
 	if gotA.VaultPKIMount != mount {
 		t.Fatalf("cert A vault_pki_mount = %q, want %q", gotA.VaultPKIMount, mount)
 	}
-	if gotA.SerialNumber != serial {
-		t.Fatalf("cert A serial_number = %q, want %q", gotA.SerialNumber, serial)
-	}
 	if gotA.VaultIssuerRef == nil || *gotA.VaultIssuerRef != "issuer-abc" {
 		t.Fatalf("cert A vault_issuer_ref = %#v, want issuer-abc", gotA.VaultIssuerRef)
 	}
@@ -179,6 +176,168 @@ func TestReconcile_Idempotent(t *testing.T) {
 		if summary.Matched != 1 {
 			t.Fatalf("run %d: matched = %d, want 1", i, summary.Matched)
 		}
+	}
+}
+
+func TestReconcile_AllMountsFail_StatusFailed(t *testing.T) {
+	t.Parallel()
+
+	// Mount discovery succeeds, but every mount's cert-list returns an error and
+	// nothing is read. This must NOT look like a successful "0 matched" run.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/sys/mounts":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"pki/": map[string]interface{}{"type": "pki"},
+			})
+		case "/v1/pki/certs":
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"errors": []string{"unsupported operation"}})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewClient(Config{Address: srv.URL, Token: "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reconciler := NewReconciler(client, &mockCertStore{})
+	summary, err := reconciler.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	if summary.VaultCertsRead != 0 {
+		t.Fatalf("vault_certs_read = %d, want 0", summary.VaultCertsRead)
+	}
+	if len(summary.Errors) == 0 {
+		t.Fatal("expected per-mount errors to be recorded")
+	}
+	if summary.Status != "failed" {
+		t.Fatalf("status = %q, want failed when nothing could be read", summary.Status)
+	}
+}
+
+func TestReconcile_EmptyMount_StatusOK(t *testing.T) {
+	t.Parallel()
+
+	// Vault's LIST convention returns 404 for a mount with no stored certs. An
+	// enabled-but-empty PKI mount is healthy, not a reconcile failure.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/sys/mounts":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"pki/": map[string]interface{}{"type": "pki"}})
+		case "/v1/pki/certs":
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"errors": []string{}})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewClient(Config{Address: srv.URL, Token: "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	summary, err := NewReconciler(client, &mockCertStore{}).Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(summary.Errors) != 0 {
+		t.Fatalf("errors = %v, want none for an empty mount", summary.Errors)
+	}
+	if summary.Status != StatusOK {
+		t.Fatalf("status = %q, want ok for a healthy empty mount", summary.Status)
+	}
+}
+
+func TestReconcile_SomeMountsFail_StatusPartial(t *testing.T) {
+	t.Parallel()
+
+	pemA, fpA := testCertWithCN(t, "partial.local")
+	const serial = "05:dd:ee:ff"
+
+	// Two mounts: pki/ reads a cert successfully, pki2/ errors on list. Some
+	// certs were read AND some reads failed -> partial.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/sys/mounts":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"pki/":  map[string]interface{}{"type": "pki"},
+				"pki2/": map[string]interface{}{"type": "pki"},
+			})
+		case "/v1/pki/certs":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": map[string]interface{}{"keys": []string{serial}}})
+		case "/v1/pki/cert/" + serial:
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": map[string]interface{}{"certificate": pemA, "serial_number": serial}})
+		case "/v1/pki2/certs":
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"errors": []string{"internal error"}})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewClient(Config{Address: srv.URL, Token: "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := &mockCertStore{certs: map[string]store.ManagedStatusUpdate{fpA: {ManagedStatus: "unmanaged"}}}
+
+	summary, err := NewReconciler(client, st).Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if summary.VaultCertsRead == 0 || len(summary.Errors) == 0 {
+		t.Fatalf("want some reads and some errors, got read=%d errors=%v", summary.VaultCertsRead, summary.Errors)
+	}
+	if summary.Status != StatusPartial {
+		t.Fatalf("status = %q, want partial", summary.Status)
+	}
+}
+
+func TestReconcile_NoErrors_StatusOK(t *testing.T) {
+	t.Parallel()
+
+	pemA, fpA := testCertWithCN(t, "ok.local")
+	const serial = "03:aa:bb:cc"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/sys/mounts":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"pki/": map[string]interface{}{"type": "pki"}})
+		case "/v1/pki/certs":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": map[string]interface{}{"keys": []string{serial}}})
+		case "/v1/pki/cert/" + serial:
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": map[string]interface{}{"certificate": pemA, "serial_number": serial}})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewClient(Config{Address: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := &mockCertStore{certs: map[string]store.ManagedStatusUpdate{fpA: {ManagedStatus: "unmanaged"}}}
+
+	summary, err := NewReconciler(client, st).Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if summary.Status != "ok" {
+		t.Fatalf("status = %q, want ok", summary.Status)
 	}
 }
 

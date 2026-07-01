@@ -50,7 +50,7 @@ func EvaluateCerts(certs []store.Certificate) ComplianceSummary {
 			summary.Findings = append(summary.Findings, f)
 			summary.FindingsBySeverity[f.Severity]++
 			summary.FindingsByPack[f.Pack]++
-			if f.Pack == "sc081" {
+			if isSC081Violation(f) {
 				summary.SC081ViolationCount++
 			}
 			if f.Pack == "pci" {
@@ -88,9 +88,20 @@ func CountSC081Violations(ctx context.Context, st CertStore, scanID *uuid.UUID) 
 	}
 	count := 0
 	for _, cert := range certs {
-		count += len(EvaluateSC081(CertInputFromStore(cert)))
+		for _, f := range EvaluateSC081(CertInputFromStore(cert)) {
+			if isSC081Violation(f) {
+				count++
+			}
+		}
 	}
 	return count, nil
+}
+
+// isSC081Violation reports whether an SC-081 finding counts toward the headline
+// violation total. Findings the pack downgrades to "info" (e.g. expiry on
+// internal non-prod certs) are reported but are not violations.
+func isSC081Violation(f Finding) bool {
+	return f.Pack == "sc081" && f.Severity != "info"
 }
 
 func loadAllCertificates(ctx context.Context, st CertStore, scanID *uuid.UUID) ([]store.Certificate, error) {

@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -163,7 +162,7 @@ func TestHandleGetScanBlindSpot_NotFound(t *testing.T) {
 
 	scanID := uuid.New()
 	srv := NewServer(config.Config{}, &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	srv.blindSpot = &fakeBlindSpotStore{scanErr: errors.New("scan not found")}
+	srv.blindSpot = &fakeBlindSpotStore{scanErr: store.ErrScanNotFound}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/scans/"+scanID.String()+"/blindspot", nil)
 	rctx := chi.NewRouteContext()
@@ -175,6 +174,28 @@ func TestHandleGetScanBlindSpot_NotFound(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestHandleGetScanBlindSpot_DBError(t *testing.T) {
+	t.Parallel()
+
+	scanID := uuid.New()
+	srv := NewServer(config.Config{}, &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// A DB/IO failure (not ErrScanNotFound) must surface as 500, not be masked
+	// as a 404 "scan not found".
+	srv.blindSpot = &fakeBlindSpotStore{scanErr: context.Canceled}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/scans/"+scanID.String()+"/blindspot", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", scanID.String())
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	rec := httptest.NewRecorder()
+	srv.handleGetScanBlindSpot(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
 	}
 }
 

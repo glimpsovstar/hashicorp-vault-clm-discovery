@@ -77,7 +77,7 @@ func RenderMarkdown(doc Document) string {
 			if s.Hostname != "" {
 				target = s.Hostname + ":" + fmt.Sprint(s.Port)
 			}
-			fmt.Fprintf(&b, "| %s | %s | %s |\n", s.Kind, target, s.Reason)
+			fmt.Fprintf(&b, "| %s | %s | %s |\n", escapeCell(s.Kind), escapeCell(target), escapeCell(s.Reason))
 		}
 	}
 	b.WriteString("\n")
@@ -86,6 +86,21 @@ func RenderMarkdown(doc Document) string {
 }
 
 const timeRFC3339 = "2006-01-02 15:04:05 UTC"
+
+// escapeCell neutralizes markdown-table metacharacters in values that may be
+// attacker-influenced (e.g. a scanned endpoint's Subject CN). It escapes pipes
+// so a value cannot open new columns, and collapses newlines so a value cannot
+// break out of its row to inject headings or extra rows.
+func escapeCell(s string) string {
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	// Escape backslashes before pipes: otherwise an input like `\|` would become
+	// `\\|`, where GFM renders `\\` as a literal backslash and leaves the pipe
+	// live as a column separator.
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, "|", `\|`)
+	return s
+}
 
 func formatScope(scope ScopeSummary) string {
 	var parts []string
@@ -133,7 +148,7 @@ func writeFindingsByPack(b *strings.Builder, summary compliance.ComplianceSummar
 		if subject == "" {
 			subject = "—"
 		}
-		fmt.Fprintf(b, "| %s | %s | %s | %s |\n", f.Severity, f.RuleID, subject, fp)
+		fmt.Fprintf(b, "| %s | %s | %s | %s |\n", escapeCell(f.Severity), escapeCell(f.RuleID), escapeCell(subject), escapeCell(fp))
 	}
 	b.WriteString("\n")
 }

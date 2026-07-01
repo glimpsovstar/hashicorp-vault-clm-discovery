@@ -14,11 +14,23 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/config"
-	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanrunner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanner"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanrunner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/vault"
 )
+
+// resourceStore is the scan/certificate/issuer lookup and delete surface used
+// by the generic resource handlers. Injectable so those handlers can be tested
+// (including the not-found vs. DB-error paths) without a database.
+type resourceStore interface {
+	GetScan(ctx context.Context, id uuid.UUID) (store.Scan, error)
+	GetCertificate(ctx context.Context, id uuid.UUID) (store.Certificate, error)
+	ListCertificates(ctx context.Context, f store.CertificateFilter) ([]store.Certificate, int, error)
+	DeleteScan(ctx context.Context, id uuid.UUID) error
+	DeleteCertificate(ctx context.Context, id uuid.UUID) error
+	DeleteIssuer(ctx context.Context, id uuid.UUID) error
+}
 
 type Server struct {
 	cfg        config.Config
@@ -30,10 +42,11 @@ type Server struct {
 	blindSpot  blindSpotStore
 	compliance complianceStore
 	report     reportStore
+	resources  resourceStore
 }
 
 func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, store: st, scanner: sc, log: log, blindSpot: st, compliance: st, report: st}
+	s := &Server{cfg: cfg, store: st, scanner: sc, log: log, blindSpot: st, compliance: st, report: st, resources: st}
 	if cfg.VaultAddr != "" {
 		if vc, err := vault.NewClient(vault.Config{
 			Address:    cfg.VaultAddr,
@@ -159,9 +172,9 @@ func (s *Server) handleGetScan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid scan id")
 		return
 	}
-	scan, err := s.store.GetScan(r.Context(), id)
+	scan, err := s.resources.GetScan(r.Context(), id)
 	if err != nil {
-		writeError(w, r, http.StatusNotFound, "scan not found")
+		s.writeLookupError(w, r, err, store.ErrScanNotFound, "scan not found", "failed to load scan")
 		return
 	}
 	writeJSON(w, http.StatusOK, scan)
@@ -173,12 +186,12 @@ func (s *Server) handleListScanCertificates(w http.ResponseWriter, r *http.Reque
 		writeError(w, r, http.StatusBadRequest, "invalid scan id")
 		return
 	}
-	if _, err := s.store.GetScan(r.Context(), id); err != nil {
-		writeError(w, r, http.StatusNotFound, "scan not found")
+	if _, err := s.resources.GetScan(r.Context(), id); err != nil {
+		s.writeLookupError(w, r, err, store.ErrScanNotFound, "scan not found", "failed to load scan")
 		return
 	}
 	limit, offset := pagination(r)
-	certs, total, err := s.store.ListCertificates(r.Context(), store.CertificateFilter{
+	certs, total, err := s.resources.ListCertificates(r.Context(), store.CertificateFilter{
 		ScanID: id,
 		Limit:  limit,
 		Offset: offset,
@@ -196,8 +209,8 @@ func (s *Server) handleDeleteScan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid scan id")
 		return
 	}
-	if err := s.store.DeleteScan(r.Context(), id); err != nil {
-		writeError(w, r, http.StatusNotFound, "scan not found")
+	if err := s.resources.DeleteScan(r.Context(), id); err != nil {
+		s.writeLookupError(w, r, err, store.ErrScanNotFound, "scan not found", "failed to delete scan")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -209,8 +222,8 @@ func (s *Server) handleDeleteCertificate(w http.ResponseWriter, r *http.Request)
 		writeError(w, r, http.StatusBadRequest, "invalid certificate id")
 		return
 	}
-	if err := s.store.DeleteCertificate(r.Context(), id); err != nil {
-		writeError(w, r, http.StatusNotFound, "certificate not found")
+	if err := s.resources.DeleteCertificate(r.Context(), id); err != nil {
+		s.writeLookupError(w, r, err, store.ErrCertificateNotFound, "certificate not found", "failed to delete certificate")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -222,8 +235,8 @@ func (s *Server) handleDeleteIssuer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid issuer id")
 		return
 	}
-	if err := s.store.DeleteIssuer(r.Context(), id); err != nil {
-		writeError(w, r, http.StatusNotFound, "issuer not found")
+	if err := s.resources.DeleteIssuer(r.Context(), id); err != nil {
+		s.writeLookupError(w, r, err, store.ErrIssuerNotFound, "issuer not found", "failed to delete issuer")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -260,9 +273,9 @@ func (s *Server) handleGetCertificate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid certificate id")
 		return
 	}
-	cert, err := s.store.GetCertificate(r.Context(), id)
+	cert, err := s.resources.GetCertificate(r.Context(), id)
 	if err != nil {
-		writeError(w, r, http.StatusNotFound, "certificate not found")
+		s.writeLookupError(w, r, err, store.ErrCertificateNotFound, "certificate not found", "failed to load certificate")
 		return
 	}
 	obs, err := s.store.GetCertificateObservations(r.Context(), id)
@@ -279,9 +292,9 @@ func (s *Server) handleGetCertificatePEM(w http.ResponseWriter, r *http.Request)
 		writeError(w, r, http.StatusBadRequest, "invalid certificate id")
 		return
 	}
-	cert, err := s.store.GetCertificate(r.Context(), id)
+	cert, err := s.resources.GetCertificate(r.Context(), id)
 	if err != nil {
-		writeError(w, r, http.StatusNotFound, "certificate not found")
+		s.writeLookupError(w, r, err, store.ErrCertificateNotFound, "certificate not found", "failed to load certificate")
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-pem-file")

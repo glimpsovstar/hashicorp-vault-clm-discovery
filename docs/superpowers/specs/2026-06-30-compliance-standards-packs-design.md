@@ -54,10 +54,17 @@ Additional SC-081-adjacent rules (Phase 1):
 
 | Rule ID | Condition | Severity |
 |---------|-----------|----------|
+| `sc081.expiry.expired` | Cert's `not_after` is in the past | `critical` |
 | `sc081.expiry.critical` | Public/external scope cert expires within 14 days | `critical` |
 | `sc081.expiry.warning` | Public/external scope cert expires within 60 days | `warning` |
 
 `cert_scope = internal` certs still get validity checks but expiry severity is `info` unless `environment = prod`.
+
+Expiry is evaluated **live** against the certificate's `not_after` at evaluation
+time, not against a `days_until_expiry` value frozen at scan time — a report
+generated days after a scan reflects current expiry. A certificate whose
+`not_after` is in the past is classified `expired` (not "expires in 0 days"),
+including one that expired within the last day.
 
 ---
 

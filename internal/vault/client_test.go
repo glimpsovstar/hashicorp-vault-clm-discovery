@@ -8,6 +8,20 @@ import (
 	"testing"
 )
 
+func TestNewClient_SetsHTTPTimeout(t *testing.T) {
+	t.Parallel()
+
+	// The client must not use http.DefaultClient (no timeout): a black-holed
+	// Vault would otherwise wedge the post-scan reconcile goroutine forever.
+	client, err := NewClient(Config{Address: "https://vault.example.com"})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if client.http.Timeout <= 0 {
+		t.Fatalf("client HTTP timeout = %v, want > 0", client.http.Timeout)
+	}
+}
+
 func TestClient_ListMounts_Authenticated(t *testing.T) {
 	t.Parallel()
 

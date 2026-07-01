@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/config"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
@@ -16,14 +18,35 @@ import (
 )
 
 type stubReconciler struct {
-	summary vault.Summary
-	err     error
-	called  bool
+	summary     vault.Summary
+	err         error
+	called      bool
+	hadDeadline bool
 }
 
-func (s *stubReconciler) Reconcile(context.Context) (vault.Summary, error) {
+func (s *stubReconciler) Reconcile(ctx context.Context) (vault.Summary, error) {
 	s.called = true
+	_, s.hadDeadline = ctx.Deadline()
 	return s.summary, s.err
+}
+
+func TestMaybeReconcileAfterScan_BoundsContext(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubReconciler{summary: vault.Summary{Status: vault.StatusOK}}
+	srv := NewServer(config.Config{VaultAddr: "http://vault.example:8200", ReconcileOnScanComplete: true}, &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv.reconciler = stub
+
+	// A background context has no deadline; the post-scan reconcile must add one
+	// so a hung Vault cannot wedge the single scan worker.
+	srv.maybeReconcileAfterScan(context.Background(), uuid.New())
+
+	if !stub.called {
+		t.Fatal("expected reconcile to be called")
+	}
+	if !stub.hadDeadline {
+		t.Fatal("expected the post-scan reconcile context to carry a deadline")
+	}
 }
 
 func TestHandleReconcile_VaultNotConfigured(t *testing.T) {

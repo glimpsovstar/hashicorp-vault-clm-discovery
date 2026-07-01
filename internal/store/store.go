@@ -16,9 +16,14 @@ import (
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/lifecycle"
 )
 
-// ErrScanNotFound is returned when a scan does not exist, letting callers
-// distinguish a genuine not-found from an underlying database/IO failure.
-var ErrScanNotFound = errors.New("scan not found")
+// ErrScanNotFound, ErrCertificateNotFound, and ErrIssuerNotFound are returned
+// when a row does not exist, letting callers distinguish a genuine not-found
+// from an underlying database/IO failure (which must not be reported as 404).
+var (
+	ErrScanNotFound        = errors.New("scan not found")
+	ErrCertificateNotFound = errors.New("certificate not found")
+	ErrIssuerNotFound      = errors.New("issuer not found")
+)
 
 type Store struct {
 	pool             *pgxpool.Pool
@@ -516,7 +521,7 @@ func (s *Store) DeleteScan(ctx context.Context, id uuid.UUID) error {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("scan not found")
+		return ErrScanNotFound
 	}
 	return nil
 }
@@ -527,7 +532,7 @@ func (s *Store) DeleteCertificate(ctx context.Context, id uuid.UUID) error {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("certificate not found")
+		return ErrCertificateNotFound
 	}
 	return nil
 }
@@ -538,7 +543,7 @@ func (s *Store) DeleteIssuer(ctx context.Context, id uuid.UUID) error {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("issuer not found")
+		return ErrIssuerNotFound
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -32,6 +33,17 @@ func parseScanID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 		return uuid.Nil, false
 	}
 	return id, true
+}
+
+// writeLookupError maps a store lookup error to a response: the typed
+// not-found sentinel becomes a 404 with notFoundMsg; any other error (e.g. a
+// database/IO failure) becomes a logged 500, so outages are never masked as 404.
+func (s *Server) writeLookupError(w http.ResponseWriter, r *http.Request, err error, notFound error, notFoundMsg, serverMsg string) {
+	if errors.Is(err, notFound) {
+		writeError(w, r, http.StatusNotFound, notFoundMsg)
+		return
+	}
+	s.writeServerError(w, r, err, serverMsg)
 }
 
 func (s *Server) writeServerError(w http.ResponseWriter, r *http.Request, err error, msg string) {

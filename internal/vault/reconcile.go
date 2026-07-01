@@ -85,7 +85,6 @@ func (r *Reconciler) Reconcile(ctx context.Context) (Summary, error) {
 				ManagedStatus:  "managed_in_vault",
 				VaultPKIMount:  normalizeMount(mount),
 				VaultIssuerRef: issuerRef,
-				SerialNumber:   vaultSerial(meta, serial),
 			})
 			if err != nil {
 				summary.Errors = append(summary.Errors, fmt.Sprintf("%s cert %s: update store: %v", mount, serial, err))

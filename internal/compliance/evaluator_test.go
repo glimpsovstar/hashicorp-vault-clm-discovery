@@ -150,6 +150,41 @@ func TestCountSC081Violations_CountsOnlySC081Pack(t *testing.T) {
 	}
 }
 
+func TestSC081ViolationCount_ExcludesInfoSeverity(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	// Internal, non-prod cert expiring in 10 days: SC-081 downgrades the expiry
+	// finding to "info". It is a finding, but not a violation, so the headline
+	// SC-081 violation count must not include it.
+	certs := []store.Certificate{
+		{
+			ID:                 uuid.New(),
+			FingerprintSHA256:  "internal-soon",
+			SubjectCN:          strPtr("internal.local"),
+			NotBefore:          now.AddDate(0, 0, -3),
+			NotAfter:           now.AddDate(0, 0, 10),
+			KeyType:            "RSA",
+			KeyBits:            2048,
+			SignatureAlgorithm: "SHA256-RSA",
+			CertScope:          governance.ScopeInternal,
+		},
+	}
+
+	summary := EvaluateCerts(certs)
+	if summary.SC081ViolationCount != 0 {
+		t.Fatalf("SC081ViolationCount = %d, want 0 (info-severity finding is not a violation)", summary.SC081ViolationCount)
+	}
+
+	count, err := CountSC081Violations(context.Background(), &fakeCertStore{certs: certs}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("CountSC081Violations = %d, want 0 (info-severity finding is not a violation)", count)
+	}
+}
+
 func TestEvaluateScan_WithScanFilter(t *testing.T) {
 	t.Parallel()
 

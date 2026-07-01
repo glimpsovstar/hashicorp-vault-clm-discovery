@@ -141,6 +141,33 @@ func TestRenderMarkdown_EscapesTableCells(t *testing.T) {
 	}
 }
 
+func TestEscapeCell(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "pipe", in: `a|b`, want: `a\|b`},
+		{name: "newline collapses", in: "a\nb", want: "a b"},
+		{name: "carriage return collapses", in: "a\rb", want: "a b"},
+		// Backslash must be escaped first, else `\|` renders as literal backslash
+		// plus a live column separator (injection bypass).
+		{name: "backslash before pipe", in: `\|`, want: `\\\|`},
+		{name: "lone backslash", in: `\`, want: `\\`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := escapeCell(tt.in); got != tt.want {
+				t.Fatalf("escapeCell(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRenderJSON_Structure(t *testing.T) {
 	t.Parallel()
 

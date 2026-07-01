@@ -161,7 +161,7 @@ func (s *Server) handleGetScan(w http.ResponseWriter, r *http.Request) {
 	}
 	scan, err := s.store.GetScan(r.Context(), id)
 	if err != nil {
-		writeError(w, r, http.StatusNotFound, "scan not found")
+		s.writeLookupError(w, r, err, store.ErrScanNotFound, "scan not found", "failed to load scan")
 		return
 	}
 	writeJSON(w, http.StatusOK, scan)
@@ -174,7 +174,7 @@ func (s *Server) handleListScanCertificates(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if _, err := s.store.GetScan(r.Context(), id); err != nil {
-		writeError(w, r, http.StatusNotFound, "scan not found")
+		s.writeLookupError(w, r, err, store.ErrScanNotFound, "scan not found", "failed to load scan")
 		return
 	}
 	limit, offset := pagination(r)
@@ -197,7 +197,7 @@ func (s *Server) handleDeleteScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.DeleteScan(r.Context(), id); err != nil {
-		writeError(w, r, http.StatusNotFound, "scan not found")
+		s.writeLookupError(w, r, err, store.ErrScanNotFound, "scan not found", "failed to delete scan")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -210,7 +210,7 @@ func (s *Server) handleDeleteCertificate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := s.store.DeleteCertificate(r.Context(), id); err != nil {
-		writeError(w, r, http.StatusNotFound, "certificate not found")
+		s.writeLookupError(w, r, err, store.ErrCertificateNotFound, "certificate not found", "failed to delete certificate")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -223,7 +223,7 @@ func (s *Server) handleDeleteIssuer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.DeleteIssuer(r.Context(), id); err != nil {
-		writeError(w, r, http.StatusNotFound, "issuer not found")
+		s.writeLookupError(w, r, err, store.ErrIssuerNotFound, "issuer not found", "failed to delete issuer")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

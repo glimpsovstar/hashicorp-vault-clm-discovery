@@ -94,6 +94,10 @@ const timeRFC3339 = "2006-01-02 15:04:05 UTC"
 func escapeCell(s string) string {
 	s = strings.ReplaceAll(s, "\r", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
+	// Escape backslashes before pipes: otherwise an input like `\|` would become
+	// `\\|`, where GFM renders `\\` as a literal backslash and leaves the pipe
+	// live as a column separator.
+	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, "|", `\|`)
 	return s
 }

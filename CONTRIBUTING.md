@@ -20,6 +20,9 @@ Skip only when explicitly requested ("skip SDLC") or for trivial typos.
 
 ```bash
 go test ./...
+go test -tags uat ./internal/uat/...            # expiry/validity integration test
+# Full manual UAT (real HTTPS endpoints), from the host:
+#   cd test/uat && docker compose -f docker-compose.uat.yml up -d --build && API=http://localhost:8080 sh driver.sh
 go build ./...
 cd web && npm run build
 docker compose -f deploy/docker-compose.yml up --build -d

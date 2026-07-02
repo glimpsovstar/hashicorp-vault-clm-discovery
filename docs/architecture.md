@@ -92,6 +92,27 @@ At certificate upsert, `ClassifyScope` assigns `cert_scope`:
 - Persisted scan diagnostics on `scans`: `expansion_warnings`, probe/upsert aggregate counts, capped `failure_samples` JSON
 - Scan completion emits a summary log line with targets succeeded/failed, certs found, and upsert failures
 
+### Testing tiers
+
+- **Unit** — `go test ./...`. Default tier; runs on every build, no external
+  services.
+- **Build-tagged integration** — `go test -tags uat ./internal/uat/...`.
+  Excluded from the default `go test ./...` (via `//go:build uat`); exercises
+  the real scanner → parser → governance → compliance pipeline against
+  in-process `httptest`-served TLS certificates. Runs in CI as a separate
+  step.
+- **Docker-compose UAT** (`test/uat/`) — real HTTPS endpoints (nginx
+  containers) behind the real API and Postgres, driven by a host-side script.
+  Manual/demo tier, not run in CI. Default profile covers a self-signed
+  expiry/validity cert matrix; opt-in `--profile vault` and
+  `--profile letsencrypt` validate reachable-Vault shadow classification and
+  a real Let's Encrypt staging certificate, respectively.
+
+See [test/uat/README.md](../test/uat/README.md) for how to run each UAT tier,
+the expected-results matrix, and intended (sometimes counter-intuitive)
+behaviors to check before treating a failure as a bug. Design rationale:
+[docs/superpowers/specs/2026-07-02-uat-expiry-compliance-testing-design.md](superpowers/specs/2026-07-02-uat-expiry-compliance-testing-design.md).
+
 ### Dashboard (`web/`)
 
 - Next.js App Router UI aligned with **HashiCorp Vault’s Helios shell** (AppFrame: header, sidebar, main)

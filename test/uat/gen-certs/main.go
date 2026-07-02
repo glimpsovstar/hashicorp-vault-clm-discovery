@@ -79,10 +79,20 @@ func writePair(outdir, id string, nb, na time.Time) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	crt, _ := os.Create(filepath.Join(outdir, id+".crt"))
+	crt, err := os.Create(filepath.Join(outdir, id+".crt"))
+	if err != nil {
+		log.Fatal(err)
+	}
 	defer crt.Close()
-	_ = pem.Encode(crt, &pem.Block{Type: "CERTIFICATE", Bytes: der})
-	kf, _ := os.Create(filepath.Join(outdir, id+".key"))
+	if err := pem.Encode(crt, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
+		log.Fatal(err)
+	}
+	kf, err := os.Create(filepath.Join(outdir, id+".key"))
+	if err != nil {
+		log.Fatal(err)
+	}
 	defer kf.Close()
-	_ = pem.Encode(kf, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	if err := pem.Encode(kf, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}); err != nil {
+		log.Fatal(err)
+	}
 }

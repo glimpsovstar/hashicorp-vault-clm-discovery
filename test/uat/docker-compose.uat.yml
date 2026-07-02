@@ -80,3 +80,32 @@ services:
   uat-exp-61:    { <<: *endpoint, environment: { ID: exp-61 } }
   uat-valid-99:  { <<: *endpoint, environment: { ID: valid-99 } }
   uat-valid-400: { <<: *endpoint, environment: { ID: valid-400 } }
+
+  # Opt-in real external cert lane: issues a Let's Encrypt STAGING cert via
+  # HTTP-01 for LE_DOMAIN (test/uat/.env, gitignored) and serves it over
+  # HTTPS. Off by default (profiles: [letsencrypt]); requires a public
+  # domain pointing at this host with :80 reachable from the internet:
+  #   cd test/uat && cp .env.example .env   # fill in real ACME_EMAIL + LE_DOMAIN
+  #   docker compose -f docker-compose.uat.yml --profile letsencrypt up -d --build
+  lego:
+    image: goacme/lego:v4
+    profiles: ["letsencrypt"]
+    env_file: [.env]
+    volumes:
+      - ./le:/le
+    # HTTP-01 needs :80 reachable from the internet on LE_DOMAIN.
+    command: >
+      --path /le --email ${ACME_EMAIL} --server https://acme-staging-v02.api.letsencrypt.org/directory
+      --domains ${LE_DOMAIN} --http --http.port :80 --accept-tos run
+    ports: ["80:80"]
+
+  uat-letsencrypt:
+    image: nginx:1.27-alpine
+    profiles: ["letsencrypt"]
+    env_file: [.env]
+    volumes:
+      - ./le:/le:ro
+      - ./nginx/le.conf.template:/etc/nginx/templates/default.conf.template:ro
+    depends_on:
+      lego:
+        condition: service_completed_successfully

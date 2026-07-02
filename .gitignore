@@ -32,3 +32,4 @@ web/*.tsbuildinfo
 # UAT local secrets and generated certs
 test/uat/.env
 test/uat/certs/
+test/uat/le/

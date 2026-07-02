@@ -33,3 +33,6 @@ web/*.tsbuildinfo
 test/uat/.env
 test/uat/certs/
 test/uat/le/
+
+# Superpowers SDD scratch (progress ledger, task briefs/reports)
+.superpowers/

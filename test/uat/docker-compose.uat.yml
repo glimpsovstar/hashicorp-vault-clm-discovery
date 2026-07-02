@@ -1,0 +1,57 @@
+name: clm-uat
+
+x-endpoint: &endpoint
+  image: nginx:1.27-alpine
+  volumes:
+    - ./certs:/certs:ro
+    - ./nginx/endpoint.conf.tmpl:/etc/nginx/templates/default.conf.tmpl:ro
+  depends_on:
+    gen-certs:
+      condition: service_completed_successfully
+
+services:
+  gen-certs:
+    image: golang:1.22
+    working_dir: /src/test/uat
+    volumes:
+      - ../../:/src
+    command: ["go", "run", "./gen-certs", "/src/test/uat/certs"]
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: clm
+      POSTGRES_PASSWORD: clm
+      POSTGRES_DB: clm
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: ../../
+      dockerfile: deploy/Dockerfile
+    environment:
+      DATABASE_URL: postgres://clm:clm@postgres:5432/clm?sslmode=disable
+      ALLOW_PRIVATE_RANGES: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+  # One HTTPS endpoint per matrix cert. All share the certs volume and the
+  # nginx entrypoint that renders /etc/nginx/templates/default.conf.tmpl
+  # (using ${ID}) into /etc/nginx/conf.d/default.conf at boot.
+  uat-expired:   { <<: *endpoint, environment: { ID: expired } }
+  uat-exp-7:     { <<: *endpoint, environment: { ID: exp-7 } }
+  uat-exp-14:    { <<: *endpoint, environment: { ID: exp-14 } }
+  uat-exp-15:    { <<: *endpoint, environment: { ID: exp-15 } }
+  uat-exp-30:    { <<: *endpoint, environment: { ID: exp-30 } }
+  uat-exp-45:    { <<: *endpoint, environment: { ID: exp-45 } }
+  uat-exp-60:    { <<: *endpoint, environment: { ID: exp-60 } }
+  uat-exp-61:    { <<: *endpoint, environment: { ID: exp-61 } }
+  uat-valid-99:  { <<: *endpoint, environment: { ID: valid-99 } }
+  uat-valid-400: { <<: *endpoint, environment: { ID: valid-400 } }

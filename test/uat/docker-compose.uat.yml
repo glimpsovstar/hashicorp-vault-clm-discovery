@@ -29,16 +29,26 @@ services:
       timeout: 5s
       retries: 10
 
-  app:
-    build:
-      context: ../../
-      dockerfile: deploy/Dockerfile
-    environment:
-      DATABASE_URL: postgres://clm:clm@postgres:5432/clm?sslmode=disable
-      ALLOW_PRIVATE_RANGES: "true"
+  migrate:
+    image: migrate/migrate:v4.17.1
+    volumes:
+      - ../../migrations:/migrations
+    command: ["-path", "/migrations", "-database", "postgres://clm:clm@postgres:5432/clm?sslmode=disable", "up"]
     depends_on:
       postgres:
         condition: service_healthy
+
+  app:
+    build:
+      context: ../../
+      dockerfile: deploy/Dockerfile.api
+    environment:
+      DATABASE_URL: postgres://clm:clm@postgres:5432/clm?sslmode=disable
+      ADDR: ":8080"
+      ALLOW_PRIVATE_RANGES: "true"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     ports:
       - "8080:8080"
 

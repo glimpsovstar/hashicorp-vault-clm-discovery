@@ -32,11 +32,24 @@ The compose stack builds the real API image, a Postgres database, and one
 nginx HTTPS endpoint per matrix cert, then a host-side driver script exercises
 the API exactly as an operator would.
 
-### Default profile — self-signed matrix
+### Recommended: one self-cleaning command
+
+```bash
+sh test/uat/run-uat.sh
+```
+
+`run-uat.sh` is the whole test as one step: it starts from a **clean slate**
+(`down -v` first, so it is isolated from any leftover stack/state), builds and
+starts the stack **waiting until every service is healthy** (`up --wait` — this
+gates the scan on real endpoint readiness so it never races a not-yet-listening
+endpoint), runs the driver, then **always tears the stack down** (including on
+failure or Ctrl-C). Its exit code is the driver's result, so it is CI/PR-safe.
+
+### Manual steps (equivalent, for debugging)
 
 ```bash
 cd test/uat
-docker compose -f docker-compose.uat.yml up -d --build
+docker compose -f docker-compose.uat.yml up -d --build --wait
 ```
 
 Then, **from the host** (not inside a container — the driver uses host
@@ -44,6 +57,7 @@ Then, **from the host** (not inside a container — the driver uses host
 
 ```bash
 API=http://localhost:8080 sh driver.sh
+docker compose -f docker-compose.uat.yml down -v   # tear down when done
 ```
 
 `gen-certs` mints the ten-certificate matrix (self-signed, exact

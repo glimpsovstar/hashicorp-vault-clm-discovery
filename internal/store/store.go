@@ -132,6 +132,8 @@ type Issuer struct {
 	IssuerName        *string   `json:"issuer_name"`
 	IssuerID          *string   `json:"issuer_id"`
 	CAChain           []string  `json:"ca_chain"`
+	VaultIssuerRef    *string   `json:"vault_issuer_ref"`
+	VaultPKIMount     *string   `json:"vault_pki_mount"`
 }
 
 type CertificateFilter struct {
@@ -498,7 +500,7 @@ func (s *Store) ListIssuers(ctx context.Context, limit, offset int) ([]Issuer, e
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, fingerprint_sha256, serial_number, subject_cn, issuer_dn,
 			not_before, not_after, key_type, key_bits, is_ca, pem, days_until_expiry,
-			status::text, issuer_name, issuer_id, ca_chain
+			status::text, issuer_name, issuer_id, ca_chain, vault_issuer_ref, vault_pki_mount
 		FROM issuers ORDER BY not_after ASC LIMIT $1 OFFSET $2
 	`, limit, offset)
 	if err != nil {
@@ -511,7 +513,8 @@ func (s *Store) ListIssuers(ctx context.Context, limit, offset int) ([]Issuer, e
 		var i Issuer
 		if err := rows.Scan(&i.ID, &i.FingerprintSHA256, &i.SerialNumber, &i.SubjectCN,
 			&i.IssuerDN, &i.NotBefore, &i.NotAfter, &i.KeyType, &i.KeyBits, &i.IsCA,
-			&i.PEM, &i.DaysUntilExpiry, &i.Status, &i.IssuerName, &i.IssuerID, &i.CAChain); err != nil {
+			&i.PEM, &i.DaysUntilExpiry, &i.Status, &i.IssuerName, &i.IssuerID, &i.CAChain,
+			&i.VaultIssuerRef, &i.VaultPKIMount); err != nil {
 			return nil, err
 		}
 		issuers = append(issuers, i)
@@ -520,6 +523,44 @@ func (s *Store) ListIssuers(ctx context.Context, limit, offset int) ([]Issuer, e
 		issuers = []Issuer{}
 	}
 	return issuers, rows.Err()
+}
+
+// GetIssuer loads a single issuer by id, returning ErrIssuerNotFound if absent.
+func (s *Store) GetIssuer(ctx context.Context, id uuid.UUID) (Issuer, error) {
+	var i Issuer
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, fingerprint_sha256, serial_number, subject_cn, issuer_dn,
+			not_before, not_after, key_type, key_bits, is_ca, pem, days_until_expiry,
+			status::text, issuer_name, issuer_id, ca_chain, vault_issuer_ref, vault_pki_mount
+		FROM issuers WHERE id = $1
+	`, id).Scan(&i.ID, &i.FingerprintSHA256, &i.SerialNumber, &i.SubjectCN,
+		&i.IssuerDN, &i.NotBefore, &i.NotAfter, &i.KeyType, &i.KeyBits, &i.IsCA,
+		&i.PEM, &i.DaysUntilExpiry, &i.Status, &i.IssuerName, &i.IssuerID, &i.CAChain,
+		&i.VaultIssuerRef, &i.VaultPKIMount)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Issuer{}, ErrIssuerNotFound
+	}
+	if err != nil {
+		return Issuer{}, err
+	}
+	return i, nil
+}
+
+// SetIssuerVaultRef records that an issuer was imported into a Vault PKI mount
+// (mode B). It stores the Vault-side issuer reference and mount, and returns the
+// updated row (ErrIssuerNotFound if the id is unknown).
+func (s *Store) SetIssuerVaultRef(ctx context.Context, id uuid.UUID, issuerRef, mount string) (Issuer, error) {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE issuers SET vault_issuer_ref = $2, vault_pki_mount = $3, updated_at = NOW()
+		WHERE id = $1
+	`, id, issuerRef, mount)
+	if err != nil {
+		return Issuer{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		return Issuer{}, ErrIssuerNotFound
+	}
+	return s.GetIssuer(ctx, id)
 }
 
 func (s *Store) DeleteScan(ctx context.Context, id uuid.UUID) error {

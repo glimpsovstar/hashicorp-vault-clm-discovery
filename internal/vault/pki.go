@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/x509"
@@ -141,6 +142,57 @@ func FingerprintSHA256FromPEM(pemStr string) (string, error) {
 
 	fp := sha256.Sum256(raw.Raw)
 	return hex.EncodeToString(fp[:]), nil
+}
+
+// IssuerImportResult summarizes a pki/issuers/import/bundle write.
+type IssuerImportResult struct {
+	ImportedIssuers []string          `json:"imported_issuers"`
+	ImportedKeys    []string          `json:"imported_keys"`
+	Mapping         map[string]string `json:"mapping"`
+}
+
+// ImportIssuerBundle imports CA material into a Vault PKI mount via
+// pki/issuers/import/bundle. This is the client's first WRITE path and requires
+// a read-write PKI policy; a read-only token yields a Vault 403 surfaced here.
+func (c *Client) ImportIssuerBundle(ctx context.Context, mount, pemBundle string) (IssuerImportResult, error) {
+	if !c.Configured() {
+		return IssuerImportResult{}, fmt.Errorf("vault client is not configured")
+	}
+	mount = normalizeMount(mount)
+	url := strings.TrimRight(c.cfg.Address, "/") + "/v1/" + mount + "issuers/import/bundle"
+
+	payload, err := json.Marshal(map[string]string{"pem_bundle": pemBundle})
+	if err != nil {
+		return IssuerImportResult{}, fmt.Errorf("encode request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return IssuerImportResult{}, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.setVaultHeaders(req)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return IssuerImportResult{}, fmt.Errorf("request %sissuers/import/bundle: %w", mount, err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return IssuerImportResult{}, fmt.Errorf("read response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return IssuerImportResult{}, fmt.Errorf("%sissuers/import/bundle: status %d: %s", mount, resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+
+	var out struct {
+		Data IssuerImportResult `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return IssuerImportResult{}, fmt.Errorf("decode response: %w", err)
+	}
+	return out.Data, nil
 }
 
 func normalizeMount(mount string) string {

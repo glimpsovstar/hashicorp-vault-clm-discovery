@@ -104,6 +104,8 @@ export type Issuer = {
   days_until_expiry: number;
   status: string;
   is_ca: boolean;
+  vault_issuer_ref?: string | null;
+  vault_pki_mount?: string | null;
 };
 
 async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
@@ -167,6 +169,15 @@ export function deleteCertificate(id: string) {
 
 export function deleteIssuer(id: string) {
   return fetchVoid(`/api/v1/issuers/${id}`, { method: "DELETE" });
+}
+
+// importIssuer implements mode B: write the issuer's CA bundle into a Vault PKI
+// mount. Requires explicit consent and the target mount.
+export function importIssuer(id: string, mount: string) {
+  return fetchJSON<Issuer>(`/api/v1/issuers/${id}/import`, {
+    method: "POST",
+    body: JSON.stringify({ consent: true, mount }),
+  });
 }
 
 export function createScan(body: {

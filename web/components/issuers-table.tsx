@@ -1,6 +1,7 @@
 "use client";
 
 import DeleteButton from "@/components/delete-button";
+import ImportCAButton from "@/components/import-ca-button";
 import { deleteIssuer, statusBadgeClass, type Issuer } from "@/lib/api";
 
 export default function IssuersTable({ items }: { items: Issuer[] }) {
@@ -27,10 +28,13 @@ export default function IssuersTable({ items }: { items: Issuer[] }) {
             <td>{issuer.issuer_dn}</td>
             <td>{issuer.is_ca ? "Yes" : "No"}</td>
             <td>
-              <DeleteButton
-                label={issuer.subject_cn || issuer.fingerprint_sha256.slice(0, 12)}
-                onDelete={() => deleteIssuer(issuer.id)}
-              />
+              <div className="table-actions">
+                <ImportCAButton issuer={issuer} />
+                <DeleteButton
+                  label={issuer.subject_cn || issuer.fingerprint_sha256.slice(0, 12)}
+                  onDelete={() => deleteIssuer(issuer.id)}
+                />
+              </div>
             </td>
           </tr>
         ))}

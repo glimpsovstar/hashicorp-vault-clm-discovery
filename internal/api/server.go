@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/go-chi/chi/v5"
@@ -29,9 +30,17 @@ type resourceStore interface {
 	GetCertificate(ctx context.Context, id uuid.UUID) (store.Certificate, error)
 	ListCertificates(ctx context.Context, f store.CertificateFilter) ([]store.Certificate, int, error)
 	SetManagedStatus(ctx context.Context, id uuid.UUID, status string) (store.Certificate, error)
+	GetIssuer(ctx context.Context, id uuid.UUID) (store.Issuer, error)
+	SetIssuerVaultRef(ctx context.Context, id uuid.UUID, issuerRef, mount string) (store.Issuer, error)
 	DeleteScan(ctx context.Context, id uuid.UUID) error
 	DeleteCertificate(ctx context.Context, id uuid.UUID) error
 	DeleteIssuer(ctx context.Context, id uuid.UUID) error
+}
+
+// issuerImporter writes CA material into a Vault PKI mount (mode B). It is nil
+// when Vault is not configured, which the handler maps to 503.
+type issuerImporter interface {
+	ImportIssuerBundle(ctx context.Context, mount, pemBundle string) (vault.IssuerImportResult, error)
 }
 
 type Server struct {
@@ -45,6 +54,7 @@ type Server struct {
 	compliance complianceStore
 	report     reportStore
 	resources  resourceStore
+	importer   issuerImporter
 }
 
 func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slog.Logger) *Server {
@@ -57,6 +67,7 @@ func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slo
 			AuthMethod: cfg.VaultAuthMethod,
 		}); err == nil {
 			s.reconciler = vault.NewReconciler(vc, st)
+			s.importer = vc
 		} else {
 			log.Warn("vault client init failed", "err", err)
 		}
@@ -100,10 +111,9 @@ func (s *Server) Router() http.Handler {
 		r.Delete("/certificates/{id}", s.handleDeleteCertificate)
 
 		r.Get("/issuers", s.handleListIssuers)
+		r.Post("/issuers/{id}/import", s.handleImportIssuer)
 		r.Delete("/issuers/{id}", s.handleDeleteIssuer)
-
-		r.Post("/reconcile", s.handleReconcile)
-
+			r.Post("/reconcile", s.handleReconcile)
 		r.Get("/blindspot", s.handleGetBlindSpot)
 		r.Get("/compliance/summary", s.handleGetComplianceSummary)
 	})
@@ -379,6 +389,108 @@ func (s *Server) handleListIssuers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": issuers, "limit": limit, "offset": offset})
+}
+
+type importIssuerRequest struct {
+	Consent bool   `json:"consent"`
+	Mount   string `json:"mount"`
+}
+
+// handleImportIssuer implements mode B (CA import): write an issuer's CA bundle
+// into a Vault PKI mount via pki/issuers/import/bundle. This is the only Vault
+// WRITE path; it requires explicit consent, a CA issuer, and a configured Vault
+// with a read-write PKI policy.
+func (s *Server) handleImportIssuer(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid issuer id")
+		return
+	}
+	var req importIssuerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if !req.Consent {
+		writeError(w, r, http.StatusBadRequest, "consent is required to import a CA into Vault")
+		return
+	}
+	mount := strings.TrimSpace(req.Mount)
+	if mount == "" {
+		writeError(w, r, http.StatusBadRequest, "mount is required")
+		return
+	}
+	if !validMount(mount) {
+		writeError(w, r, http.StatusBadRequest, "invalid mount: use a simple path segment (letters, digits, -, _, /)")
+		return
+	}
+	if s.importer == nil {
+		writeError(w, r, http.StatusServiceUnavailable, "vault is not configured")
+		return
+	}
+
+	issuer, err := s.resources.GetIssuer(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrIssuerNotFound) {
+			writeError(w, r, http.StatusNotFound, "issuer not found")
+			return
+		}
+		s.writeServerError(w, r, err, "failed to load issuer")
+		return
+	}
+	if !issuer.IsCA {
+		writeError(w, r, http.StatusConflict, "issuer is not a CA; only CA material can be imported into Vault PKI")
+		return
+	}
+
+	result, err := s.importer.ImportIssuerBundle(r.Context(), mount, issuerBundle(issuer))
+	if err != nil {
+		// The write reached Vault but was rejected (e.g. 403 read-only token) or
+		// Vault is unreachable; surface as a bad-gateway rather than a 500.
+		s.log.Warn("vault issuer import failed", "action", "import_ca", "issuer_id", id.String(), "mount", mount, "err", err)
+		writeError(w, r, http.StatusBadGateway, "vault import failed")
+		return
+	}
+
+	updated, err := s.resources.SetIssuerVaultRef(r.Context(), id, firstIssuerRef(result), mount)
+	if err != nil {
+		s.writeServerError(w, r, err, "failed to record issuer import")
+		return
+	}
+	s.log.Info("vault issuer import", "action", "import_ca", "issuer_id", id.String(), "mount", mount)
+	writeJSON(w, http.StatusOK, updated)
+}
+
+// issuerBundle concatenates the issuer PEM with its chain for import/bundle.
+func issuerBundle(i store.Issuer) string {
+	parts := append([]string{i.PEM}, i.CAChain...)
+	return strings.Join(parts, "\n")
+}
+
+// validMount guards the user-supplied Vault mount before it is interpolated into
+// the request URL: reject leading slashes, dot-segments, and any character
+// outside a simple mount path so a value like "../../sys" cannot alter the path.
+func validMount(m string) bool {
+	if m == "" || strings.HasPrefix(m, "/") || strings.Contains(m, "..") {
+		return false
+	}
+	for _, c := range m {
+		ok := c == '-' || c == '_' || c == '/' ||
+			(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// firstIssuerRef returns the Vault-side issuer reference to persist, preferring
+// the first imported issuer id.
+func firstIssuerRef(r vault.IssuerImportResult) string {
+	if len(r.ImportedIssuers) > 0 {
+		return r.ImportedIssuers[0]
+	}
+	return ""
 }
 
 func pagination(r *http.Request) (int, int) {

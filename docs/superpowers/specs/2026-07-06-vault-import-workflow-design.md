@@ -1,7 +1,7 @@
 # Design: Vault import workflow (catalog / CA bundle / mirror) — #25
 
 - **Issue:** #25 (parent lifecycle #20 Import phase)
-- **Status:** **PR 1 implemented** (modes A catalog + D mirror, read-only). PR 2 (mode B, CA import — first Vault write) pending.
+- **Status:** **PR 1 (A+D) and PR 2 (B) implemented.** Mode B is the first Vault write path; Terraform integration validation (local Docker Vault + HCP) is the follow-up.
 - **Design source:** `docs/superpowers/specs/2026-06-14-scan-report-and-vault-import-design.md` (Feature 2)
 - **Builds on:** reconcile (#23/#32) — read-only Vault client, `managed_status`, `vault_issuer_ref`/`vault_pki_mount`
 
@@ -77,6 +77,21 @@ CLM issuing certs, bulk reissue/deploy (C is v1.3+ docs), HCP inventory backfill
 
 Decision-tree doc links to a vault-agent/AAP reference architecture section; no
 code.
+
+## Required Vault policy (mode B)
+
+Mode B needs a **read-write** PKI policy on the configured Vault token; reconcile
+(read-only) works with a subset. Example:
+
+```hcl
+# mode B (write):
+path "pki/issuers/import/bundle" { capabilities = ["create", "update"] }
+path "pki/issuer/*"              { capabilities = ["read"] }
+# reconcile (read-only):
+path "sys/mounts"                { capabilities = ["read"] }
+path "pki/certs"                 { capabilities = ["list"] }
+path "pki/cert/*"                { capabilities = ["read"] }
+```
 
 ## Consent & audit
 

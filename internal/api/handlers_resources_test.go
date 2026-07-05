@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,7 +16,17 @@ import (
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/config"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/vault"
 )
+
+type fakeImporter struct {
+	result vault.IssuerImportResult
+	err    error
+}
+
+func (f *fakeImporter) ImportIssuerBundle(context.Context, string, string) (vault.IssuerImportResult, error) {
+	return f.result, f.err
+}
 
 type fakeResourceStore struct {
 	scan            store.Scan
@@ -26,6 +37,9 @@ type fakeResourceStore struct {
 	listErr         error
 	setStatusResult store.Certificate
 	setStatusErr    error
+	issuer          store.Issuer
+	issuerErr       error
+	setIssuerRefErr error
 	deleteScanErr   error
 	deleteCertErr   error
 	deleteIssuerErr error
@@ -62,6 +76,23 @@ func (f *fakeResourceStore) SetManagedStatus(_ context.Context, _ uuid.UUID, sta
 	c := f.setStatusResult
 	c.ManagedStatus = status
 	return c, nil
+}
+
+func (f *fakeResourceStore) GetIssuer(_ context.Context, _ uuid.UUID) (store.Issuer, error) {
+	if f.issuerErr != nil {
+		return store.Issuer{}, f.issuerErr
+	}
+	return f.issuer, nil
+}
+
+func (f *fakeResourceStore) SetIssuerVaultRef(_ context.Context, _ uuid.UUID, issuerRef, mount string) (store.Issuer, error) {
+	if f.setIssuerRefErr != nil {
+		return store.Issuer{}, f.setIssuerRefErr
+	}
+	i := f.issuer
+	i.VaultIssuerRef = &issuerRef
+	i.VaultPKIMount = &mount
+	return i, nil
 }
 
 func (f *fakeResourceStore) DeleteScan(context.Context, uuid.UUID) error { return f.deleteScanErr }
@@ -305,6 +336,49 @@ func TestHandleCatalogImport_Statuses(t *testing.T) {
 	}
 }
 
+func TestHandleImportIssuer_Statuses(t *testing.T) {
+	t.Parallel()
+
+	ca := store.Issuer{IsCA: true, PEM: "-----BEGIN CERTIFICATE-----\nX\n-----END CERTIFICATE-----"}
+	okImporter := &fakeImporter{result: vault.IssuerImportResult{ImportedIssuers: []string{"iss-1"}}}
+
+	tests := []struct {
+		name     string
+		res      *fakeResourceStore
+		importer issuerImporter
+		id       string
+		body     string
+		want     int
+	}{
+		{"invalid id", &fakeResourceStore{issuer: ca}, okImporter, "nope", `{"consent":true,"mount":"pki"}`, http.StatusBadRequest},
+		{"bad body", &fakeResourceStore{issuer: ca}, okImporter, uuid.New().String(), `{`, http.StatusBadRequest},
+		{"no consent", &fakeResourceStore{issuer: ca}, okImporter, uuid.New().String(), `{"consent":false,"mount":"pki"}`, http.StatusBadRequest},
+		{"no mount", &fakeResourceStore{issuer: ca}, okImporter, uuid.New().String(), `{"consent":true}`, http.StatusBadRequest},
+		{"invalid mount", &fakeResourceStore{issuer: ca}, okImporter, uuid.New().String(), `{"consent":true,"mount":"../../sys"}`, http.StatusBadRequest},
+		{"vault not configured", &fakeResourceStore{issuer: ca}, nil, uuid.New().String(), `{"consent":true,"mount":"pki"}`, http.StatusServiceUnavailable},
+		{"issuer not found", &fakeResourceStore{issuerErr: store.ErrIssuerNotFound}, okImporter, uuid.New().String(), `{"consent":true,"mount":"pki"}`, http.StatusNotFound},
+		{"not a CA", &fakeResourceStore{issuer: store.Issuer{IsCA: false}}, okImporter, uuid.New().String(), `{"consent":true,"mount":"pki"}`, http.StatusConflict},
+		{"vault error", &fakeResourceStore{issuer: ca}, &fakeImporter{err: errors.New("permission denied")}, uuid.New().String(), `{"consent":true,"mount":"pki"}`, http.StatusBadGateway},
+		{"success", &fakeResourceStore{issuer: ca}, okImporter, uuid.New().String(), `{"consent":true,"mount":"pki"}`, http.StatusOK},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv := newResourceServer(tt.res)
+			srv.importer = tt.importer
+			rec := httptest.NewRecorder()
+			srv.handleImportIssuer(rec, idRequestBody(http.MethodPost, tt.id, tt.body))
+			if rec.Code != tt.want {
+				t.Fatalf("status = %d, want %d", rec.Code, tt.want)
+			}
+			if tt.want == http.StatusOK && !strings.Contains(rec.Body.String(), `"vault_issuer_ref"`) {
+				t.Fatalf("success body missing vault_issuer_ref: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
 // TestCertificateRoutes_Registered exercises the real Router so a dropped route
 // (e.g. DELETE removed while adding catalog-import) fails loudly instead of only
 // through direct handler calls.
@@ -322,6 +396,10 @@ func TestCertificateRoutes_Registered(t *testing.T) {
 	}{
 		{http.MethodPost, "/api/v1/certificates/" + id + "/catalog-import", `{"consent":true}`, http.StatusOK},
 		{http.MethodDelete, "/api/v1/certificates/" + id, "", http.StatusNoContent},
+		{http.MethodDelete, "/api/v1/issuers/" + id, "", http.StatusNoContent},
+		// importer is nil on the resource-only server, so the route resolving to
+		// 503 (not 404/405) proves it is registered.
+		{http.MethodPost, "/api/v1/issuers/" + id + "/import", `{"consent":true,"mount":"pki"}`, http.StatusServiceUnavailable},
 	}
 	for _, c := range cases {
 		var body io.Reader

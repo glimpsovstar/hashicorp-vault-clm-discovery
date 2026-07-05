@@ -1,6 +1,6 @@
 # UAT & Expiry/Validity Compliance Testing — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Add a deterministic Go integration test and a realistic docker-compose UAT that drive the real scan→parse→lifecycle→governance→SC-081 pipeline across controlled certificate expiry/validity windows, confirming the app's reactions match intent.
 
@@ -43,7 +43,7 @@
 - Consumes: `scanner.New(scanner.Config{Timeout time.Duration, AllowPrivateRanges bool}) *scanner.Scanner`; `(*scanner.Scanner).Probe(ctx, scanner.Target{IP string, Port int, Hostname string}) scanner.ProbeResult`; `scanner.ProbeResult{Certificate cert.ParsedCertificate, Error error}`; `cert.ParsedCertificate{NotBefore, NotAfter time.Time, IssuerDN, SubjectCN, KeyType string, KeyBits int, SignatureAlgorithm, FingerprintSHA256 string, ChainStatus cert.ChainStatus}`; `governance.ClassifyScope(chainStatus, issuerDN, hostname, environment string) string`; `store.Certificate{...}`; `compliance.EvaluateCerts([]store.Certificate) compliance.ComplianceSummary` with fields `Findings []compliance.Finding` and `SC081ViolationCount int`; `compliance.Finding{RuleID, Pack, Severity string}`.
 - Produces: nothing consumed by later tasks (self-contained test).
 
-- [ ] **Step 1: Write the test file (helpers + matrix + assertions)**
+- [x] **Step 1: Write the test file (helpers + matrix + assertions)**
 
 ```go
 //go:build uat
@@ -245,17 +245,17 @@ func TestUAT_ExpiryValidityMatrix(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run and observe (UAT: pass confirms intended behavior)**
+- [x] **Step 2: Run and observe (UAT: pass confirms intended behavior)**
 
 Run: `go test -tags uat ./internal/uat/... -v`
 Expected: PASS for all 10 subtests. A FAIL is a genuine UAT finding — capture the actual vs expected, then triage as "bug vs intended" (do NOT edit the test to make it pass without understanding why).
 
-- [ ] **Step 3: Confirm the default suite is unaffected**
+- [x] **Step 3: Confirm the default suite is unaffected**
 
 Run: `go test ./... 2>&1 | tail -3`
 Expected: all packages pass; `internal/uat` shows `[no test files]` (build tag excludes it).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/uat/expiry_compliance_uat_test.go
@@ -273,7 +273,7 @@ git commit -m "test(uat): expiry/validity compliance integration test (//go:buil
 - Consumes: the `uat` build tag from Task 1.
 - Produces: nothing.
 
-- [ ] **Step 1: Add the step**
+- [x] **Step 1: Add the step**
 
 In `.github/workflows/ci.yml`, in the `go` job's `steps:`, immediately after the `- run: go build ./...` line, add:
 
@@ -281,12 +281,12 @@ In `.github/workflows/ci.yml`, in the `go` job's `steps:`, immediately after the
       - run: go test -tags uat ./internal/uat/...
 ```
 
-- [ ] **Step 2: Verify locally the command the CI runs**
+- [x] **Step 2: Verify locally the command the CI runs**
 
 Run: `go test -tags uat ./internal/uat/...`
 Expected: `ok  github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/uat`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add .github/workflows/ci.yml
@@ -306,7 +306,7 @@ git commit -m "ci: run build-tagged uat integration test"
 - Consumes: nothing.
 - Produces: writes `<outdir>/<id>.crt` + `<id>.key` PEM pairs for each matrix id; consumed by Task 4 (nginx) and Task 5 (driver reads the id list).
 
-- [ ] **Step 1: Write the generator**
+- [x] **Step 1: Write the generator**
 
 ```go
 // Command gen-certs mints the UAT self-signed certificate matrix with exact
@@ -399,12 +399,12 @@ func writePair(outdir, id string, nb, na time.Time) {
 }
 ```
 
-- [ ] **Step 2: Run it and verify output**
+- [x] **Step 2: Run it and verify output**
 
 Run: `cd test/uat && go run ./gen-certs ./certs && ls certs && openssl x509 -in certs/exp-7.crt -noout -enddate`
 Expected: 20 files (`.crt`/`.key` × 10); the `notAfter` on `exp-7.crt` is ~7.5 days out.
 
-- [ ] **Step 3: Write `.env.example`**
+- [x] **Step 3: Write `.env.example`**
 
 ```bash
 # test/uat/.env.example — copy to test/uat/.env (gitignored) and fill in real values.
@@ -414,7 +414,7 @@ ACME_EMAIL=you@example.com
 LE_DOMAIN=uat.example.com
 ```
 
-- [ ] **Step 4: Update `.gitignore`**
+- [x] **Step 4: Update `.gitignore`**
 
 Append to `.gitignore`:
 
@@ -424,7 +424,7 @@ test/uat/.env
 test/uat/certs/
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add test/uat/gen-certs/main.go test/uat/.env.example .gitignore
@@ -443,7 +443,7 @@ git commit -m "test(uat): Go cert generator for expiry matrix + secrets scaffold
 - Consumes: cert PEMs from Task 3 in `./certs`.
 - Produces: HTTPS endpoints reachable from the app container as `https://uat-<id>:443`; the app API on `localhost:8080`. Consumed by Task 5 (driver).
 
-- [ ] **Step 1: Write the nginx server-block template**
+- [x] **Step 1: Write the nginx server-block template**
 
 `test/uat/nginx/endpoint.conf.tmpl` (the entrypoint substitutes `__ID__`):
 
@@ -457,7 +457,7 @@ server {
 }
 ```
 
-- [ ] **Step 2: Write the compose file**
+- [x] **Step 2: Write the compose file**
 
 `test/uat/docker-compose.uat.yml`. One nginx service per matrix id keeps ports/isolation simple; all mount the shared `./certs`. `gen-certs` runs first to populate certs.
 
@@ -539,7 +539,7 @@ server {
 }
 ```
 
-- [ ] **Step 3: Bring the base stack up and confirm endpoints serve the right certs**
+- [x] **Step 3: Bring the base stack up and confirm endpoints serve the right certs**
 
 Run:
 ```bash
@@ -550,7 +550,7 @@ docker compose -f docker-compose.uat.yml exec app sh -c \
 ```
 Expected: the app is healthy on `:8080`; `uat-exp-7` presents a cert expiring ~7.5 days out.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add test/uat/nginx/endpoint.conf.tmpl test/uat/docker-compose.uat.yml
@@ -568,7 +568,7 @@ git commit -m "test(uat): docker-compose base stack with per-cert HTTPS endpoint
 - Consumes: the app API at `${API:-http://localhost:8080}`; endpoint hostnames `uat-<id>` on port 443 (from the app container's network — the driver runs inside the app container so it shares the compose network DNS).
 - Produces: exit 0 on full match; non-zero + a printed expected-vs-actual table on mismatch.
 
-- [ ] **Step 1: Write the driver**
+- [x] **Step 1: Write the driver**
 
 `test/uat/driver.sh` (run inside the app container so `uat-*` DNS resolves). It scans all endpoints by hostname, waits for completion, then asserts per-cert compliance findings via `/api/v1/scans/{id}/compliance`. It checks the internal (as-discovered) severities and violation count, then PATCHes each expiry cert to `environment=prod` and re-checks full severity.
 
@@ -654,12 +654,12 @@ BS=$(curl -fsS "$API/api/v1/scans/$SID/blindspot")
 [ "$fail" = 0 ] && echo "UAT PASS" || { echo "UAT FAIL"; exit 1; }
 ```
 
-- [ ] **Step 2: Confirm the compliance API exposes `subject_cn` per finding**
+- [x] **Step 2: Confirm the compliance API exposes `subject_cn` per finding**
 
 Run: `sed -n '/type Finding struct/,/}/p' internal/compliance/types.go`
 Expected: the `Finding` struct includes `SubjectCN` with a JSON tag `subject_cn`. If the JSON key differs, update the `jq` selectors in `driver.sh` to match the real key. (This is a read-only verification step — adjust the script, not the API.)
 
-- [ ] **Step 3: Run the driver against the base stack**
+- [x] **Step 3: Run the driver against the base stack**
 
 Run:
 ```bash
@@ -672,7 +672,7 @@ docker compose -f docker-compose.uat.yml exec -T app sh /driver.sh
 ```
 Expected: `UAT PASS`. Any `FAIL <id>` line is a UAT finding to triage (bug vs intended), matching the expected-results table in the README.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add test/uat/driver.sh
@@ -690,7 +690,7 @@ git commit -m "test(uat): driver asserts expiry/validity matrix + shadow certs"
 - Consumes: the base app/postgres.
 - Produces: `RECONCILE_ON_SCAN_COMPLETE`/`VAULT_ADDR` wiring so a reconcile marks any Vault-matched certs `managed_in_vault`.
 
-- [ ] **Step 1: Add the vault service and app wiring**
+- [x] **Step 1: Add the vault service and app wiring**
 
 Add to `services:` in `docker-compose.uat.yml`:
 
@@ -707,7 +707,7 @@ Add to `services:` in `docker-compose.uat.yml`:
 
 And add (commented in the base `app`, documented in README) the env the `vault` profile expects the operator to set when running that profile: `VAULT_ADDR=http://vault:8200`, `VAULT_TOKEN=root`.
 
-- [ ] **Step 2: Document the limitation and run**
+- [x] **Step 2: Document the limitation and run**
 
 Because the UAT certs are self-signed (not Vault-issued), they remain **shadow** even with Vault up — the `vault` profile validates that a reachable-but-empty Vault yields `status: ok` with `vault_managed=0`, and (per the reconcile empty-mount fix) does **not** report failure. Run:
 
@@ -718,7 +718,7 @@ VAULT_ADDR=http://vault:8200 VAULT_TOKEN=root \
 ```
 Expected: app starts with Vault configured; a `POST /api/v1/reconcile` returns `{"status":"ok",...,"vault_managed":0}` (verify: `curl -fsS -X POST localhost:8080/api/v1/reconcile | jq .status` → `ok`).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add test/uat/docker-compose.uat.yml
@@ -736,7 +736,7 @@ git commit -m "test(uat): opt-in vault profile (managed-vs-shadow validation)"
 - Consumes: `ACME_EMAIL` and `LE_DOMAIN` from `test/uat/.env`.
 - Produces: an HTTPS endpoint serving a real LE **staging** cert, scannable as an external target.
 
-- [ ] **Step 1: Add the lego sidecar + endpoint**
+- [x] **Step 1: Add the lego sidecar + endpoint**
 
 ```yaml
   lego:
@@ -775,7 +775,7 @@ server {
 }
 ```
 
-- [ ] **Step 2: Document + run (requires a public domain)**
+- [x] **Step 2: Document + run (requires a public domain)**
 
 Run (only meaningful with a real `LE_DOMAIN` pointing at this host and :80 reachable):
 
@@ -785,7 +785,7 @@ docker compose -f docker-compose.uat.yml --profile letsencrypt up -d --build
 ```
 Then scan `${LE_DOMAIN}` and assert: `cert_scope == "external"`, no `sc081.expiry.*` finding (90-day cert), no `sc081.validity.*` finding today. This is a documented manual check (not automated in `driver.sh`) because it depends on external DNS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add test/uat/docker-compose.uat.yml test/uat/nginx/le.conf.tmpl
@@ -805,11 +805,11 @@ git commit -m "test(uat): opt-in letsencrypt (staging) external-cert profile"
 - Consumes: all prior tasks.
 - Produces: operator docs.
 
-- [ ] **Step 1: Write `test/uat/README.md`**
+- [x] **Step 1: Write `test/uat/README.md`**
 
 Include: purpose; how to run the Go test (`go test -tags uat ./internal/uat/...`); how to run the compose UAT (default, `--profile vault`, `--profile letsencrypt`); the env vars (`ACME_EMAIL`, `LE_DOMAIN`, gitignored `.env`); the full **expected-results matrix** (copy the table from the spec); and the four **intended behaviors** stated as expected (self-signed→`info`→not counted; fresh LE→no findings; `exp-14`/`exp-60` inclusive boundaries; validity vs expiry independence). State clearly: "a `FAIL` line is a real finding — triage bug vs intended against this table."
 
-- [ ] **Step 2: Update `CONTRIBUTING.md` verification commands**
+- [x] **Step 2: Update `CONTRIBUTING.md` verification commands**
 
 In the `## Verification commands` block, after `go test ./...`, add:
 
@@ -819,16 +819,16 @@ go test -tags uat ./internal/uat/...            # expiry/validity integration te
 #   cd test/uat && docker compose -f docker-compose.uat.yml up -d --build && sh driver.sh
 ```
 
-- [ ] **Step 3: Add a "Testing tiers" note to `docs/architecture.md`**
+- [x] **Step 3: Add a "Testing tiers" note to `docs/architecture.md`**
 
 Under a new `### Testing tiers` heading (near the existing testing/observability content), add: unit tests (`go test ./...`, default) → build-tagged integration (`go test -tags uat ./internal/uat/...`, real scanner+compliance, in CI) → docker-compose UAT (`test/uat/`, real HTTPS endpoints, manual/demo, opt-in vault + letsencrypt profiles). Link to `test/uat/README.md` and this plan's spec.
 
-- [ ] **Step 4: Verify docs render and links resolve**
+- [x] **Step 4: Verify docs render and links resolve**
 
 Run: `git diff --stat && grep -n "test/uat" CONTRIBUTING.md docs/architecture.md`
 Expected: both files reference the UAT; README exists.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add test/uat/README.md CONTRIBUTING.md docs/architecture.md

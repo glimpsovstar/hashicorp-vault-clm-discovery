@@ -22,6 +22,7 @@ type Summary struct {
 	MountsScanned  int      `json:"mounts_scanned"`
 	VaultCertsRead int      `json:"vault_certs_read"`
 	Matched        int      `json:"matched"`
+	Revoked        int      `json:"revoked"`
 	UnmatchedCLM   int      `json:"unmatched_clm"`
 	Status         string   `json:"status"`
 	Errors         []string `json:"errors"`
@@ -81,10 +82,12 @@ func (r *Reconciler) Reconcile(ctx context.Context) (Summary, error) {
 			}
 
 			issuerRef := issuerRefFromMeta(meta)
+			revoked := revocationFromMeta(meta)
 			updated, err := r.store.UpdateManagedStatusByFingerprint(ctx, fp, store.ManagedStatusUpdate{
 				ManagedStatus:  "managed_in_vault",
 				VaultPKIMount:  normalizeMount(mount),
 				VaultIssuerRef: issuerRef,
+				Revoked:        revoked,
 			})
 			if err != nil {
 				summary.Errors = append(summary.Errors, fmt.Sprintf("%s cert %s: update store: %v", mount, serial, err))
@@ -92,6 +95,9 @@ func (r *Reconciler) Reconcile(ctx context.Context) (Summary, error) {
 			}
 			if updated {
 				summary.Matched++
+				if revoked {
+					summary.Revoked++
+				}
 			}
 		}
 	}

@@ -119,13 +119,14 @@ This plan covers **v1.1 lifecycle slices only**:
 - Modify: `internal/vault/reconcile.go` or new `revocation.go`
 - Modify: `internal/store/certificates.go` — `status`, `revocation_status`
 
-> **Status: deferred to v1.1b — NOT yet implemented.** This slice is the next task
-> (see `docs/superpowers/specs/…-revocation-alignment-design.md`).
+> **Status: implemented in v1.1b** (issue #32, spec
+> `docs/superpowers/specs/2026-07-06-revocation-alignment-design.md`). Source is
+> Vault PKI `revocation_time` via reconcile (no OCSP/CRL, no migration).
 
-- [ ] **Step 1:** Write test — revoked serial in Vault CRL/registry → CLM `status=revoked`
-- [ ] **Step 2:** Implement read of revocation metadata from Vault PKI cert response
-- [ ] **Step 3:** Run `go test ./...`
-- [ ] **Step 4:** Update `docs/data-model.md` revocation fields (v1 → Yes)
+- [x] **Step 1:** Write test — revoked serial in Vault CRL/registry → CLM `status=revoked`
+- [x] **Step 2:** Implement read of revocation metadata from Vault PKI cert response
+- [x] **Step 3:** Run `go test ./...`
+- [x] **Step 4:** Update `docs/data-model.md` revocation fields (v1 → Yes)
 
 ---
 

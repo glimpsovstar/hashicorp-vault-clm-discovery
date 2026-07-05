@@ -27,6 +27,11 @@ North star and roadmap: `docs/program-context.md`.
   self-cleaning `run-uat.sh`, and a CI step. Merged to `main` via PR #31
   (pre-merge sub-agent review: APPROVE WITH NITS; nits fixed — signal-safe
   teardown, resilient poll, numeric-safe assertions).
+- **v1.1b — revocation alignment** — reconcile now marks Vault-revoked certs as
+  `status=revoked` (reads `revocation_time` already returned by `ReadCert`; no
+  extra Vault call, no migration). Revoked status is durable across rescans.
+  Merged to `main` via PR #33 (issue #32). Sub-agent review APPROVE WITH NITS;
+  MAJOR durability gap + MINORs fixed.
 
 ## In progress
 
@@ -34,13 +39,11 @@ North star and roadmap: `docs/program-context.md`.
 
 ## Next
 
-1. **Delete stale remote branch** `origin/feature/27-phase-1-blind-spot` (Phase 1
-   content already on `main`; local branch + worktree already removed).
-2. **v1.1b** — OCSP/CRL revocation alignment (planned, not started).
-3. **v1.2** — full environment scan report, catalog/CA import
-   (`pki/issuers/import/bundle`), "Choose" wizard, vault-agent/AAP hooks,
-   optional HCP reporting ingest.
-4. **v2** — cloud CA sources (ACM, etc.).
+1. **v1.2** — full environment scan report (#24), Vault import workflow
+   (#25: catalog, CA bundle import via `pki/issuers/import/bundle`, reissue,
+   mirror), "Choose" wizard, vault-agent/AAP hooks, optional HCP reporting ingest.
+2. **OCSP/CRL for shadow (non-Vault) certs** — extends revocation beyond Vault PKI.
+3. **v2** — cloud CA sources (ACM, etc.).
 
 ## Key context
 
@@ -62,5 +65,4 @@ North star and roadmap: `docs/program-context.md`.
   `VAULT_TOKEN` (`token` method implemented). Read-only PKI (`LIST/READ`).
 - **Gotchas:** UAT Go test is build-tagged and excluded from default `go test ./...`;
   expiry offsets use a `+12h` buffer; test certs are RSA-2048/SHA-256 to avoid
-  crypto findings. `Go is not installed on the current dev machine` — tests must be
-  run where the Go toolchain is available.
+  crypto findings. Go toolchain installed locally via Homebrew (go1.26.4).

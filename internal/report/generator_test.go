@@ -75,6 +75,12 @@ func TestRenderMarkdown_ContainsRequiredSections(t *testing.T) {
 		"## PCI inventory gaps",
 		"## Algorithm inventory",
 		"## Scan diagnostics",
+		"## Certificate health",
+		"## Expiry risk",
+		"## Issuer trust & chain quality",
+		"## Scope & governance",
+		"## Insights",
+		"## Recommendations",
 	}
 	for _, section := range required {
 		if !strings.Contains(md, section) {

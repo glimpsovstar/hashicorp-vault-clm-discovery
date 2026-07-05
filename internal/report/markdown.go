@@ -2,6 +2,7 @@ package report
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/compliance"
@@ -82,7 +83,148 @@ func RenderMarkdown(doc Document) string {
 	}
 	b.WriteString("\n")
 
+	writeCertHealth(&b, doc.CertHealth)
+	writeExpiryRisk(&b, doc.ExpiryRisk)
+	writeIssuerTrust(&b, doc.IssuerTrust)
+	writeScopeGovernance(&b, doc.Governance)
+	writeTopInsights(&b, doc.Insights)
+	writeRecommendations(&b, doc.Recommends)
+
 	return b.String()
+}
+
+func writeCertHealth(b *strings.Builder, h CertHealth) {
+	b.WriteString("## Certificate health\n\n")
+	fmt.Fprintf(b, "**Total certificates:** %d\n\n", h.Total)
+	if len(h.ByStatus) > 0 {
+		b.WriteString("| Status | Count |\n|--------|-------|\n")
+		for _, k := range sortedKeys(h.ByStatus) {
+			fmt.Fprintf(b, "| %s | %d |\n", escapeCell(k), h.ByStatus[k])
+		}
+		b.WriteString("\n")
+	}
+	e := h.ExpiryBuckets
+	b.WriteString("**Days until expiry:**\n\n")
+	b.WriteString("| Bucket | Count |\n|--------|-------|\n")
+	fmt.Fprintf(b, "| Expired | %d |\n", e.Expired)
+	fmt.Fprintf(b, "| ≤ 7 days | %d |\n", e.Within7)
+	fmt.Fprintf(b, "| 8–30 days | %d |\n", e.Within30)
+	fmt.Fprintf(b, "| 31–90 days | %d |\n", e.Within90)
+	fmt.Fprintf(b, "| > 90 days | %d |\n\n", e.Beyond90)
+}
+
+func writeExpiryRisk(b *strings.Builder, r ExpiryRisk) {
+	b.WriteString("## Expiry risk\n\n")
+	fmt.Fprintf(b, "- **Expiring within 7 days:** %d\n", r.Within7)
+	fmt.Fprintf(b, "- **Expiring within 30 days:** %d\n", r.Within30)
+	fmt.Fprintf(b, "- **Expiring within 90 days:** %d\n\n", r.Within90)
+	if len(r.ByScope) > 0 {
+		b.WriteString("| Scope | ≤7d | ≤30d | ≤90d |\n|-------|-----|------|------|\n")
+		for _, scope := range sortedKeys(mapKeysExpiry(r.ByScope)) {
+			c := r.ByScope[scope]
+			label := scope
+			if label == "" {
+				label = "—"
+			}
+			fmt.Fprintf(b, "| %s | %d | %d | %d |\n", escapeCell(label), c.Within7, c.Within30, c.Within90)
+		}
+		b.WriteString("\n")
+	}
+}
+
+func writeIssuerTrust(b *strings.Builder, t IssuerTrust) {
+	b.WriteString("## Issuer trust & chain quality\n\n")
+	if len(t.Issuers) == 0 {
+		b.WriteString("No issuers observed for this scan.\n\n")
+		return
+	}
+	b.WriteString("| Issuer | Certs | CA | In Vault | Import candidate |\n|--------|-------|----|----------|------------------|\n")
+	limit := len(t.Issuers)
+	if limit > 25 {
+		limit = 25
+	}
+	for _, s := range t.Issuers[:limit] {
+		cand := "no"
+		if s.ImportCandidate {
+			cand = "yes"
+		}
+		fmt.Fprintf(b, "| %s | %d | %d | %d | %s |\n", escapeCell(s.IssuerDN), s.CertCount, s.CACount, s.InVault, cand)
+	}
+	b.WriteString("\n")
+}
+
+func writeScopeGovernance(b *strings.Builder, g ScopeGovernance) {
+	b.WriteString("## Scope & governance\n\n")
+	if len(g.ByScope) > 0 {
+		b.WriteString("**By scope:**\n\n")
+		for _, k := range sortedKeys(g.ByScope) {
+			fmt.Fprintf(b, "- %s: %d\n", escapeCell(k), g.ByScope[k])
+		}
+		b.WriteString("\n")
+	}
+	if len(g.ByManagedStatus) > 0 {
+		b.WriteString("**By managed status:**\n\n")
+		for _, k := range sortedKeys(g.ByManagedStatus) {
+			fmt.Fprintf(b, "- %s: %d\n", escapeCell(k), g.ByManagedStatus[k])
+		}
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(b, "**Ownership coverage:** %d of %d certificates have an owner.\n\n", g.OwnerCoverage.WithOwner, g.OwnerCoverage.Total)
+}
+
+func writeTopInsights(b *strings.Builder, insights []Insight) {
+	b.WriteString("## Insights\n\n")
+	if len(insights) == 0 {
+		b.WriteString("No insights for this scan.\n\n")
+		return
+	}
+	b.WriteString("| Severity | Type | Subject | Recommendation | Description |\n|----------|------|---------|----------------|-------------|\n")
+	limit := len(insights)
+	if limit > 50 {
+		limit = 50
+	}
+	for _, in := range insights[:limit] {
+		subject := in.SubjectCN
+		if subject == "" {
+			subject = "—"
+		}
+		fmt.Fprintf(b, "| %s | %s | %s | %s | %s |\n",
+			escapeCell(string(in.Severity)), escapeCell(in.Type), escapeCell(subject),
+			escapeCell(in.Recommendation), escapeCell(in.Description))
+	}
+	b.WriteString("\n")
+}
+
+func writeRecommendations(b *strings.Builder, recs []Recommendation) {
+	b.WriteString("## Recommendations\n\n")
+	if len(recs) == 0 {
+		b.WriteString("No recommended actions.\n\n")
+		return
+	}
+	b.WriteString("| Phase | Action | Count |\n|-------|--------|-------|\n")
+	for _, r := range recs {
+		fmt.Fprintf(b, "| %s | %s | %d |\n", escapeCell(r.Phase), escapeCell(r.Title), r.Count)
+	}
+	b.WriteString("\n")
+}
+
+// sortedKeys returns the keys of a count map in stable ascending order.
+func sortedKeys(m map[string]int) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// mapKeysExpiry adapts an ExpiryCounts map to the []string sorting helper.
+func mapKeysExpiry(m map[string]ExpiryCounts) map[string]int {
+	out := make(map[string]int, len(m))
+	for k := range m {
+		out[k] = 0
+	}
+	return out
 }
 
 const timeRFC3339 = "2006-01-02 15:04:05 UTC"

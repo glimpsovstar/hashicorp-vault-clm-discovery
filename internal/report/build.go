@@ -41,10 +41,36 @@ func BuildForScan(ctx context.Context, st ScanStore, scanID uuid.UUID) (Document
 		return Document{}, err
 	}
 
+	certs, err := loadScanCertificates(ctx, st, scanID)
+	if err != nil {
+		return Document{}, err
+	}
+
 	blindSpot := BuildBlindSpotSummary(managed, discovered, summary.SC081ViolationCount)
 	return Generate(GenerateInput{
 		Scan:       scan,
 		BlindSpot:  blindSpot,
 		Compliance: summary,
+		Certs:      certs,
 	}), nil
+}
+
+// loadScanCertificates pages through the scan's certificates via the same
+// ListCertificates path the compliance evaluator uses.
+func loadScanCertificates(ctx context.Context, st ScanStore, scanID uuid.UUID) ([]store.Certificate, error) {
+	const pageSize = 500
+	var out []store.Certificate
+	offset := 0
+	for {
+		batch, total, err := st.ListCertificates(ctx, store.CertificateFilter{ScanID: scanID, Limit: pageSize, Offset: offset})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, batch...)
+		offset += len(batch)
+		if len(batch) == 0 || offset >= total {
+			break
+		}
+	}
+	return out, nil
 }

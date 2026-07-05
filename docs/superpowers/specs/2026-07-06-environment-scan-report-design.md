@@ -1,7 +1,7 @@
 # Design: Environment scan report (Radar-style, cert-only) — #24
 
 - **Issue:** #24 (Discover-phase artifact; complements #14 diagnostics)
-- **Status:** Design gate — awaiting approval before implementation
+- **Status:** Implemented (approach approved). On-demand generation; report_version 0.2.0; formats markdown/json/csv.
 - **Architecture:** [docs/reporting-architecture.md](../../reporting-architecture.md) (this spec is the concrete implementation of it)
 - **Builds on:** report v0 (`internal/report`: `Document`, `Generate`, `BuildForScan`, `RenderMarkdown`, `RenderJSON`) shipped in Phase 1
 

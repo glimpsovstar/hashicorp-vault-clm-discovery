@@ -179,6 +179,61 @@ func TestHandleGetScanReport_JSONFormat(t *testing.T) {
 	}
 }
 
+func TestHandleGetScanReport_CSVFormat(t *testing.T) {
+	t.Parallel()
+
+	scanID := uuid.New()
+	srv := NewServer(config.Config{}, &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv.report = &fakeReportStore{
+		scan: store.Scan{ID: scanID, Status: "completed"},
+		disc: 1,
+		certs: []store.Certificate{
+			{Status: "expired", DaysUntilExpiry: -1, ChainStatus: "complete", HostnameMatchesSAN: true, ManagedStatus: "unmanaged", CertScope: "external", IssuerDN: "CN=Public"},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/scans/"+scanID.String()+"/report?format=csv", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", scanID.String())
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	rec := httptest.NewRecorder()
+	srv.handleGetScanReport(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Header().Get("Content-Type"), "text/csv") {
+		t.Fatalf("content-type = %q, want text/csv", rec.Header().Get("Content-Type"))
+	}
+	if cd := rec.Header().Get("Content-Disposition"); !strings.Contains(cd, "attachment") || !strings.Contains(cd, scanID.String()) {
+		t.Fatalf("content-disposition = %q", cd)
+	}
+	if !strings.HasPrefix(rec.Body.String(), "category,type,severity") {
+		t.Fatalf("csv body did not start with header: %q", rec.Body.String())
+	}
+}
+
+func TestHandleGetScanReport_InvalidFormat(t *testing.T) {
+	t.Parallel()
+
+	scanID := uuid.New()
+	srv := NewServer(config.Config{}, &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv.report = &fakeReportStore{scan: store.Scan{ID: scanID, Status: "completed"}, disc: 1}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/scans/"+scanID.String()+"/report?format=bogus", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", scanID.String())
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	rec := httptest.NewRecorder()
+	srv.handleGetScanReport(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
 func TestHandleGetScanReport_RouteRegistered(t *testing.T) {
 	t.Parallel()
 

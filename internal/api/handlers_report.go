@@ -51,7 +51,17 @@ func (s *Server) handleGetScanReport(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(raw)
+	case "csv":
+		raw, err := report.RenderCSV(doc)
+		if err != nil {
+			s.writeServerError(w, r, err, "failed to encode report")
+			return
+		}
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename=\"scan-"+id.String()+"-report.csv\"")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(raw)
 	default:
-		writeError(w, r, http.StatusBadRequest, "format must be markdown or json")
+		writeError(w, r, http.StatusBadRequest, "format must be markdown, json, or csv")
 	}
 }

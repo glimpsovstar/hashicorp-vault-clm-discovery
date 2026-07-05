@@ -1,6 +1,6 @@
 # CLM Lifecycle v1.1 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Deliver **Choose** (reconcile-informed) and **Manage** (Vault PKI reconciliation) slices of the CLM lifecycle so discovered certs align with Vault PKI, complementing HCP Certificates Inventory.
 
@@ -50,11 +50,11 @@ This plan covers **v1.1 lifecycle slices only**:
 - Create: `internal/vault/client_test.go`
 - Test: `internal/vault/client_test.go`
 
-- [ ] **Step 1:** Add env vars to config loader: `VAULT_ADDR`, `VAULT_NAMESPACE`, `VAULT_AUTH_METHOD`, AppRole/token/AWS fields per HCP spec
-- [ ] **Step 2:** Write failing test — client authenticates against httptest Vault stub returning 200 on `sys/mounts`
-- [ ] **Step 3:** Implement minimal client with namespace header and auth wrapper
-- [ ] **Step 4:** Run `go test ./internal/vault/... -v` — expect PASS
-- [ ] **Step 5:** Document env vars in `README.md` § Environment variables
+- [x] **Step 1:** Add env vars to config loader: `VAULT_ADDR`, `VAULT_NAMESPACE`, `VAULT_AUTH_METHOD`, AppRole/token/AWS fields per HCP spec
+- [x] **Step 2:** Write failing test — client authenticates against httptest Vault stub returning 200 on `sys/mounts`
+- [x] **Step 3:** Implement minimal client with namespace header and auth wrapper
+- [x] **Step 4:** Run `go test ./internal/vault/... -v` — expect PASS
+- [x] **Step 5:** Document env vars in `README.md` § Environment variables
 
 ---
 
@@ -64,10 +64,10 @@ This plan covers **v1.1 lifecycle slices only**:
 - Create: `internal/vault/pki.go`
 - Test: `internal/vault/pki_test.go`
 
-- [ ] **Step 1:** Write table test — mock `sys/mounts` filters `type=pki`; mock `LIST pki/certs/` and `READ pki/cert/{serial}`
-- [ ] **Step 2:** Implement `ListPKIMounts`, `ListCertSerials(mount)`, `ReadCert(mount, serial)` returning PEM + metadata
-- [ ] **Step 3:** Implement fingerprint helper (SHA-256 DER) aligned with `internal/cert`
-- [ ] **Step 4:** Run `go test ./internal/vault/... -v` — expect PASS
+- [x] **Step 1:** Write table test — mock `sys/mounts` filters `type=pki`; mock `LIST pki/certs/` and `READ pki/cert/{serial}`
+- [x] **Step 2:** Implement `ListPKIMounts`, `ListCertSerials(mount)`, `ReadCert(mount, serial)` returning PEM + metadata
+- [x] **Step 3:** Implement fingerprint helper (SHA-256 DER) aligned with `internal/cert`
+- [x] **Step 4:** Run `go test ./internal/vault/... -v` — expect PASS
 
 ---
 
@@ -78,12 +78,12 @@ This plan covers **v1.1 lifecycle slices only**:
 - Modify: `internal/store/certificates.go`
 - Test: `internal/vault/reconcile_test.go`
 
-- [ ] **Step 1:** Write failing test — two CLM certs in store; mock Vault returns one matching fingerprint → one row `managed_in_vault`, one `unmanaged`
-- [ ] **Step 2:** Implement reconcile loop: mounts → serials → read → fingerprint → store update
-- [ ] **Step 3:** Populate `vault_pki_mount`, `vault_issuer_ref`, `serial_number` on match; idempotent re-run
-- [ ] **Step 4:** Apply optional `cert_scope` rule per open question #8 (document chosen behavior in code comment + data-model)
-- [ ] **Step 5:** Return summary struct: `{mounts_scanned, certs_read, matched, errors}`
-- [ ] **Step 6:** Run `go test ./internal/vault/... -v` and `go test ./internal/store/... -v`
+- [x] **Step 1:** Write failing test — two CLM certs in store; mock Vault returns one matching fingerprint → one row `managed_in_vault`, one `unmanaged`
+- [x] **Step 2:** Implement reconcile loop: mounts → serials → read → fingerprint → store update
+- [x] **Step 3:** Populate `vault_pki_mount`, `vault_issuer_ref`, `serial_number` on match; idempotent re-run
+- [x] **Step 4:** Apply optional `cert_scope` rule per open question #8 (document chosen behavior in code comment + data-model)
+- [x] **Step 5:** Return summary struct: `{mounts_scanned, certs_read, matched, errors}`
+- [x] **Step 6:** Run `go test ./internal/vault/... -v` and `go test ./internal/store/... -v`
 
 ---
 
@@ -93,10 +93,10 @@ This plan covers **v1.1 lifecycle slices only**:
 - Modify: `internal/api/handlers.go` (or routes file)
 - Modify: scan worker completion path
 
-- [ ] **Step 1:** Write API test — `POST /api/v1/reconcile` returns 200 + summary JSON when Vault configured
-- [ ] **Step 2:** Implement handler; 503 if Vault not configured
-- [ ] **Step 3:** If `RECONCILE_ON_SCAN_COMPLETE=true`, invoke reconciler after successful scan (log errors, do not fail scan)
-- [ ] **Step 4:** Run `go test ./internal/api/... -v`
+- [x] **Step 1:** Write API test — `POST /api/v1/reconcile` returns 200 + summary JSON when Vault configured
+- [x] **Step 2:** Implement handler; 503 if Vault not configured
+- [x] **Step 3:** If `RECONCILE_ON_SCAN_COMPLETE=true`, invoke reconciler after successful scan (log errors, do not fail scan)
+- [x] **Step 4:** Run `go test ./internal/api/... -v`
 
 ---
 
@@ -106,10 +106,10 @@ This plan covers **v1.1 lifecycle slices only**:
 - Modify: `web/` inventory table component(s)
 - Modify: `web/lib/api.ts` if new endpoint client needed
 
-- [ ] **Step 1:** Ensure inventory API response includes `managed_status`, `vault_pki_mount`
-- [ ] **Step 2:** Vault column: Connected when `managed_in_vault`, else Not connected (per `data-model.md`)
-- [ ] **Step 3:** Optional: Reconcile button or link to docs (manual trigger v1.1)
-- [ ] **Step 4:** Run `cd web && npm run build`
+- [x] **Step 1:** Ensure inventory API response includes `managed_status`, `vault_pki_mount`
+- [x] **Step 2:** Vault column: Connected when `managed_in_vault`, else Not connected (per `data-model.md`)
+- [x] **Step 3:** Optional: Reconcile button or link to docs (manual trigger v1.1)
+- [x] **Step 4:** Run `cd web && npm run build`
 
 ---
 
@@ -118,6 +118,9 @@ This plan covers **v1.1 lifecycle slices only**:
 **Files:**
 - Modify: `internal/vault/reconcile.go` or new `revocation.go`
 - Modify: `internal/store/certificates.go` — `status`, `revocation_status`
+
+> **Status: deferred to v1.1b — NOT yet implemented.** This slice is the next task
+> (see `docs/superpowers/specs/…-revocation-alignment-design.md`).
 
 - [ ] **Step 1:** Write test — revoked serial in Vault CRL/registry → CLM `status=revoked`
 - [ ] **Step 2:** Implement read of revocation metadata from Vault PKI cert response
@@ -134,20 +137,20 @@ This plan covers **v1.1 lifecycle slices only**:
 - Modify: `docs/data-model.md` — reconcile field semantics, Choose matrix pointer
 - Optional create: `docs/operator-lifecycle.md` — short operator guide for Discover → Choose → Manage (v1.1)
 
-- [ ] **Step 1:** Add lifecycle spec link to README Roadmap
-- [ ] **Step 2:** Cross-link HCP spec from architecture § Vault integration
-- [ ] **Step 3:** Document read-only Vault policy (from HCP spec) in README
-- [ ] **Step 4:** Note HCP complement in demo-flow or CONTRIBUTING if applicable
+- [x] **Step 1:** Add lifecycle spec link to README Roadmap
+- [x] **Step 2:** Cross-link HCP spec from architecture § Vault integration
+- [x] **Step 3:** Document read-only Vault policy (from HCP spec) in README
+- [x] **Step 4:** Note HCP complement in demo-flow or CONTRIBUTING if applicable
 
 ---
 
 ### Task 8: Verification gate
 
-- [ ] Run `go test ./...`
-- [ ] Run `go build ./...`
-- [ ] Run `docker compose -f deploy/docker-compose.yml build` (if compose unchanged, smoke only)
-- [ ] Manual: scan demo hostname → reconcile against test Vault → Vault column Connected for matched cert
-- [ ] Manual: compare one row with HCP Certificates Inventory (human compare — complement narrative)
+- [x] Run `go test ./...`
+- [x] Run `go build ./...`
+- [x] Run `docker compose -f deploy/docker-compose.yml build` (if compose unchanged, smoke only)
+- [x] Manual: scan demo hostname → reconcile against test Vault → Vault column Connected for matched cert
+- [x] Manual: compare one row with HCP Certificates Inventory (human compare — complement narrative)
 
 ---
 

@@ -18,11 +18,11 @@ Replace the generic dark dashboard with a Vault-style Helios shell: AppFrame lay
 
 ## Test plan
 
-- [ ] `cd web && npm run build`
-- [ ] Docker Compose: dashboard loads at `:3000`
-- [ ] Header shows gold Vault chevron (not generic shield)
-- [ ] Sidebar active state on Inventory / Scans / Issuers
-- [ ] Scan form + inventory filters still work against API
+- [x] `cd web && npm run build`
+- [x] Docker Compose: dashboard loads at `:3000`
+- [x] Header shows gold Vault chevron (not generic shield)
+- [x] Sidebar active state on Inventory / Scans / Issuers
+- [x] Scan form + inventory filters still work against API
 
 ## Follow-ups (optional)
 

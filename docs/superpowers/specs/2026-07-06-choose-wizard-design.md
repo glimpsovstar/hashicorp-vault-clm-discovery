@@ -1,7 +1,7 @@
 # Design: Choose wizard — recommend the next lifecycle action (#38)
 
 - **Issue:** #38 (lifecycle Choose phase, parent #20)
-- **Status:** Design gate — awaiting approval before implementation
+- **Status:** Implemented — pure recommender in `internal/lifecycle`, `GET /certificates/{id}/choose`, cert-detail panel.
 - **Builds on:** scope classification, reconcile (#23/#32), import (#25 A/B/D)
 
 ## Goal

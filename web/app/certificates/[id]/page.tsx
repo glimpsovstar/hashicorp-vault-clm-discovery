@@ -6,6 +6,7 @@ import {
   expiryBadgeClass,
   expiryLabel,
   getCertificate,
+  getChoose,
   statusBadgeClass,
   vaultConnectedBadgeClass,
   vaultConnectedLabel,
@@ -23,6 +24,7 @@ export default async function CertificateDetailPage({
   const { id } = await params;
   const { certificate: cert, observations: rawObservations } = await getCertificate(id);
   const observations = rawObservations ?? [];
+  const choose = await getChoose(id).catch(() => null);
 
   return (
     <>
@@ -42,6 +44,25 @@ export default async function CertificateDetailPage({
           </a>
         }
       />
+
+      {choose && (
+        <section className="panel">
+          <div className="panel-header">
+            <h2>Recommended next step</h2>
+          </div>
+          <div className="panel-body">
+            <p>
+              <strong>{choose.title}</strong>
+            </p>
+            <p className="help-text">{choose.rationale}</p>
+            {choose.cta && choose.cta !== "None" && (
+              <p>
+                <span className="badge badge-neutral">Suggested: {choose.cta}</span>
+              </p>
+            )}
+          </div>
+        </section>
+      )}
 
       <section className="panel">
         <div className="panel-body">

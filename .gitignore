@@ -28,3 +28,11 @@ web/*.tsbuildinfo
 
 # Git worktrees (Superpowers isolated development)
 .worktrees/
+
+# UAT local secrets and generated certs
+test/uat/.env
+test/uat/certs/
+test/uat/le/
+
+# Superpowers SDD scratch (progress ledger, task briefs/reports)
+.superpowers/

@@ -1,0 +1,7 @@
+server {
+    listen 443 ssl;
+    server_name ${ID}.uat.test;
+    ssl_certificate     /certs/${ID}.crt;
+    ssl_certificate_key /certs/${ID}.key;
+    location / { return 200 "uat ${ID}\n"; }
+}

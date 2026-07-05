@@ -1,0 +1,7 @@
+server {
+    listen 443 ssl;
+    server_name ${LE_DOMAIN};
+    ssl_certificate     /le/certificates/${LE_DOMAIN}.crt;
+    ssl_certificate_key /le/certificates/${LE_DOMAIN}.key;
+    location / { return 200 "uat letsencrypt\n"; }
+}

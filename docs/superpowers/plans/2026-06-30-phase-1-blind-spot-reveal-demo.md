@@ -1,6 +1,6 @@
 # Phase 1 — Blind-spot reveal demo Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Deliver the Release 1 POV demo — *"Vault sees N. We found M. Here are K SC-081 violations"* — by shipping Vault PKI reconcile, compliance rule packs, blind-spot dashboard, and scan report v0.
 
@@ -103,7 +103,7 @@ Per research §9.0 — do **not** implement in this plan:
 - Modify: `internal/config/config.go`
 - Test: `internal/vault/client_test.go`
 
-- [ ] **Step 1: Write failing auth test**
+- [x] **Step 1: Write failing auth test**
 
 ```go
 func TestClient_ListMounts_Authenticated(t *testing.T) {
@@ -126,12 +126,12 @@ func TestClient_ListMounts_Authenticated(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test — expect FAIL**
+- [x] **Step 2: Run test — expect FAIL**
 
 Run: `go test ./internal/vault/... -run TestClient_ListMounts -v`  
 Expected: FAIL — package or symbol not found
 
-- [ ] **Step 3: Add config fields**
+- [x] **Step 3: Add config fields**
 
 In `internal/config/config.go`, add:
 
@@ -144,15 +144,15 @@ VaultAuthMethod string // token | approle | aws
 
 Load from `VAULT_ADDR`, `VAULT_NAMESPACE`, `VAULT_TOKEN`, `VAULT_AUTH_METHOD`.
 
-- [ ] **Step 4: Implement minimal client**
+- [x] **Step 4: Implement minimal client**
 
 `NewClient`, namespace header `X-Vault-Namespace`, `ListMounts` GET `/v1/sys/mounts`.
 
-- [ ] **Step 5: Run test — expect PASS**
+- [x] **Step 5: Run test — expect PASS**
 
 Run: `go test ./internal/vault/... -run TestClient_ListMounts -v`
 
-- [ ] **Step 6: Document env vars in README.md § Environment variables**
+- [x] **Step 6: Document env vars in README.md § Environment variables**
 
 ---
 
@@ -161,15 +161,15 @@ Run: `go test ./internal/vault/... -run TestClient_ListMounts -v`
 **Files:**
 - Create: `internal/vault/pki.go`, `internal/vault/pki_test.go`
 
-- [ ] **Step 1: Table test for PKI mount filter and cert read**
+- [x] **Step 1: Table test for PKI mount filter and cert read**
 
 Mock `sys/mounts` with one `pki` mount at `pki/`. Mock `LIST pki/certs` returning serial list. Mock `READ pki/cert/abc` returning PEM matching test fixture fingerprint.
 
-- [ ] **Step 2: Implement `ListPKIMounts`, `ListCertSerials`, `ReadCert`**
+- [x] **Step 2: Implement `ListPKIMounts`, `ListCertSerials`, `ReadCert`**
 
-- [ ] **Step 3: Implement `FingerprintSHA256(pem string)` aligned with `internal/cert`**
+- [x] **Step 3: Implement `FingerprintSHA256(pem string)` aligned with `internal/cert`**
 
-- [ ] **Step 4: Run `go test ./internal/vault/... -v` — PASS**
+- [x] **Step 4: Run `go test ./internal/vault/... -v` — PASS**
 
 ---
 
@@ -179,17 +179,17 @@ Mock `sys/mounts` with one `pki` mount at `pki/`. Mock `LIST pki/certs` returnin
 - Create: `internal/vault/reconcile.go`, `internal/vault/reconcile_test.go`
 - Modify: `internal/store/certificates.go`
 
-- [ ] **Step 1: Failing test — one match, one shadow**
+- [x] **Step 1: Failing test — one match, one shadow**
 
 Store two certs; Vault mock returns fingerprint matching cert A only. Expect A → `managed_in_vault`, B → `unmanaged`.
 
-- [ ] **Step 2: Implement reconcile loop**
+- [x] **Step 2: Implement reconcile loop**
 
 `Reconcile(ctx) (Summary, error)` — mounts → serials → read → fingerprint → `store.UpdateManagedStatus`.
 
 Populate `vault_pki_mount`, `vault_issuer_ref`, `serial_number` on match.
 
-- [ ] **Step 3: Return summary struct**
+- [x] **Step 3: Return summary struct**
 
 ```go
 type Summary struct {
@@ -201,7 +201,7 @@ type Summary struct {
 }
 ```
 
-- [ ] **Step 4: Run `go test ./internal/vault/... ./internal/store/... -v` — PASS**
+- [x] **Step 4: Run `go test ./internal/vault/... ./internal/store/... -v` — PASS**
 
 ---
 
@@ -211,15 +211,15 @@ type Summary struct {
 - Create: `internal/api/handlers_reconcile.go`
 - Modify: `internal/api/server.go`, scan worker completion path
 
-- [ ] **Step 1: API test — POST `/api/v1/reconcile` returns 200 + summary when Vault configured**
+- [x] **Step 1: API test — POST `/api/v1/reconcile` returns 200 + summary when Vault configured**
 
-- [ ] **Step 2: Implement handler — 503 if `VAULT_ADDR` empty**
+- [x] **Step 2: Implement handler — 503 if `VAULT_ADDR` empty**
 
-- [ ] **Step 3: Add `RECONCILE_ON_SCAN_COMPLETE` env (default `false`)**
+- [x] **Step 3: Add `RECONCILE_ON_SCAN_COMPLETE` env (default `false`)**
 
 After scan `status=completed`, invoke reconciler; log errors, do not fail scan.
 
-- [ ] **Step 4: Run `go test ./internal/api/... -v` — PASS**
+- [x] **Step 4: Run `go test ./internal/api/... -v` — PASS**
 
 ---
 
@@ -229,20 +229,20 @@ After scan `status=completed`, invoke reconciler; log errors, do not fail scan.
 - Create: `internal/api/handlers_blindspot.go`
 - Modify: `internal/store/certificates.go` — count helpers
 
-- [ ] **Step 1: Store methods**
+- [x] **Step 1: Store methods**
 
 ```go
 func (s *Store) CountByManagedStatus(ctx context.Context, scanID *uuid.UUID) (managed, discovered int, err error)
 ```
 
-- [ ] **Step 2: Handlers**
+- [x] **Step 2: Handlers**
 
 - `GET /api/v1/scans/{id}/blindspot` — counts for scan certs
 - `GET /api/v1/blindspot` — estate-wide
 
 Response includes `sc081_violations` (delegate to compliance package once Task 6 ships; return 0 until then).
 
-- [ ] **Step 3: API tests + `go test ./internal/api/... -v`**
+- [x] **Step 3: API tests + `go test ./internal/api/... -v`**
 
 ---
 
@@ -255,9 +255,9 @@ Response includes `sc081_violations` (delegate to compliance package once Task 6
 **Files:**
 - Create: `internal/compliance/types.go`, `internal/compliance/sc081.go`, `internal/compliance/sc081_test.go`
 
-- [ ] **Step 1: Define `Finding`, `ComplianceSummary` per spec**
+- [x] **Step 1: Define `Finding`, `ComplianceSummary` per spec**
 
-- [ ] **Step 2: Table tests for SC-081 validity schedule**
+- [x] **Step 2: Table tests for SC-081 validity schedule**
 
 | Validity days | not_before | Expected rule |
 |---------------|------------|---------------|
@@ -265,9 +265,9 @@ Response includes `sc081_violations` (delegate to compliance package once Task 6
 | 180 | 2026-06-01 | none |
 | 120 | 2027-06-01 | `sc081.validity.99d` critical |
 
-- [ ] **Step 3: Implement `EvaluateSC081(cert CertInput) []Finding`**
+- [x] **Step 3: Implement `EvaluateSC081(cert CertInput) []Finding`**
 
-- [ ] **Step 4: Run `go test ./internal/compliance/... -run SC081 -v` — PASS**
+- [x] **Step 4: Run `go test ./internal/compliance/... -run SC081 -v` — PASS**
 
 ---
 
@@ -276,13 +276,13 @@ Response includes `sc081_violations` (delegate to compliance package once Task 6
 **Files:**
 - Create: `internal/compliance/pci.go`, `internal/compliance/crypto.go`, `internal/compliance/pci_test.go`, `internal/compliance/crypto_test.go`
 
-- [ ] **Step 1: PCI tests — missing owner on external, untagged prod**
+- [x] **Step 1: PCI tests — missing owner on external, untagged prod**
 
-- [ ] **Step 2: Crypto tests — RSA 1024, SHA-1 signature**
+- [x] **Step 2: Crypto tests — RSA 1024, SHA-1 signature**
 
-- [ ] **Step 3: Implement evaluators**
+- [x] **Step 3: Implement evaluators**
 
-- [ ] **Step 4: Run `go test ./internal/compliance/... -v` — PASS**
+- [x] **Step 4: Run `go test ./internal/compliance/... -v` — PASS**
 
 ---
 
@@ -291,15 +291,15 @@ Response includes `sc081_violations` (delegate to compliance package once Task 6
 **Files:**
 - Create: `internal/compliance/evaluator.go`, `internal/compliance/evaluator_test.go`
 
-- [ ] **Step 1: `EvaluateCert(row store.CertificateRow) []Finding`**
+- [x] **Step 1: `EvaluateCert(row store.CertificateRow) []Finding`**
 
 Runs SC-081 + PCI + crypto; sorts by severity.
 
-- [ ] **Step 2: `EvaluateScan(ctx, store, scanID) ComplianceSummary`**
+- [x] **Step 2: `EvaluateScan(ctx, store, scanID) ComplianceSummary`**
 
 Loads scan certs, aggregates counts, builds algorithm inventory.
 
-- [ ] **Step 3: Run `go test ./internal/compliance/... -v` — PASS**
+- [x] **Step 3: Run `go test ./internal/compliance/... -v` — PASS**
 
 ---
 
@@ -309,13 +309,13 @@ Loads scan certs, aggregates counts, builds algorithm inventory.
 - Create: `internal/api/handlers_compliance.go`
 - Modify: `internal/api/server.go`, `handlers_blindspot.go` (wire SC-081 count)
 
-- [ ] **Step 1: `GET /api/v1/scans/{id}/compliance` — returns ComplianceSummary JSON**
+- [x] **Step 1: `GET /api/v1/scans/{id}/compliance` — returns ComplianceSummary JSON**
 
-- [ ] **Step 2: `GET /api/v1/compliance/summary?scan_id=` — optional filter**
+- [x] **Step 2: `GET /api/v1/compliance/summary?scan_id=` — optional filter**
 
-- [ ] **Step 3: Update blind-spot handler to include real `sc081_violations` count**
+- [x] **Step 3: Update blind-spot handler to include real `sc081_violations` count**
 
-- [ ] **Step 4: API tests — PASS**
+- [x] **Step 4: API tests — PASS**
 
 ---
 
@@ -328,17 +328,17 @@ Loads scan certs, aggregates counts, builds algorithm inventory.
 **Files:**
 - Create: `internal/report/generator.go`, `internal/report/markdown.go`, `internal/report/json.go`, `internal/report/generator_test.go`
 
-- [ ] **Step 1: Test — Markdown report contains sections**
+- [x] **Step 1: Test — Markdown report contains sections**
 
 `# Executive summary`, `## Blind-spot reveal`, `## SC-081 posture`, `## PCI inventory gaps`, `## Algorithm inventory`, `## Scan diagnostics`
 
-- [ ] **Step 2: Implement generator**
+- [x] **Step 2: Implement generator**
 
 Inputs: scan row, compliance summary, blind-spot counts, diagnostics from `scans` table.
 
-- [ ] **Step 3: No full PEM in Markdown body (spec non-goal)**
+- [x] **Step 3: No full PEM in Markdown body (spec non-goal)**
 
-- [ ] **Step 4: Run `go test ./internal/report/... -v` — PASS**
+- [x] **Step 4: Run `go test ./internal/report/... -v` — PASS**
 
 ---
 
@@ -348,15 +348,15 @@ Inputs: scan row, compliance summary, blind-spot counts, diagnostics from `scans
 - Create: `internal/api/handlers_report.go`
 - Modify: `internal/api/server.go`
 
-- [ ] **Step 1: `GET /api/v1/scans/{id}/report`**
+- [x] **Step 1: `GET /api/v1/scans/{id}/report`**
 
 Query `format=markdown|json` (default markdown).  
 Content-Type: `text/markdown` or `application/json`.  
 404 if scan not completed.
 
-- [ ] **Step 2: API test — completed scan returns 200 Markdown**
+- [x] **Step 2: API test — completed scan returns 200 Markdown**
 
-- [ ] **Step 3: Run `go test ./internal/api/... -v` — PASS**
+- [x] **Step 3: Run `go test ./internal/api/... -v` — PASS**
 
 ---
 
@@ -370,20 +370,20 @@ Content-Type: `text/markdown` or `application/json`.
 - Create: `web/components/blind-spot-card.tsx`
 - Modify: `web/app/scans/[id]/page.tsx`, `web/lib/api.ts`
 
-- [ ] **Step 1: Add API client functions**
+- [x] **Step 1: Add API client functions**
 
 `fetchBlindSpot(scanId)`, `triggerReconcile()`, `downloadReport(scanId, format)`.
 
-- [ ] **Step 2: Blind-spot card component**
+- [x] **Step 2: Blind-spot card component**
 
 Four stat tiles: Vault managed, On wire, Shadow, SC-081 violations.  
 Buttons: Reconcile with Vault, Download report.
 
-- [ ] **Step 3: Vault-not-configured state**
+- [x] **Step 3: Vault-not-configured state**
 
 Show discovered count only + link to README.
 
-- [ ] **Step 4: Run `cd web && npm run build` — PASS**
+- [x] **Step 4: Run `cd web && npm run build` — PASS**
 
 ---
 
@@ -392,13 +392,13 @@ Show discovered count only + link to README.
 **Files:**
 - Modify: `web/components/inventory-table.tsx`, inventory page if needed
 
-- [ ] **Step 1: Vault column — Connected when `managed_status === 'managed_in_vault'`**
+- [x] **Step 1: Vault column — Connected when `managed_status === 'managed_in_vault'`**
 
-- [ ] **Step 2: Inventory toolbar — Reconcile button calling POST `/api/v1/reconcile`**
+- [x] **Step 2: Inventory toolbar — Reconcile button calling POST `/api/v1/reconcile`**
 
 Show toast/summary with matched count.
 
-- [ ] **Step 3: Run `cd web && npm run build` — PASS**
+- [x] **Step 3: Run `cd web && npm run build` — PASS**
 
 ---
 
@@ -407,7 +407,7 @@ Show toast/summary with matched count.
 **Files:**
 - Modify: `docs/demo-flow.md`, `README.md` roadmap section
 
-- [ ] **Step 1: POV script (under 2 minutes)**
+- [x] **Step 1: POV script (under 2 minutes)**
 
 1. `docker compose up`
 2. Configure `VAULT_ADDR` + token in compose env
@@ -416,20 +416,20 @@ Show toast/summary with matched count.
 5. Download Markdown report
 6. Talking points: N vs M vs K
 
-- [ ] **Step 2: Update README roadmap — Phase 1 complete items**
+- [x] **Step 2: Update README roadmap — Phase 1 complete items**
 
-- [ ] **Step 3: Link specs and this plan from `docs/program-context.md`**
+- [x] **Step 3: Link specs and this plan from `docs/program-context.md`**
 
 ---
 
 ### Task 15: Verification gate
 
-- [ ] Run `go test ./...`
-- [ ] Run `go build ./...`
-- [ ] Run `docker compose -f deploy/docker-compose.yml build`
-- [ ] Manual POV: scan → reconcile → blind-spot card → download report
-- [ ] Manual: verify at least one cert shows Vault Connected after reconcile against test Vault
-- [ ] Update CLM-discovery-research HTML deck slide 7 with live demo note (optional doc PR)
+- [x] Run `go test ./...`
+- [x] Run `go build ./...`
+- [x] Run `docker compose -f deploy/docker-compose.yml build`
+- [x] Manual POV: scan → reconcile → blind-spot card → download report
+- [x] Manual: verify at least one cert shows Vault Connected after reconcile against test Vault
+- [x] Update CLM-discovery-research HTML deck slide 7 with live demo note (optional doc PR)
 
 ---
 

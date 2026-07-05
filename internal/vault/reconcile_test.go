@@ -415,10 +415,13 @@ func TestRevocationFromMeta(t *testing.T) {
 		{"not revoked zero", map[string]interface{}{"revocation_time": float64(0)}, false},
 		{"missing key", map[string]interface{}{}, false},
 		{"nil value", map[string]interface{}{"revocation_time": nil}, false},
+		{"negative float64", map[string]interface{}{"revocation_time": float64(-1)}, false},
 		{"json.Number revoked", map[string]interface{}{"revocation_time": json.Number("1700000000")}, true},
 		{"json.Number zero", map[string]interface{}{"revocation_time": json.Number("0")}, false},
 		{"string revoked", map[string]interface{}{"revocation_time": "1700000000"}, true},
 		{"string zero", map[string]interface{}{"revocation_time": "0"}, false},
+		{"string fractional (unparseable int) => false", map[string]interface{}{"revocation_time": "1.5"}, false},
+		{"unexpected type => false", map[string]interface{}{"revocation_time": true}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

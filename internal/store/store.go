@@ -308,7 +308,10 @@ func (s *Store) UpsertCertificate(ctx context.Context, scanID uuid.UUID, parsed 
 		ON CONFLICT (fingerprint_sha256) DO UPDATE SET
 			last_seen = EXCLUDED.last_seen,
 			days_until_expiry = EXCLUDED.days_until_expiry,
-			status = EXCLUDED.status,
+			status = CASE
+				WHEN certificates.revocation_status = 'revoked_in_vault' THEN certificates.status
+				ELSE EXCLUDED.status
+			END,
 			cert_scope = EXCLUDED.cert_scope,
 			updated_at = NOW()
 		RETURNING id

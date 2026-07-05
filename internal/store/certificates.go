@@ -26,14 +26,20 @@ type ManagedStatusUpdate struct {
 func (s *Store) UpdateManagedStatusByFingerprint(ctx context.Context, fingerprint string, u ManagedStatusUpdate) (bool, error) {
 	// revocation_checked_at is always stamped (we did read Vault). When revoked,
 	// promote status to 'revoked' and record revocation_status; otherwise leave
-	// the scan-derived lifecycle status untouched and clear any prior revocation.
+	// the scan-derived lifecycle status untouched. revocation_status is only
+	// cleared when it was reconcile's own marker, so a future OCSP/CRL source for
+	// shadow certs is not wiped by a Vault reconcile pass.
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE certificates SET
 			managed_status = $2,
 			vault_pki_mount = $3,
 			vault_issuer_ref = $4,
 			status = CASE WHEN $5 THEN 'revoked'::cert_status ELSE status END,
-			revocation_status = CASE WHEN $5 THEN 'revoked_in_vault' ELSE NULL END,
+			revocation_status = CASE
+				WHEN $5 THEN 'revoked_in_vault'
+				WHEN revocation_status = 'revoked_in_vault' THEN NULL
+				ELSE revocation_status
+			END,
 			revocation_checked_at = NOW(),
 			updated_at = NOW()
 		WHERE fingerprint_sha256 = $1

@@ -101,6 +101,21 @@ via reconcile.
 
 Idempotent: re-running yields the same result.
 
+### Durability across rescans
+
+Reconcile owns the `revoked` signal, but `UpsertCertificate` runs on every scan
+and would otherwise reset `status` to the scan-derived lifecycle value. To keep
+a revoked cert visibly revoked between reconciles, the upsert preserves `status`
+when the existing row is `revocation_status = 'revoked_in_vault'`:
+
+```sql
+status = CASE WHEN certificates.revocation_status = 'revoked_in_vault'
+              THEN certificates.status ELSE EXCLUDED.status END
+```
+
+Conversely, reconcile only clears `revocation_status` when it was reconcile's own
+marker, so a future OCSP/CRL source for shadow certs is not wiped by a Vault pass.
+
 ## Testing (TDD)
 
 - `internal/vault/reconcile_test.go` — table rows: (a) matched + revoked ⇒

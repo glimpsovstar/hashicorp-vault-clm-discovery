@@ -40,8 +40,12 @@ North star and roadmap: `docs/program-context.md`.
 - **#25 import workflow — PR 1 (modes A + D)** — catalog import
   (`POST /certificates/{id}/catalog-import` → `managed_status=imported`,
   consent-gated, read-only) and a read-only Wire-vs-Vault mirror panel on the
-  cert detail page + "Track in CLM" button. Merged via PR #35. Issue #25 stays
-  open for PR 2.
+  cert detail page + "Track in CLM" button. Merged via PR #35.
+- **#25 import workflow — PR 2 (mode B, CA import)** — first Vault **write**:
+  `vault.ImportIssuerBundle` + `POST /issuers/{id}/import` (consent, validated
+  mount, is_ca/503/502 handling), `GetIssuer`/`SetIssuerVaultRef`, and an
+  "Import CA to Vault" consent modal. Merged via PR #36. (Review caught dropped
+  DELETE/reconcile routes — restored + Router-level test guards added.)
 
 ## In progress
 
@@ -49,14 +53,17 @@ North star and roadmap: `docs/program-context.md`.
 
 ## Next
 
-1. **#25 PR 2 — mode B (CA import)** — `POST /issuers/{id}/import` → Vault
-   `pki/issuers/import/bundle` (first **write** path); needs a read-write PKI
-   policy + consent modal. Spec:
-   `docs/superpowers/specs/2026-07-06-vault-import-workflow-design.md`.
-2. Remaining v1.2 — "Choose" wizard, vault-agent/AAP hooks, optional HCP
-   reporting ingest.
-3. **OCSP/CRL for shadow (non-Vault) certs**; mode C reissue (v1.3+).
-4. **v2** — cloud CA sources (ACM, etc.).
+1. **Terraform integration validation** (agreed): `test/integration/` with two
+   Terraform-provisioned scenarios exercising scan → import (mode B) → reconcile:
+   - **Scenario 1 (local, CI):** `kreuzwerker/docker` + `hashicorp/vault` — dev-mode
+     Vault container + self-signed-cert nginx container; build-tagged integration
+     driver; runs in CI.
+   - **Scenario 2 (HCP, opt-in):** `hashicorp/hcp` + `hashicorp/vault` — configure
+     PKI on an EXISTING HCP Vault cluster; creds via env/gitignored tfvars, never
+     committed; not in default CI.
+2. #25 mode C (reissue) docs link to vault-agent/AAP (v1.3+); remaining v1.2
+   "Choose" wizard, HCP reporting ingest.
+3. **OCSP/CRL for shadow certs**; **v2** cloud CA sources.
 
 ## Key context
 

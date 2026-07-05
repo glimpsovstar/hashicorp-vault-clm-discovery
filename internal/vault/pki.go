@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -147,6 +148,33 @@ func normalizeMount(mount string) string {
 		return mount + "/"
 	}
 	return mount
+}
+
+// revocationFromMeta reports whether Vault marks the serial revoked. Vault's
+// pki/cert/{serial} response carries revocation_time in unix seconds (0 when
+// not revoked). Depending on how the response was decoded the value may arrive
+// as a float64 (default json), a json.Number, or a string, so all are handled.
+func revocationFromMeta(meta map[string]interface{}) bool {
+	v, ok := meta["revocation_time"]
+	if !ok || v == nil {
+		return false
+	}
+	switch t := v.(type) {
+	case float64:
+		return t > 0
+	case int:
+		return t > 0
+	case int64:
+		return t > 0
+	case json.Number:
+		n, err := t.Int64()
+		return err == nil && n > 0
+	case string:
+		n, err := strconv.ParseInt(strings.TrimSpace(t), 10, 64)
+		return err == nil && n > 0
+	default:
+		return false
+	}
 }
 
 func (c *Client) setVaultHeaders(req *http.Request) {

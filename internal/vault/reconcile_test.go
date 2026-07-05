@@ -341,6 +341,94 @@ func TestReconcile_NoErrors_StatusOK(t *testing.T) {
 	}
 }
 
+func TestReconcile_RevokedCert(t *testing.T) {
+	t.Parallel()
+
+	pemR, fpR := testCertWithCN(t, "revoked.local")
+	pemV, fpV := testCertWithCN(t, "valid.local")
+	const (
+		mount   = "pki/"
+		serialR = "0a:11:22:33"
+		serialV = "0b:44:55:66"
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/sys/mounts":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{mount: map[string]interface{}{"type": "pki"}})
+		case "/v1/pki/certs":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": map[string]interface{}{"keys": []string{serialR, serialV}}})
+		case "/v1/pki/cert/" + serialR:
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": map[string]interface{}{
+				"certificate":     pemR,
+				"serial_number":   serialR,
+				"revocation_time": 1700000000, // revoked
+			}})
+		case "/v1/pki/cert/" + serialV:
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": map[string]interface{}{
+				"certificate":     pemV,
+				"serial_number":   serialV,
+				"revocation_time": 0, // not revoked
+			}})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewClient(Config{Address: srv.URL, Token: "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	st := &mockCertStore{certs: map[string]store.ManagedStatusUpdate{
+		fpR: {ManagedStatus: "unmanaged"},
+		fpV: {ManagedStatus: "unmanaged"},
+	}}
+
+	summary, err := NewReconciler(client, st).Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	if summary.Revoked != 1 {
+		t.Fatalf("summary.Revoked = %d, want 1", summary.Revoked)
+	}
+	if got := st.certs[fpR]; !got.Revoked {
+		t.Fatalf("revoked cert: Revoked = false, want true")
+	}
+	if got := st.certs[fpV]; got.Revoked {
+		t.Fatalf("valid cert: Revoked = true, want false")
+	}
+}
+
+func TestRevocationFromMeta(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		meta map[string]interface{}
+		want bool
+	}{
+		{"revoked float64", map[string]interface{}{"revocation_time": float64(1700000000)}, true},
+		{"not revoked zero", map[string]interface{}{"revocation_time": float64(0)}, false},
+		{"missing key", map[string]interface{}{}, false},
+		{"nil value", map[string]interface{}{"revocation_time": nil}, false},
+		{"json.Number revoked", map[string]interface{}{"revocation_time": json.Number("1700000000")}, true},
+		{"json.Number zero", map[string]interface{}{"revocation_time": json.Number("0")}, false},
+		{"string revoked", map[string]interface{}{"revocation_time": "1700000000"}, true},
+		{"string zero", map[string]interface{}{"revocation_time": "0"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := revocationFromMeta(tt.meta); got != tt.want {
+				t.Fatalf("revocationFromMeta(%v) = %v, want %v", tt.meta, got, tt.want)
+			}
+		})
+	}
+}
+
 func testCertWithCN(t *testing.T, cn string) (string, string) {
 	t.Helper()
 

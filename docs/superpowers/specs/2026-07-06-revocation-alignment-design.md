@@ -1,7 +1,7 @@
 # Design: v1.1b Revocation alignment (Vault PKI → CLM `status=revoked`)
 
 - **Issue:** #32 (follows #23 reconcile; v1.1 plan Task 6 "v1.1b slice")
-- **Status:** Design gate — awaiting approval before implementation
+- **Status:** Implemented (approach approved). Reconcile reads Vault PKI `revocation_time`; no migration, no new endpoint.
 - **Scope:** Read-only. Vault-managed certs only. No OCSP/CRL network calls.
 
 ## Problem

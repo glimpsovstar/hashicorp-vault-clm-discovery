@@ -31,9 +31,9 @@ Computed on write; stored for dashboard/alerts.
 | Field | Type | v1 | Description |
 |-------|------|----|-------------|
 | `days_until_expiry` | int | Yes | Days until `not_after` |
-| `status` | enum | Yes | `valid`, `expiring_soon`, `expired`, `revoked` |
-| `revocation_status` | text | No | From OCSP/CRL (v1.1) |
-| `revocation_checked_at` | timestamptz | No | Last revocation check |
+| `status` | enum | Yes | `valid`, `expiring_soon`, `expired`, `revoked` (v1.1b sets `revoked` from Vault reconcile) |
+| `revocation_status` | text | v1.1b | `revoked_in_vault` when the matched Vault PKI serial is revoked; source is Vault PKI `revocation_time` via reconcile (OCSP/CRL for shadow certs is later) |
+| `revocation_checked_at` | timestamptz | v1.1b | Stamped each reconcile that reads the matched Vault serial |
 | `crl_distribution_points` | text[] | Yes | From cert AIA |
 | `ocsp_servers` | text[] | Yes | From cert AIA |
 

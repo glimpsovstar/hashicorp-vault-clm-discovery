@@ -34,5 +34,12 @@ test/uat/.env
 test/uat/certs/
 test/uat/le/
 
+# Terraform (integration harness) — state, plugins, and local var files
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+test/integration/terraform/**/terraform.tfvars
+
 # Superpowers SDD scratch (progress ledger, task briefs/reports)
 .superpowers/

@@ -14,6 +14,11 @@ Encrypt staging certificate.
 See the design spec for full rationale:
 [docs/superpowers/specs/2026-07-02-uat-expiry-compliance-testing-design.md](../../docs/superpowers/specs/2026-07-02-uat-expiry-compliance-testing-design.md).
 
+> **Local-only stack.** `docker-compose.uat.yml` uses throwaway credentials
+> (`clm/clm`, Vault dev-root token) and binds ports to the host for
+> convenience. It is intended for ephemeral local/CI UAT runs only — never
+> expose it on a shared or public network.
+
 ## Running the Go integration test
 
 ```bash

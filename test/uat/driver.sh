@@ -51,7 +51,9 @@ echo "==> waiting for scan $SID"
 ST=""
 i=1
 while [ "$i" -le 60 ]; do
-  ST=$(curl -fsS "$API/api/v1/scans/$SID" | jq -r .status)
+  # Tolerate transient startup failures (5xx / connection resets) without
+  # aborting the whole script under `set -e`; treat them as "still pending".
+  ST=$(curl -fsS "$API/api/v1/scans/$SID" 2>/dev/null | jq -r '.status // "pending"' 2>/dev/null || echo pending)
   [ "$ST" = completed ] && break
   [ "$ST" = failed ] && { echo "FAIL: scan $SID failed"; exit 1; }
   sleep 2
@@ -116,7 +118,14 @@ done
 
 echo "==> asserting shadow certs in blind-spot"
 BS=$(curl -fsS "$API/api/v1/scans/$SID/blindspot")
-[ "$(echo "$BS" | jq -r .vault_managed)" = "0" ] || { echo "FAIL: expected vault_managed=0, got $(echo "$BS" | jq -r .vault_managed)"; fail=1; }
-[ "$(echo "$BS" | jq -r .shadow)" -ge 1 ] || { echo "FAIL: expected shadow>=1, got $(echo "$BS" | jq -r .shadow)"; fail=1; }
+VM=$(echo "$BS" | jq -r '.vault_managed // ""')
+SH=$(echo "$BS" | jq -r '.shadow // ""')
+[ "$VM" = "0" ] || { echo "FAIL: expected vault_managed=0, got '$VM'"; fail=1; }
+# Numeric-safe: a missing/non-numeric shadow count is a failure, not a raw
+# "integer expression expected" shell error.
+case "$SH" in
+  ''|*[!0-9]*) echo "FAIL: expected shadow>=1, got '$SH'"; fail=1;;
+  *) [ "$SH" -ge 1 ] || { echo "FAIL: expected shadow>=1, got '$SH'"; fail=1; };;
+esac
 
 [ "$fail" = 0 ] && echo "UAT PASS" || { echo "UAT FAIL"; exit 1; }

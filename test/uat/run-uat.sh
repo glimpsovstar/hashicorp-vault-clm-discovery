@@ -19,8 +19,11 @@ cleanup() {
 	echo "==> tearing down UAT stack"
 	$COMPOSE down -v --remove-orphans >/dev/null 2>&1 || true
 }
-# Clean up on interrupt/terminate as well as the normal exit path below.
-trap 'cleanup' INT TERM
+# Guarantee teardown on ANY exit (normal, error, or an early `set -u` abort).
+# On Ctrl-C/kill, exit explicitly so the EXIT trap fires and we never resume
+# into the driver against a half-torn-down stack.
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 echo "==> ensuring a clean slate (isolate from any leftover stack/state)"
 $COMPOSE down -v --remove-orphans >/dev/null 2>&1 || true
@@ -31,7 +34,6 @@ echo "==> building + starting UAT stack (waiting for ALL services healthy)"
 # real endpoint readiness, so it never races past a not-yet-listening endpoint.
 if ! $COMPOSE up -d --build --force-recreate --wait --wait-timeout 180; then
 	echo "stack did not become healthy in time"
-	cleanup
 	exit 1
 fi
 
@@ -39,6 +41,6 @@ echo "==> running driver"
 API="$API" sh driver.sh
 rc=$?
 
-cleanup
+# Teardown is handled by the EXIT trap.
 echo "==> UAT finished (exit $rc)"
 exit "$rc"

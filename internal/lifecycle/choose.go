@@ -21,7 +21,9 @@ type ChooseResult struct {
 // ChooseRecommendation maps a certificate's signals to a single recommended
 // Choose-phase action, following the lifecycle decision tree. Order matters:
 // already-managed short-circuits, then trust (chain) problems, then CA import,
-// then scope-based routing.
+// then the CLM-catalog (imported) state, then scope-based routing. A self_signed
+// chain is not treated as a trust problem here — an unmanaged self-signed
+// internal leaf is plausibly Vault-issued and routes to reconcile.
 func ChooseRecommendation(in ChooseInput) ChooseResult {
 	switch {
 	case in.ManagedStatus == "managed_in_vault":

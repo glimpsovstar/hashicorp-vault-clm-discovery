@@ -27,6 +27,9 @@ Requires `terraform`, `docker`, `go`, `curl`. No secrets.
 sh test/integration/run-integration.sh
 ```
 
+Host ports `8080` (API), `8200` (Vault), and `8443` (nginx) must be free (all
+configurable via the `local` module variables; Postgres is network-internal).
+
 `run-integration.sh` is the whole test in one step: `terraform apply` stands up
 Postgres, a one-shot migrate, the CLM API, a Vault dev server (PKI mount +
 least-privilege import policy), and an nginx endpoint serving a TF-generated

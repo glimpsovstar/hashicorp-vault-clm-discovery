@@ -44,14 +44,17 @@ until curl -sf "$APP_URL/api/v1/health" >/dev/null 2>&1; do
 done
 
 echo "==> running integration driver"
-INTEGRATION_APP_URL="$APP_URL" \
+if INTEGRATION_APP_URL="$APP_URL" \
   INTEGRATION_VAULT_ADDR="$VAULT_ADDR" \
   INTEGRATION_VAULT_TOKEN="$VAULT_TOKEN" \
   INTEGRATION_PKI_MOUNT="$PKI_MOUNT" \
   INTEGRATION_CA_CN="$CA_CN" \
   INTEGRATION_SCAN_TARGET="$SCAN_TARGET" \
-  go test -tags integration -count=1 "$REPO_ROOT/test/integration/..." -run TestIntegration -v
-rc=$?
+  go test -tags integration -count=1 "$REPO_ROOT/test/integration/..." -run TestIntegration -v; then
+  rc=0
+else
+  rc=$?
+fi
 
 echo "==> integration finished (exit $rc)"
 exit "$rc"

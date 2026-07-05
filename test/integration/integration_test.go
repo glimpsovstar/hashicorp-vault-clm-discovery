@@ -51,7 +51,7 @@ func TestIntegration_CAImportToVault(t *testing.T) {
 	c := &http.Client{Timeout: 15 * time.Second}
 
 	// 1. Scan the self-signed endpoint (in-network DNS name, port 443).
-	scanID := postJSON(t, c, e.appURL+"/api/v1/scans", map[string]any{
+	scanID, _ := postJSON(t, c, e.appURL+"/api/v1/scans", map[string]any{
 		"hostnames": []string{e.scanTarget},
 		"ports":     []int{443},
 		"consent":   true,

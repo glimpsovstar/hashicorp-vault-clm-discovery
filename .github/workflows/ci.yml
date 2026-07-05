@@ -55,6 +55,7 @@ jobs:
     # Scenario 1: Terraform-provisioned local Vault + self-signed endpoint; runs
     # the mode-B CA-import flow end-to-end, then tears the stack down.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

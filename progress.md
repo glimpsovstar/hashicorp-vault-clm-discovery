@@ -24,24 +24,23 @@ North star and roadmap: `docs/program-context.md`.
 - **UAT & expiry/validity testing** — build-tagged Go integration test
   (`internal/uat/expiry_compliance_uat_test.go`, `//go:build uat`) plus a
   docker-compose UAT stack (`test/uat/`) with `vault` and `letsencrypt` profiles,
-  self-cleaning `run-uat.sh`, and a CI step. Complete on branch
-  `feat/uat-expiry-compliance-testing` (committed, pushed) — **not yet merged**.
+  self-cleaning `run-uat.sh`, and a CI step. Merged to `main` via PR #31
+  (pre-merge sub-agent review: APPROVE WITH NITS; nits fixed — signal-safe
+  teardown, resilient poll, numeric-safe assertions).
 
 ## In progress
 
-- Nothing actively coding. Working tree clean on `feat/uat-expiry-compliance-testing`.
+- Nothing actively coding. On `main`, working tree clean.
 
 ## Next
 
-1. **Land the UAT branch** — open PR for `feat/uat-expiry-compliance-testing`,
-   `Fixes` the UAT issue, squash-merge to `main`.
-2. **Delete stale remote branch** `origin/feature/27-phase-1-blind-spot` (Phase 1
+1. **Delete stale remote branch** `origin/feature/27-phase-1-blind-spot` (Phase 1
    content already on `main`; local branch + worktree already removed).
-3. **v1.1b** — OCSP/CRL revocation alignment (planned, not started).
-4. **v1.2** — full environment scan report, catalog/CA import
+2. **v1.1b** — OCSP/CRL revocation alignment (planned, not started).
+3. **v1.2** — full environment scan report, catalog/CA import
    (`pki/issuers/import/bundle`), "Choose" wizard, vault-agent/AAP hooks,
    optional HCP reporting ingest.
-5. **v2** — cloud CA sources (ACM, etc.).
+4. **v2** — cloud CA sources (ACM, etc.).
 
 ## Key context
 

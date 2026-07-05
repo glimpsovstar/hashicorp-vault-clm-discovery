@@ -32,6 +32,11 @@ North star and roadmap: `docs/program-context.md`.
   extra Vault call, no migration). Revoked status is durable across rescans.
   Merged to `main` via PR #33 (issue #32). Sub-agent review APPROVE WITH NITS;
   MAJOR durability gap + MINORs fixed.
+- **#24 — environment scan report** — Radar-style, cert-only report expanding
+  report v0: insight classifier (severity + recommendation codes), aggregators
+  (cert health, expiry risk, issuer trust, scope/governance), new Markdown
+  sections, and CSV export (`format=csv`, formula-injection guarded). Dashboard
+  gains CSV/JSON download. `report_version` 0.2.0. Merged via PR #34.
 
 ## In progress
 
@@ -39,11 +44,12 @@ North star and roadmap: `docs/program-context.md`.
 
 ## Next
 
-1. **v1.2** — full environment scan report (#24), Vault import workflow
-   (#25: catalog, CA bundle import via `pki/issuers/import/bundle`, reissue,
-   mirror), "Choose" wizard, vault-agent/AAP hooks, optional HCP reporting ingest.
-2. **OCSP/CRL for shadow (non-Vault) certs** — extends revocation beyond Vault PKI.
-3. **v2** — cloud CA sources (ACM, etc.).
+1. **#25** — Vault import workflow (catalog, CA bundle import via
+   `pki/issuers/import/bundle`, reissue, mirror).
+2. Remaining v1.2 — "Choose" wizard, vault-agent/AAP hooks, optional HCP
+   reporting ingest.
+3. **OCSP/CRL for shadow (non-Vault) certs** — extends revocation beyond Vault PKI.
+4. **v2** — cloud CA sources (ACM, etc.).
 
 ## Key context
 

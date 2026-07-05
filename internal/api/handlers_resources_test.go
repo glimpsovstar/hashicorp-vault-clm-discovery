@@ -304,3 +304,38 @@ func TestHandleCatalogImport_Statuses(t *testing.T) {
 		})
 	}
 }
+
+// TestCertificateRoutes_Registered exercises the real Router so a dropped route
+// (e.g. DELETE removed while adding catalog-import) fails loudly instead of only
+// through direct handler calls.
+func TestCertificateRoutes_Registered(t *testing.T) {
+	t.Parallel()
+
+	id := uuid.New().String()
+	srv := newResourceServer(&fakeResourceStore{})
+
+	cases := []struct {
+		method string
+		path   string
+		body   string
+		want   int
+	}{
+		{http.MethodPost, "/api/v1/certificates/" + id + "/catalog-import", `{"consent":true}`, http.StatusOK},
+		{http.MethodDelete, "/api/v1/certificates/" + id, "", http.StatusNoContent},
+	}
+	for _, c := range cases {
+		var body io.Reader
+		if c.body != "" {
+			body = strings.NewReader(c.body)
+		}
+		req := httptest.NewRequest(c.method, c.path, body)
+		rec := httptest.NewRecorder()
+		srv.Router().ServeHTTP(rec, req)
+		if rec.Code == http.StatusMethodNotAllowed || rec.Code == http.StatusNotFound {
+			t.Fatalf("%s %s: route not registered (got %d)", c.method, c.path, rec.Code)
+		}
+		if rec.Code != c.want {
+			t.Fatalf("%s %s: status = %d, want %d", c.method, c.path, rec.Code, c.want)
+		}
+	}
+}

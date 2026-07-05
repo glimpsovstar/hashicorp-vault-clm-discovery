@@ -97,6 +97,8 @@ func (s *Server) Router() http.Handler {
 		r.Get("/certificates/{id}/pem", s.handleGetCertificatePEM)
 		r.Patch("/certificates/{id}", s.handlePatchCertificate)
 		r.Post("/certificates/{id}/catalog-import", s.handleCatalogImport)
+		r.Delete("/certificates/{id}", s.handleDeleteCertificate)
+
 		r.Get("/issuers", s.handleListIssuers)
 		r.Delete("/issuers/{id}", s.handleDeleteIssuer)
 

@@ -52,6 +52,9 @@ North star and roadmap: `docs/program-context.md`.
   build-tagged Go driver runs scan → import CA (mode B) → verify in Vault, then
   destroys. Scenario 2 (HCP, opt-in) configures PKI on an existing cluster.
   Merged via PR #37; validated end-to-end (CI `integration` job green).
+- **#38 Choose wizard** — `lifecycle.ChooseRecommendation` (pure, cycle-free)
+  maps cert signals to a next-action code; `GET /certificates/{id}/choose` +
+  a "Recommended next step" panel on cert detail. Merged via PR #39.
 
 ## In progress
 
@@ -59,10 +62,10 @@ North star and roadmap: `docs/program-context.md`.
 
 ## Next
 
-1. #25 mode C (reissue) docs → vault-agent/AAP reference (v1.3+).
-2. Remaining v1.2 — "Choose" wizard, optional HCP reporting ingest.
-3. **OCSP/CRL for shadow certs**; **v2** cloud CA sources (ACM, etc.).
-4. (Optional) run the HCP integration lane manually with `hcpvenv` creds.
+1. (Optional) run the HCP integration lane against the real cluster with `hcpvenv`
+   creds — writes a `pki-clm-int` mount to the shared HCP Vault, so confirm first.
+2. #25 mode C (reissue) docs → vault-agent/AAP reference (v1.3+).
+3. **OCSP/CRL for shadow (non-Vault) certs**; **v2** cloud CA sources (ACM, etc.).
 
 ## Key context
 

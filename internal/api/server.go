@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -27,6 +28,7 @@ type resourceStore interface {
 	GetScan(ctx context.Context, id uuid.UUID) (store.Scan, error)
 	GetCertificate(ctx context.Context, id uuid.UUID) (store.Certificate, error)
 	ListCertificates(ctx context.Context, f store.CertificateFilter) ([]store.Certificate, int, error)
+	SetManagedStatus(ctx context.Context, id uuid.UUID, status string) (store.Certificate, error)
 	DeleteScan(ctx context.Context, id uuid.UUID) error
 	DeleteCertificate(ctx context.Context, id uuid.UUID) error
 	DeleteIssuer(ctx context.Context, id uuid.UUID) error
@@ -94,6 +96,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/certificates/{id}", s.handleGetCertificate)
 		r.Get("/certificates/{id}/pem", s.handleGetCertificatePEM)
 		r.Patch("/certificates/{id}", s.handlePatchCertificate)
+		r.Post("/certificates/{id}/catalog-import", s.handleCatalogImport)
 		r.Delete("/certificates/{id}", s.handleDeleteCertificate)
 
 		r.Get("/issuers", s.handleListIssuers)
@@ -327,6 +330,44 @@ func (s *Server) handlePatchCertificate(w http.ResponseWriter, r *http.Request) 
 		s.writeServerError(w, r, err, "failed to update certificate")
 		return
 	}
+	writeJSON(w, http.StatusOK, cert)
+}
+
+type catalogImportRequest struct {
+	Consent bool `json:"consent"`
+}
+
+// handleCatalogImport implements mode A (catalog): track a discovered cert in
+// CLM as managed_status=imported. It never calls Vault and requires explicit
+// consent, mirroring the scan consent policy.
+func (s *Server) handleCatalogImport(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid certificate id")
+		return
+	}
+	var req catalogImportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if !req.Consent {
+		writeError(w, r, http.StatusBadRequest, "consent is required to catalog a certificate")
+		return
+	}
+	cert, err := s.resources.SetManagedStatus(r.Context(), id, "imported")
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrCertificateNotFound):
+			writeError(w, r, http.StatusNotFound, "certificate not found")
+		case errors.Is(err, store.ErrManagedByVault):
+			writeError(w, r, http.StatusConflict, "certificate is managed in vault; catalog import does not apply")
+		default:
+			s.writeServerError(w, r, err, "failed to catalog certificate")
+		}
+		return
+	}
+	s.log.Info("catalog import", "action", "catalog_import", "certificate_id", id.String(), "managed_status", "imported")
 	writeJSON(w, http.StatusOK, cert)
 }
 

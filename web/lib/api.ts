@@ -26,6 +26,9 @@ export type Certificate = {
   hostname_matches_san: boolean;
   managed_status: string;
   cert_scope: string;
+  vault_pki_mount?: string | null;
+  vault_issuer_ref?: string | null;
+  revocation_status?: string | null;
   observation_count?: number;
   last_seen: string;
   pem?: string;
@@ -183,6 +186,15 @@ export function patchCertificate(id: string, body: Partial<Pick<Certificate, "ow
   return fetchJSON<Certificate>(`/api/v1/certificates/${id}`, {
     method: "PATCH",
     body: JSON.stringify(body),
+  });
+}
+
+// catalogImport implements mode A: track the cert in CLM (managed_status=imported)
+// without any Vault write. Requires explicit consent per the API contract.
+export function catalogImport(id: string) {
+  return fetchJSON<Certificate>(`/api/v1/certificates/${id}/catalog-import`, {
+    method: "POST",
+    body: JSON.stringify({ consent: true }),
   });
 }
 

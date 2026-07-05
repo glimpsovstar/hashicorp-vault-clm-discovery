@@ -2,10 +2,40 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
 )
+
+// ErrManagedByVault is returned when a catalog import (mode A) is attempted on a
+// certificate that reconcile already marks managed_in_vault. That state is owned
+// by reconcile and must not be overwritten by a manual catalog action.
+var ErrManagedByVault = errors.New("certificate is managed in vault")
+
+// SetManagedStatus sets the CLM management state for catalog import (mode A). It
+// refuses to overwrite 'managed_in_vault' (owned by Vault reconcile) and returns
+// ErrManagedByVault in that case, or ErrCertificateNotFound if the id is unknown.
+// The guard is a single atomic UPDATE so a concurrent reconcile cannot be
+// clobbered between a read and the write.
+func (s *Store) SetManagedStatus(ctx context.Context, id uuid.UUID, status string) (Certificate, error) {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE certificates SET managed_status = $2, updated_at = NOW()
+		WHERE id = $1 AND managed_status <> 'managed_in_vault'
+	`, id, status)
+	if err != nil {
+		return Certificate{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		// No row updated: either the id is unknown or it is managed_in_vault.
+		// Distinguish the two so the API can return 404 vs 409.
+		if _, err := s.GetCertificate(ctx, id); err != nil {
+			return Certificate{}, err // ErrCertificateNotFound (or a real DB error)
+		}
+		return Certificate{}, ErrManagedByVault
+	}
+	return s.GetCertificate(ctx, id)
+}
 
 // ManagedStatusUpdate sets Vault reconciliation fields on a certificate row.
 // It deliberately does not carry serial_number: reconcile matches by

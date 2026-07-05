@@ -17,7 +17,7 @@ export default function ImportCAButton({ issuer }: { issuer: Issuer }) {
   if (!issuer.is_ca) {
     return null;
   }
-  if (issuer.vault_issuer_ref) {
+  if (issuer.vault_pki_mount) {
     return <span className="badge badge-success">In Vault</span>;
   }
 

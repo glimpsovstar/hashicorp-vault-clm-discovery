@@ -112,9 +112,8 @@ func (s *Server) Router() http.Handler {
 
 		r.Get("/issuers", s.handleListIssuers)
 		r.Post("/issuers/{id}/import", s.handleImportIssuer)
-
-		r.Post("/reconcile", s.handleReconcile)
-
+		r.Delete("/issuers/{id}", s.handleDeleteIssuer)
+			r.Post("/reconcile", s.handleReconcile)
 		r.Get("/blindspot", s.handleGetBlindSpot)
 		r.Get("/compliance/summary", s.handleGetComplianceSummary)
 	})
@@ -421,6 +420,10 @@ func (s *Server) handleImportIssuer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "mount is required")
 		return
 	}
+	if !validMount(mount) {
+		writeError(w, r, http.StatusBadRequest, "invalid mount: use a simple path segment (letters, digits, -, _, /)")
+		return
+	}
 	if s.importer == nil {
 		writeError(w, r, http.StatusServiceUnavailable, "vault is not configured")
 		return
@@ -462,6 +465,23 @@ func (s *Server) handleImportIssuer(w http.ResponseWriter, r *http.Request) {
 func issuerBundle(i store.Issuer) string {
 	parts := append([]string{i.PEM}, i.CAChain...)
 	return strings.Join(parts, "\n")
+}
+
+// validMount guards the user-supplied Vault mount before it is interpolated into
+// the request URL: reject leading slashes, dot-segments, and any character
+// outside a simple mount path so a value like "../../sys" cannot alter the path.
+func validMount(m string) bool {
+	if m == "" || strings.HasPrefix(m, "/") || strings.Contains(m, "..") {
+		return false
+	}
+	for _, c := range m {
+		ok := c == '-' || c == '_' || c == '/' ||
+			(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // firstIssuerRef returns the Vault-side issuer reference to persist, preferring

@@ -354,6 +354,7 @@ func TestHandleImportIssuer_Statuses(t *testing.T) {
 		{"bad body", &fakeResourceStore{issuer: ca}, okImporter, uuid.New().String(), `{`, http.StatusBadRequest},
 		{"no consent", &fakeResourceStore{issuer: ca}, okImporter, uuid.New().String(), `{"consent":false,"mount":"pki"}`, http.StatusBadRequest},
 		{"no mount", &fakeResourceStore{issuer: ca}, okImporter, uuid.New().String(), `{"consent":true}`, http.StatusBadRequest},
+		{"invalid mount", &fakeResourceStore{issuer: ca}, okImporter, uuid.New().String(), `{"consent":true,"mount":"../../sys"}`, http.StatusBadRequest},
 		{"vault not configured", &fakeResourceStore{issuer: ca}, nil, uuid.New().String(), `{"consent":true,"mount":"pki"}`, http.StatusServiceUnavailable},
 		{"issuer not found", &fakeResourceStore{issuerErr: store.ErrIssuerNotFound}, okImporter, uuid.New().String(), `{"consent":true,"mount":"pki"}`, http.StatusNotFound},
 		{"not a CA", &fakeResourceStore{issuer: store.Issuer{IsCA: false}}, okImporter, uuid.New().String(), `{"consent":true,"mount":"pki"}`, http.StatusConflict},
@@ -395,6 +396,7 @@ func TestCertificateRoutes_Registered(t *testing.T) {
 	}{
 		{http.MethodPost, "/api/v1/certificates/" + id + "/catalog-import", `{"consent":true}`, http.StatusOK},
 		{http.MethodDelete, "/api/v1/certificates/" + id, "", http.StatusNoContent},
+		{http.MethodDelete, "/api/v1/issuers/" + id, "", http.StatusNoContent},
 		// importer is nil on the resource-only server, so the route resolving to
 		// 503 (not 404/405) proves it is registered.
 		{http.MethodPost, "/api/v1/issuers/" + id + "/import", `{"consent":true,"mount":"pki"}`, http.StatusServiceUnavailable},

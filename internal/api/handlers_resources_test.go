@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -23,6 +24,8 @@ type fakeResourceStore struct {
 	certErr         error
 	certs           []store.Certificate
 	listErr         error
+	setStatusResult store.Certificate
+	setStatusErr    error
 	deleteScanErr   error
 	deleteCertErr   error
 	deleteIssuerErr error
@@ -50,6 +53,15 @@ func (f *fakeResourceStore) ListCertificates(_ context.Context, filter store.Cer
 		return nil, 0, f.listErr
 	}
 	return f.certs, len(f.certs), nil
+}
+
+func (f *fakeResourceStore) SetManagedStatus(_ context.Context, _ uuid.UUID, status string) (store.Certificate, error) {
+	if f.setStatusErr != nil {
+		return store.Certificate{}, f.setStatusErr
+	}
+	c := f.setStatusResult
+	c.ManagedStatus = status
+	return c, nil
 }
 
 func (f *fakeResourceStore) DeleteScan(context.Context, uuid.UUID) error { return f.deleteScanErr }
@@ -246,6 +258,48 @@ func TestHandleDeleteIssuer_Statuses(t *testing.T) {
 			newResourceServer(tt.res).handleDeleteIssuer(rec, idRequest(http.MethodDelete, uuid.New().String()))
 			if rec.Code != tt.want {
 				t.Fatalf("status = %d, want %d", rec.Code, tt.want)
+			}
+		})
+	}
+}
+
+// idRequestBody builds a request carrying an "id" chi URL param and a JSON body.
+func idRequestBody(method, id, body string) *http.Request {
+	req := httptest.NewRequest(method, "/", strings.NewReader(body))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", id)
+	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+}
+
+func TestHandleCatalogImport_Statuses(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		res  *fakeResourceStore
+		id   string
+		body string
+		want int
+	}{
+		{name: "invalid id", res: &fakeResourceStore{}, id: "nope", body: `{"consent":true}`, want: http.StatusBadRequest},
+		{name: "bad body", res: &fakeResourceStore{}, id: uuid.New().String(), body: `{`, want: http.StatusBadRequest},
+		{name: "no consent", res: &fakeResourceStore{}, id: uuid.New().String(), body: `{"consent":false}`, want: http.StatusBadRequest},
+		{name: "not found", res: &fakeResourceStore{setStatusErr: store.ErrCertificateNotFound}, id: uuid.New().String(), body: `{"consent":true}`, want: http.StatusNotFound},
+		{name: "managed in vault", res: &fakeResourceStore{setStatusErr: store.ErrManagedByVault}, id: uuid.New().String(), body: `{"consent":true}`, want: http.StatusConflict},
+		{name: "db error", res: &fakeResourceStore{setStatusErr: context.Canceled}, id: uuid.New().String(), body: `{"consent":true}`, want: http.StatusInternalServerError},
+		{name: "success", res: &fakeResourceStore{}, id: uuid.New().String(), body: `{"consent":true}`, want: http.StatusOK},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rec := httptest.NewRecorder()
+			newResourceServer(tt.res).handleCatalogImport(rec, idRequestBody(http.MethodPost, tt.id, tt.body))
+			if rec.Code != tt.want {
+				t.Fatalf("status = %d, want %d", rec.Code, tt.want)
+			}
+			if tt.want == http.StatusOK && !strings.Contains(rec.Body.String(), `"imported"`) {
+				t.Fatalf("expected managed_status imported in body: %s", rec.Body.String())
 			}
 		})
 	}

@@ -1,7 +1,7 @@
 # Design: Vault import workflow (catalog / CA bundle / mirror) — #25
 
 - **Issue:** #25 (parent lifecycle #20 Import phase)
-- **Status:** Design gate — awaiting approval before implementation
+- **Status:** **PR 1 implemented** (modes A catalog + D mirror, read-only). PR 2 (mode B, CA import — first Vault write) pending.
 - **Design source:** `docs/superpowers/specs/2026-06-14-scan-report-and-vault-import-design.md` (Feature 2)
 - **Builds on:** reconcile (#23/#32) — read-only Vault client, `managed_status`, `vault_issuer_ref`/`vault_pki_mount`
 
@@ -10,11 +10,11 @@
 "Import into Vault" is ambiguous. #25 makes the four interpretations explicit and
 maps each to a lifecycle phase and `managed_status` semantics.
 
-| ID | Mode | Vault write | Version | This PR |
-|----|------|-------------|---------|---------|
-| **A** | Catalog — track in CLM (`managed_status=imported`) | No | v1.2 | ✅ |
-| **B** | CA/material import — `pki/issuers/import/bundle` | **Yes** | v1.2 | ✅ |
-| **D** | Mirror — wire observation vs Vault row, side-by-side (read-only) | No | v1.2 | ✅ |
+| ID | Mode | Vault write | Version | Delivery |
+|----|------|-------------|---------|----------|
+| **A** | Catalog — track in CLM (`managed_status=imported`) | No | v1.2 | **PR 1** |
+| **D** | Mirror — wire observation vs Vault row, side-by-side (read-only) | No | v1.2 | **PR 1** |
+| **B** | CA/material import — `pki/issuers/import/bundle` | **Yes** | v1.2 | **PR 2** |
 | **C** | Reissue + deploy — Vault issue + agent/AAP + rescan | Yes | v1.3+ | Docs only |
 
 ## Goals
@@ -110,5 +110,6 @@ before squash-merge.
 
 ## Open scoping question (for approval)
 
-A + D are read-only/low-risk; B introduces the first Vault **write** path. Deliver
-all three in one PR (this plan), or split B into its own PR after A + D land?
+**Resolved:** split delivery. **PR 1** ships A (catalog) + D (mirror) — both
+read-only to Vault, low risk. **PR 2** ships B (CA import) — the first Vault
+write path — with its own read-write PKI policy docs and consent modal.

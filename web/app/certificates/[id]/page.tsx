@@ -13,6 +13,7 @@ import {
   vaultImportedLabel,
 } from "@/lib/api";
 import EnrichmentForm from "./enrichment-form";
+import CatalogImportButton from "./catalog-import-button";
 
 export default async function CertificateDetailPage({
   params,
@@ -79,6 +80,53 @@ export default async function CertificateDetailPage({
             </div>
             <div>
               <EnrichmentForm cert={cert} />
+              <div style={{ marginTop: 16 }}>
+                <CatalogImportButton cert={cert} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <h2>Wire vs Vault</h2>
+        </div>
+        <div className="panel-body">
+          <p className="help-text">
+            Read-only comparison of what was observed on the wire against Vault
+            reconcile. Run reconcile to refresh the Vault side.
+          </p>
+          <div className="grid-2">
+            <div className="detail-list">
+              <h3 style={{ marginTop: 0 }}>On the wire</h3>
+              <p>
+                <strong>Subject:</strong> {cert.subject_cn || "—"}
+              </p>
+              <p>
+                <strong>Fingerprint:</strong> {cert.fingerprint_sha256}
+              </p>
+              <p>
+                <strong>Observations:</strong> {observations.length}
+              </p>
+            </div>
+            <div className="detail-list">
+              <h3 style={{ marginTop: 0 }}>In Vault</h3>
+              <p>
+                <strong>Managed status:</strong>{" "}
+                <span className={vaultConnectedBadgeClass(cert.managed_status)}>
+                  {vaultConnectedLabel(cert.managed_status)}
+                </span>
+              </p>
+              <p>
+                <strong>PKI mount:</strong> {cert.vault_pki_mount || "—"}
+              </p>
+              <p>
+                <strong>Issuer ref:</strong> {cert.vault_issuer_ref || "—"}
+              </p>
+              <p>
+                <strong>Revocation:</strong> {cert.revocation_status || "—"}
+              </p>
             </div>
           </div>
         </div>

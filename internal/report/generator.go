@@ -9,7 +9,7 @@ import (
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
 )
 
-const ReportVersion = "0.1.0"
+const ReportVersion = "0.2.0"
 
 // BlindSpotSummary is the Vault vs wire comparison for a scan report.
 type BlindSpotSummary struct {
@@ -21,35 +21,41 @@ type BlindSpotSummary struct {
 
 // ScanDiagnostics captures probe and persistence metrics from a scan run.
 type ScanDiagnostics struct {
-	TargetsTotal      int                           `json:"targets_total"`
-	TargetsSucceeded  int                           `json:"targets_succeeded"`
-	TargetsFailed     int                           `json:"targets_failed"`
-	CertsFound        int                           `json:"certs_found"`
-	UpsertFailures    int                           `json:"upsert_failures"`
-	ExpansionWarnings []string                      `json:"expansion_warnings,omitempty"`
-	FailureSamples    []store.TargetFailureSample   `json:"failure_samples,omitempty"`
-	Error             *string                       `json:"error,omitempty"`
+	TargetsTotal      int                         `json:"targets_total"`
+	TargetsSucceeded  int                         `json:"targets_succeeded"`
+	TargetsFailed     int                         `json:"targets_failed"`
+	CertsFound        int                         `json:"certs_found"`
+	UpsertFailures    int                         `json:"upsert_failures"`
+	ExpansionWarnings []string                    `json:"expansion_warnings,omitempty"`
+	FailureSamples    []store.TargetFailureSample `json:"failure_samples,omitempty"`
+	Error             *string                     `json:"error,omitempty"`
 }
 
 // Document is the structured scan report payload shared by renderers.
 type Document struct {
-	ReportVersion string                      `json:"report_version"`
-	GeneratedAt   time.Time                   `json:"generated_at"`
-	ScanID        uuid.UUID                   `json:"scan_id"`
-	ScanStatus    string                      `json:"scan_status"`
-	Scope         ScopeSummary                `json:"scope"`
-	BlindSpot     BlindSpotSummary            `json:"blind_spot"`
+	ReportVersion string                       `json:"report_version"`
+	GeneratedAt   time.Time                    `json:"generated_at"`
+	ScanID        uuid.UUID                    `json:"scan_id"`
+	ScanStatus    string                       `json:"scan_status"`
+	Scope         ScopeSummary                 `json:"scope"`
+	BlindSpot     BlindSpotSummary             `json:"blind_spot"`
 	Compliance    compliance.ComplianceSummary `json:"compliance"`
-	Diagnostics   ScanDiagnostics             `json:"scan_diagnostics"`
+	Diagnostics   ScanDiagnostics              `json:"scan_diagnostics"`
+	CertHealth    CertHealth                   `json:"cert_health"`
+	ExpiryRisk    ExpiryRisk                   `json:"expiry_risk"`
+	IssuerTrust   IssuerTrust                  `json:"issuer_trust"`
+	Governance    ScopeGovernance              `json:"scope_governance"`
+	Insights      []Insight                    `json:"insights"`
+	Recommends    []Recommendation             `json:"recommendations"`
 }
 
 // ScopeSummary describes scan targets for the report header.
 type ScopeSummary struct {
-	CIDRs       []string   `json:"cidrs"`
-	Hostnames   []string   `json:"hostnames"`
-	Ports       []int      `json:"ports"`
-	StartedAt   *time.Time `json:"started_at,omitempty"`
-	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	CIDRs      []string   `json:"cidrs"`
+	Hostnames  []string   `json:"hostnames"`
+	Ports      []int      `json:"ports"`
+	StartedAt  *time.Time `json:"started_at,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
 }
 
 // GenerateInput aggregates data sources for report generation.
@@ -57,10 +63,12 @@ type GenerateInput struct {
 	Scan       store.Scan
 	BlindSpot  BlindSpotSummary
 	Compliance compliance.ComplianceSummary
+	Certs      []store.Certificate
 }
 
 // Generate builds a report document from scan, blind-spot, and compliance data.
 func Generate(in GenerateInput) Document {
+	insights := ClassifyAll(in.Certs)
 	return Document{
 		ReportVersion: ReportVersion,
 		GeneratedAt:   time.Now().UTC(),
@@ -85,6 +93,12 @@ func Generate(in GenerateInput) Document {
 			FailureSamples:    in.Scan.FailureSamples,
 			Error:             in.Scan.Error,
 		},
+		CertHealth:  BuildCertHealth(in.Certs),
+		ExpiryRisk:  BuildExpiryRisk(in.Certs),
+		IssuerTrust: BuildIssuerTrust(in.Certs),
+		Governance:  BuildScopeGovernance(in.Certs),
+		Insights:    insights,
+		Recommends:  BuildRecommendations(insights),
 	}
 }
 

@@ -83,11 +83,11 @@ export default function BlindSpotCard({ scanId, scanStatus }: Props) {
     }
   }
 
-  async function handleDownload() {
+  async function handleDownload(format: "markdown" | "json" | "csv") {
     setDownloading(true);
     setMessage(null);
     try {
-      await downloadReport(scanId, "markdown");
+      await downloadReport(scanId, format);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Download failed");
     } finally {
@@ -152,10 +152,26 @@ export default function BlindSpotCard({ scanId, scanStatus }: Props) {
           <button
             type="button"
             className="button button-secondary"
-            onClick={() => void handleDownload()}
+            onClick={() => void handleDownload("markdown")}
             disabled={downloading}
           >
             {downloading ? "Downloading…" : "Download report"}
+          </button>
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={() => void handleDownload("csv")}
+            disabled={downloading}
+          >
+            Download CSV
+          </button>
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={() => void handleDownload("json")}
+            disabled={downloading}
+          >
+            Download JSON
           </button>
         </div>
 

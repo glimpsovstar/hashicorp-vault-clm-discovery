@@ -198,7 +198,7 @@ export function triggerReconcile() {
   return fetchJSON<ReconcileSummary>("/api/v1/reconcile", { method: "POST" });
 }
 
-export async function downloadReport(scanId: string, format: "markdown" | "json" = "markdown") {
+export async function downloadReport(scanId: string, format: "markdown" | "json" | "csv" = "markdown") {
   const res = await fetch(
     `${getApiBaseUrl()}/api/v1/scans/${scanId}/report?format=${format}`,
     { cache: "no-store" }
@@ -209,9 +209,10 @@ export async function downloadReport(scanId: string, format: "markdown" | "json"
   }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
+  const ext = format === "markdown" ? "md" : format;
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `scan-${scanId.slice(0, 8)}-report.${format === "json" ? "json" : "md"}`;
+  anchor.download = `scan-${scanId.slice(0, 8)}-report.${ext}`;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();

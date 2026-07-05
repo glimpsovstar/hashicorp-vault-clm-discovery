@@ -44,7 +44,7 @@ func TestRenderMarkdown_ContainsRequiredSections(t *testing.T) {
 			FindingsBySeverity:  map[string]int{"critical": 1},
 			FindingsByPack:      map[string]int{"sc081": 1, "pci": 1},
 			AlgorithmInventory: compliance.AlgorithmInventory{
-				RSA2048Plus: 2,
+				RSA2048Plus:  2,
 				RSAUnder2048: 1,
 			},
 			Findings: []compliance.Finding{
@@ -75,6 +75,12 @@ func TestRenderMarkdown_ContainsRequiredSections(t *testing.T) {
 		"## PCI inventory gaps",
 		"## Algorithm inventory",
 		"## Scan diagnostics",
+		"## Certificate health",
+		"## Expiry risk",
+		"## Issuer trust & chain quality",
+		"## Scope & governance",
+		"## Insights",
+		"## Recommendations",
 	}
 	for _, section := range required {
 		if !strings.Contains(md, section) {

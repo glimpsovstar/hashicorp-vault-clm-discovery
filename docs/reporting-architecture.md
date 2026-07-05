@@ -8,7 +8,7 @@ Ongoing reference for **certificate-focused environment scan reports** in Vault 
 
 After a TLS scan completes, operators need a **shareable, Radar-style artifact** that summarizes what was found on the wire — certificate health, expiry risk, issuer trust, and scope — without implying a full Vault security posture review.
 
-This document defines the **report pipeline**, data sources, output formats, section template, and non-goals. Implementation is planned for **v1.2** (see design spec).
+This document defines the **report pipeline**, data sources, output formats, section template, and non-goals. Implemented in v1.2 (issue #24): `GET /api/v1/scans/{id}/report?format=markdown|json|csv` with the full section template below. Design: [environment-scan-report-design.md](superpowers/specs/2026-07-06-environment-scan-report-design.md).
 
 ## Vault Radar pattern (adapted for CLM)
 

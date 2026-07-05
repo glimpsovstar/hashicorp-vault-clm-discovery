@@ -37,6 +37,11 @@ North star and roadmap: `docs/program-context.md`.
   (cert health, expiry risk, issuer trust, scope/governance), new Markdown
   sections, and CSV export (`format=csv`, formula-injection guarded). Dashboard
   gains CSV/JSON download. `report_version` 0.2.0. Merged via PR #34.
+- **#25 import workflow — PR 1 (modes A + D)** — catalog import
+  (`POST /certificates/{id}/catalog-import` → `managed_status=imported`,
+  consent-gated, read-only) and a read-only Wire-vs-Vault mirror panel on the
+  cert detail page + "Track in CLM" button. Merged via PR #35. Issue #25 stays
+  open for PR 2.
 
 ## In progress
 
@@ -44,11 +49,13 @@ North star and roadmap: `docs/program-context.md`.
 
 ## Next
 
-1. **#25** — Vault import workflow (catalog, CA bundle import via
-   `pki/issuers/import/bundle`, reissue, mirror).
+1. **#25 PR 2 — mode B (CA import)** — `POST /issuers/{id}/import` → Vault
+   `pki/issuers/import/bundle` (first **write** path); needs a read-write PKI
+   policy + consent modal. Spec:
+   `docs/superpowers/specs/2026-07-06-vault-import-workflow-design.md`.
 2. Remaining v1.2 — "Choose" wizard, vault-agent/AAP hooks, optional HCP
    reporting ingest.
-3. **OCSP/CRL for shadow (non-Vault) certs** — extends revocation beyond Vault PKI.
+3. **OCSP/CRL for shadow (non-Vault) certs**; mode C reissue (v1.3+).
 4. **v2** — cloud CA sources (ACM, etc.).
 
 ## Key context

@@ -46,6 +46,12 @@ North star and roadmap: `docs/program-context.md`.
   mount, is_ca/503/502 handling), `GetIssuer`/`SetIssuerVaultRef`, and an
   "Import CA to Vault" consent modal. Merged via PR #36. (Review caught dropped
   DELETE/reconcile routes — restored + Router-level test guards added.)
+- **Terraform Vault integration validation** — `test/integration/`: scenario 1
+  (local, **in CI**) provisions the whole stack via `docker`+`vault`+`tls`
+  providers (postgres, migrate, app, Vault dev + PKI, self-signed nginx) and a
+  build-tagged Go driver runs scan → import CA (mode B) → verify in Vault, then
+  destroys. Scenario 2 (HCP, opt-in) configures PKI on an existing cluster.
+  Merged via PR #37; validated end-to-end (CI `integration` job green).
 
 ## In progress
 
@@ -53,17 +59,10 @@ North star and roadmap: `docs/program-context.md`.
 
 ## Next
 
-1. **Terraform integration validation** (agreed): `test/integration/` with two
-   Terraform-provisioned scenarios exercising scan → import (mode B) → reconcile:
-   - **Scenario 1 (local, CI):** `kreuzwerker/docker` + `hashicorp/vault` — dev-mode
-     Vault container + self-signed-cert nginx container; build-tagged integration
-     driver; runs in CI.
-   - **Scenario 2 (HCP, opt-in):** `hashicorp/hcp` + `hashicorp/vault` — configure
-     PKI on an EXISTING HCP Vault cluster; creds via env/gitignored tfvars, never
-     committed; not in default CI.
-2. #25 mode C (reissue) docs link to vault-agent/AAP (v1.3+); remaining v1.2
-   "Choose" wizard, HCP reporting ingest.
-3. **OCSP/CRL for shadow certs**; **v2** cloud CA sources.
+1. #25 mode C (reissue) docs → vault-agent/AAP reference (v1.3+).
+2. Remaining v1.2 — "Choose" wizard, optional HCP reporting ingest.
+3. **OCSP/CRL for shadow certs**; **v2** cloud CA sources (ACM, etc.).
+4. (Optional) run the HCP integration lane manually with `hcpvenv` creds.
 
 ## Key context
 

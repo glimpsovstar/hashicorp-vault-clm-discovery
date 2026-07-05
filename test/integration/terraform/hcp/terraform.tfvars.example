@@ -1,0 +1,9 @@
+# HCP Vault integration — copy to terraform.tfvars and fill from your env.
+# NEVER commit the real token. With David's setup: run the `hcpvenv` alias, then
+# use $VAULT_ADDR / $VAULT_TOKEN here (namespace is `admin`). The hcp provider
+# reads HCP_CLIENT_ID / HCP_CLIENT_SECRET / HCP_PROJECT_ID from the environment.
+
+vault_addr      = "https://<your-hcp-cluster>.hashicorp.cloud:8200"
+vault_namespace = "admin"
+vault_token     = "hvs.REPLACE_ME"
+pki_mount       = "pki-clm-int"

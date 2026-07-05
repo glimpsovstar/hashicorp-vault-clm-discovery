@@ -147,6 +147,18 @@ export function getCertificate(id: string) {
   return fetchJSON<{ certificate: Certificate; observations: Observation[] }>(`/api/v1/certificates/${id}`);
 }
 
+export type ChooseResult = {
+  code: string;
+  title: string;
+  rationale: string;
+  cta: string;
+};
+
+// getChoose returns the recommended Choose-phase action for a certificate.
+export function getChoose(id: string) {
+  return fetchJSON<ChooseResult>(`/api/v1/certificates/${id}/choose`);
+}
+
 export function listScans() {
   return fetchJSON<{ items: Scan[] }>("/api/v1/scans");
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/config"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/lifecycle"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanrunner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
@@ -106,6 +107,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/certificates", s.handleListCertificates)
 		r.Get("/certificates/{id}", s.handleGetCertificate)
 		r.Get("/certificates/{id}/pem", s.handleGetCertificatePEM)
+		r.Get("/certificates/{id}/choose", s.handleGetCertificateChoose)
 		r.Patch("/certificates/{id}", s.handlePatchCertificate)
 		r.Post("/certificates/{id}/catalog-import", s.handleCatalogImport)
 		r.Delete("/certificates/{id}", s.handleDeleteCertificate)
@@ -113,7 +115,9 @@ func (s *Server) Router() http.Handler {
 		r.Get("/issuers", s.handleListIssuers)
 		r.Post("/issuers/{id}/import", s.handleImportIssuer)
 		r.Delete("/issuers/{id}", s.handleDeleteIssuer)
-			r.Post("/reconcile", s.handleReconcile)
+
+		r.Post("/reconcile", s.handleReconcile)
+
 		r.Get("/blindspot", s.handleGetBlindSpot)
 		r.Get("/compliance/summary", s.handleGetComplianceSummary)
 	})
@@ -341,6 +345,32 @@ func (s *Server) handlePatchCertificate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, cert)
+}
+
+// handleGetCertificateChoose returns the recommended Choose-phase action for a
+// certificate based on its discovered signals (read-only).
+func (s *Server) handleGetCertificateChoose(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid certificate id")
+		return
+	}
+	cert, err := s.resources.GetCertificate(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrCertificateNotFound) {
+			writeError(w, r, http.StatusNotFound, "certificate not found")
+			return
+		}
+		s.writeServerError(w, r, err, "failed to load certificate")
+		return
+	}
+	rec := lifecycle.ChooseRecommendation(lifecycle.ChooseInput{
+		CertScope:     cert.CertScope,
+		ManagedStatus: cert.ManagedStatus,
+		ChainStatus:   cert.ChainStatus,
+		IsCA:          cert.IsCA,
+	})
+	writeJSON(w, http.StatusOK, rec)
 }
 
 type catalogImportRequest struct {

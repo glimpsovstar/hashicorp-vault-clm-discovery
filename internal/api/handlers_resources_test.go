@@ -379,6 +379,36 @@ func TestHandleImportIssuer_Statuses(t *testing.T) {
 	}
 }
 
+func TestHandleGetCertificateChoose_Statuses(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		res  *fakeResourceStore
+		id   string
+		want int
+	}{
+		{"invalid id", &fakeResourceStore{}, "nope", http.StatusBadRequest},
+		{"not found", &fakeResourceStore{certErr: store.ErrCertificateNotFound}, uuid.New().String(), http.StatusNotFound},
+		{"db error", &fakeResourceStore{certErr: context.Canceled}, uuid.New().String(), http.StatusInternalServerError},
+		{"success", &fakeResourceStore{cert: store.Certificate{ManagedStatus: "managed_in_vault"}}, uuid.New().String(), http.StatusOK},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rec := httptest.NewRecorder()
+			newResourceServer(tt.res).handleGetCertificateChoose(rec, idRequest(http.MethodGet, tt.id))
+			if rec.Code != tt.want {
+				t.Fatalf("status = %d, want %d", rec.Code, tt.want)
+			}
+			if tt.want == http.StatusOK && !strings.Contains(rec.Body.String(), `"already_managed"`) {
+				t.Fatalf("success body missing recommendation code: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
 // TestCertificateRoutes_Registered exercises the real Router so a dropped route
 // (e.g. DELETE removed while adding catalog-import) fails loudly instead of only
 // through direct handler calls.
@@ -395,6 +425,7 @@ func TestCertificateRoutes_Registered(t *testing.T) {
 		want   int
 	}{
 		{http.MethodPost, "/api/v1/certificates/" + id + "/catalog-import", `{"consent":true}`, http.StatusOK},
+		{http.MethodGet, "/api/v1/certificates/" + id + "/choose", "", http.StatusOK},
 		{http.MethodDelete, "/api/v1/certificates/" + id, "", http.StatusNoContent},
 		{http.MethodDelete, "/api/v1/issuers/" + id, "", http.StatusNoContent},
 		// importer is nil on the resource-only server, so the route resolving to

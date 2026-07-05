@@ -67,7 +67,8 @@ type Insight struct {
 `ClassifyCertificate(store.Certificate) []Insight` — pure function implementing
 the severity table from reporting-architecture.md (expired→high, expiring_soon
 ≤30d→medium, incomplete/untrusted chain→medium, san_mismatch→low, unmanaged
-internal→low governance, weak key→ per crypto). Recommendation codes assigned
+internal→low governance, weak key→ per crypto, **revoked→critical** — a revoked
+cert still served is the strongest signal). Recommendation codes assigned
 per condition. Deterministic ordering (severity desc, then CN).
 
 ### 2. Aggregates (`internal/report/aggregate.go`)
@@ -97,9 +98,11 @@ classifier + aggregators, and fills the new fields. Bump `ReportVersion`
 - **JSON** (`json.go`) — unchanged mechanics (marshals the richer `Document`).
 - **CSV** (`csv.go`, new) — `RenderCSV(doc) ([]byte, error)` flattening
   `Insights` to columns: `category,type,severity,recommendation,subject_cn,
-  fingerprint_sha256,issuer_dn,days_until_expiry,cert_scope,managed_status,description`.
-  Use `encoding/csv` (handles quoting/injection of commas/quotes). Guard against
-  CSV formula injection by prefixing cells beginning with `= + - @` with `'`.
+  fingerprint_sha256,issuer_dn,days_until_expiry,tags,description` (scope +
+  managed status travel in the pipe-joined `tags` column; `days_until_expiry` is
+  populated for expiry insights). Use `encoding/csv` (handles quoting/injection
+  of commas/quotes). Guard against CSV formula injection by prefixing cells
+  beginning with `= + - @` or a leading TAB/CR with `'`.
 
 ### 5. API (`internal/api/handlers_report.go`)
 

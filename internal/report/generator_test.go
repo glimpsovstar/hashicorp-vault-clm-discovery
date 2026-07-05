@@ -44,7 +44,7 @@ func TestRenderMarkdown_ContainsRequiredSections(t *testing.T) {
 			FindingsBySeverity:  map[string]int{"critical": 1},
 			FindingsByPack:      map[string]int{"sc081": 1, "pci": 1},
 			AlgorithmInventory: compliance.AlgorithmInventory{
-				RSA2048Plus: 2,
+				RSA2048Plus:  2,
 				RSAUnder2048: 1,
 			},
 			Findings: []compliance.Finding{

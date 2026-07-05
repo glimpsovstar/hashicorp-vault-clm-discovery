@@ -136,7 +136,10 @@ func BuildIssuerTrust(certs []store.Certificate) IssuerTrust {
 
 	issuers := make([]IssuerSummary, 0, len(byDN))
 	for _, s := range byDN {
-		s.ImportCandidate = s.InVault == 0
+		// A CA import candidate is an issuer that signs certs on the wire, has at
+		// least one CA cert observed, and is not yet matched in Vault. Public/leaf
+		// issuers with no CA material are not import targets.
+		s.ImportCandidate = s.InVault == 0 && s.CACount > 0
 		issuers = append(issuers, *s)
 	}
 	sort.SliceStable(issuers, func(i, j int) bool {

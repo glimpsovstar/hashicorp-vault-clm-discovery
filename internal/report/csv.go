@@ -55,16 +55,16 @@ func RenderCSV(doc Document) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// sanitizeCSVCell neutralizes CSV formula injection: a leading =, +, -, or @
-// can cause spreadsheet apps to execute the cell as a formula. Prefixing with a
-// single quote forces text interpretation. Values here originate from scanned
-// endpoints (Subject CN, issuer DN), so they are treated as untrusted.
+// sanitizeCSVCell neutralizes CSV formula injection: a leading =, +, -, @, TAB,
+// or CR can cause spreadsheet apps to execute the cell as a formula. Prefixing
+// with a single quote forces text interpretation. Values here originate from
+// scanned endpoints (Subject CN, issuer DN), so they are treated as untrusted.
 func sanitizeCSVCell(s string) string {
 	if s == "" {
 		return s
 	}
 	switch s[0] {
-	case '=', '+', '-', '@':
+	case '=', '+', '-', '@', '\t', '\r':
 		return "'" + s
 	}
 	return s

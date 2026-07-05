@@ -72,6 +72,8 @@ func TestSanitizeCSVCell(t *testing.T) {
 		{"+1", "'+1"},
 		{"-1", "'-1"},
 		{"@x", "'@x"},
+		{"\tcmd", "'\tcmd"},
+		{"\rcmd", "'\rcmd"},
 	} {
 		if got := sanitizeCSVCell(tc.in); got != tc.want {
 			t.Fatalf("sanitizeCSVCell(%q) = %q, want %q", tc.in, got, tc.want)

@@ -77,23 +77,40 @@ func TestBuildExpiryRisk_Cumulative(t *testing.T) {
 func TestBuildIssuerTrust(t *testing.T) {
 	t.Parallel()
 
-	tr := BuildIssuerTrust(sampleCerts())
-	// Two issuers; "CN=Public CA" has 2 certs and none in vault => import candidate.
-	var publicCA *IssuerSummary
-	for i := range tr.Issuers {
-		if tr.Issuers[i].IssuerDN == "CN=Public CA" {
-			publicCA = &tr.Issuers[i]
-		}
+	certs := []store.Certificate{
+		// Internal CA, unmanaged => import candidate.
+		cert("valid", 300, "internal", "unmanaged", "CN=Internal Root", true, "complete"),
+		// Public CA leaves, unmanaged, NOT CA => not import candidates.
+		cert("valid", 100, "external", "unmanaged", "CN=Public CA", false, "complete"),
+		cert("valid", 90, "external", "unmanaged", "CN=Public CA", false, "complete"),
 	}
+
+	tr := BuildIssuerTrust(certs)
+	get := func(dn string) *IssuerSummary {
+		for i := range tr.Issuers {
+			if tr.Issuers[i].IssuerDN == dn {
+				return &tr.Issuers[i]
+			}
+		}
+		return nil
+	}
+
+	publicCA := get("CN=Public CA")
 	if publicCA == nil {
 		t.Fatal("expected CN=Public CA issuer summary")
 	}
 	if publicCA.CertCount != 2 {
 		t.Fatalf("public CA cert count = %d, want 2", publicCA.CertCount)
 	}
-	if !publicCA.ImportCandidate {
-		t.Fatal("public CA should be an import candidate (0 in vault)")
+	if publicCA.ImportCandidate {
+		t.Fatal("public CA (leaf, no CA cert) must NOT be an import candidate")
 	}
+
+	internalRoot := get("CN=Internal Root")
+	if internalRoot == nil || !internalRoot.ImportCandidate {
+		t.Fatalf("internal CA (unmanaged, is_ca) should be an import candidate: %+v", internalRoot)
+	}
+
 	// Sorted by cert count desc: first issuer has >= second's count.
 	if len(tr.Issuers) == 2 && tr.Issuers[0].CertCount < tr.Issuers[1].CertCount {
 		t.Fatalf("issuers not sorted by cert count desc: %+v", tr.Issuers)

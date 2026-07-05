@@ -120,7 +120,7 @@ func writeExpiryRisk(b *strings.Builder, r ExpiryRisk) {
 	fmt.Fprintf(b, "- **Expiring within 90 days:** %d\n\n", r.Within90)
 	if len(r.ByScope) > 0 {
 		b.WriteString("| Scope | ≤7d | ≤30d | ≤90d |\n|-------|-----|------|------|\n")
-		for _, scope := range sortedKeys(mapKeysExpiry(r.ByScope)) {
+		for _, scope := range sortedKeysExpiry(r.ByScope) {
 			c := r.ByScope[scope]
 			label := scope
 			if label == "" {
@@ -218,13 +218,14 @@ func sortedKeys(m map[string]int) []string {
 	return keys
 }
 
-// mapKeysExpiry adapts an ExpiryCounts map to the []string sorting helper.
-func mapKeysExpiry(m map[string]ExpiryCounts) map[string]int {
-	out := make(map[string]int, len(m))
+// sortedKeysExpiry returns the scope keys of an ExpiryCounts map in stable order.
+func sortedKeysExpiry(m map[string]ExpiryCounts) []string {
+	keys := make([]string, 0, len(m))
 	for k := range m {
-		out[k] = 0
+		keys = append(keys, k)
 	}
-	return out
+	sort.Strings(keys)
+	return keys
 }
 
 const timeRFC3339 = "2006-01-02 15:04:05 UTC"

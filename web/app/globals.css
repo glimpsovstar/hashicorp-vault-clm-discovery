@@ -412,6 +412,27 @@ a.button:hover {
   text-decoration: none;
 }
 
+/* Modal (consent dialogs, e.g. Vault CA import) */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.modal {
+  background: var(--token-color-surface-primary, #fff);
+  border: 1px solid var(--token-color-border-primary, #dedfe3);
+  border-radius: 6px;
+  padding: 24px;
+  max-width: 480px;
+  width: calc(100% - 32px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
 /* Badges (HDS semantic) */
 .badge {
   display: inline-flex;

@@ -94,11 +94,14 @@ North star and roadmap: `docs/program-context.md`.
   - ~~PR 1 — `internal/aap` client~~ — DONE (#50 / PR #51): dynamic template
     discovery by name, launch with extra_vars, status normalization, WaitForJob
     with transient-failure tolerance. httptest-covered.
-  - PR 2 — `POST /certificates/{id}/renew` + CN/mount/role/service → extra_vars
-    mapping (launch the AAP "CLM - Issue Certificate" JT / Issue→Deploy→Verify
-    workflow). (Starting now.)
+  - ~~PR 2 — `POST /certificates/{id}/renew`~~ — DONE (#52 / PR #53): consent-gated
+    endpoint resolves the AAP template by name and launches it with extra_vars
+    (CN/mount/role/service/target_hosts/ttl/alt_names). All values validated
+    (CN DNS host; ttl/alt_names SSTI-guarded). `renewLauncher` seam + config.
   - PR 3 — expiry-threshold auto-policy (< N days) + closed-loop verify
-    (rescan → reconcile → managed_in_vault).
+    (rescan → reconcile → managed_in_vault). **BLOCKED on a design decision:**
+    the renew endpoint needs role/mount/service per cert; auto-renewal must know
+    where to get those (stored per-cert at catalog time? derived? survey?).
   - AAP contract captured in memory (repo/clm-discovery.md); creds live on the
     user's Mac (TF-deployed AAP), never committed.
 

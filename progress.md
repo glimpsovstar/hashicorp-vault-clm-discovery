@@ -98,27 +98,38 @@ North star and roadmap: `docs/program-context.md`.
     endpoint resolves the AAP template by name and launches it with extra_vars
     (CN/mount/role/service/target_hosts/ttl/alt_names). All values validated
     (CN DNS host; ttl/alt_names SSTI-guarded). `renewLauncher` seam + config.
-  - PR 3 — expiry-threshold auto-policy (< N days) + closed-loop verify
-    (rescan → reconcile → managed_in_vault). **BLOCKED on a design decision:**
-    the renew endpoint needs role/mount/service per cert; auto-renewal must know
-    where to get those (stored per-cert at catalog time? derived? survey?).
+  - ~~PR 3a — persist per-cert renewal config~~ — DONE (#54 / PR #55): migration
+    000005 `renewal_config JSONB`, `store.SetRenewalConfig`, optional `renewal`
+    object on catalog-import. Survives rescans. Feeds the AAP dynamic inventory.
+  - PR 3b — `POST /renew-expiring` batch auto-renewal (< N days) using
+    `renewal_config` + closed-loop verify (rescan → reconcile → managed_in_vault).
   - AAP contract captured in memory (repo/clm-discovery.md); creds live on the
     user's Mac (TF-deployed AAP), never committed.
+
+- **Architecture decided (ADR 0001)** — source of truth + event-driven design.
+  See [docs/adr/0001-source-of-truth-and-event-driven-automation.md](docs/adr/0001-source-of-truth-and-event-driven-automation.md).
+  - **CLM = inventory system of record** (managed + shadow + governance +
+    renewal config); **Vault = issuance/trust SoR**. Works on HCP and TFE/
+    self-managed (no dependence on the HCP-only cert dashboard).
+  - **AAP builds dynamic inventory from a read-only CLM REST endpoint** (pulls),
+    fed by `renewal_config` — not by querying Vault directly.
+  - **Events via a transactional outbox.** Phase 1 transport = Ansible EDA
+    webhook (no bus). Phase 2 = message bus (NATS/Kafka) when a 2nd consumer
+    appears. Outbox + EDA is the reactive path; `POST /renew-expiring` is the
+    batch path; both share one internal "launch renewal" service.
 
 ## Next (confirmed order)
 
 1. **Hardening (first):**
    - ~~Private-IP deny on the CRL/OCSP fetch~~ — DONE (#46 / PR #47).
    - ~~OCSP stapling capture at scan~~ — DONE (#48 / PR #49).
-2. **Mode C full automation** — the IBM/HashiCorp/Red Hat "Eliminate Certificate
-   Risk at Scale" solution brief closed loop (Vault issues/governs; **AAP**
-   deploys/rotates/verifies; CLM = "monitor inventory + orchestrate + verify").
-   Builds on the renewal kit (#44) — turn the generated AAP playbook into a
-   **triggered** action:
-   - `internal/aap` client (launch job template `/api/v2/job_templates/{id}/launch`
-     + poll job status; mockable/httptest-tested);
-   - **on-demand `POST /certificates/{id}/renew` + auto-policy** (renew when
-     < N days to expiry);
+2. **Mode C full automation** (Vault issues/governs; **AAP** deploys/rotates/
+   verifies; CLM = monitor + orchestrate + verify):
+   - ~~AAP client~~ (#50), ~~renew endpoint~~ (#52), ~~renewal-config persistence~~ (#54).
+   - **PR 3b:** `POST /renew-expiring` batch auto-renewal + closed-loop verify.
+   - **AAP dynamic-inventory endpoint** (read-only; ADR 0001).
+   - **Transactional outbox + Ansible EDA webhook** (event Phase 1; ADR 0001).
+   - **Message bus transport** (event Phase 2; ADR 0001) — when a 2nd consumer exists.
    - closed-loop verify (rescan -> reconcile -> managed_in_vault).
    - **User HAS an AAP Controller** and will provide URL + token (like the HCP
      cluster) for end-to-end validation.

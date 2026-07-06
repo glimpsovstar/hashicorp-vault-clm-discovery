@@ -105,9 +105,11 @@ North star and roadmap: `docs/program-context.md`.
     `store.ListRenewable` + consent-gated batch endpoint (defaults to
     EXPIRING_SOON_DAYS), one shared `launchRenewal`/`validateRenewalLaunch` path
     with the on-demand renew. Closed-loop verify = existing rescan+reconcile.
-  - **NEXT: AAP dynamic-inventory endpoint** (read-only; ADR 0001) — AAP pulls
-    eligible hosts + hostvars built from `renewal_config`.
-  - Then: transactional outbox + Ansible EDA webhook (event Phase 1).
+  - ~~AAP dynamic-inventory endpoint~~ — DONE (#61 / PR #62): `internal/inventory`
+    renders the Ansible `--list` JSON (host=CN, issue-role hostvars + clm_* meta,
+    `ansible_connection: local`, `clm_renewable`/`svc_*` groups); `GET /inventory`
+    from `store.ListRenewable` with `?within_days=N`.
+  - **NEXT: transactional outbox + Ansible EDA webhook** (event Phase 1, ADR 0001).
   - AAP contract captured in memory (repo/clm-discovery.md); creds live on the
     user's Mac (TF-deployed AAP), never committed.
 

@@ -706,6 +706,9 @@ func (s *Store) ListUndeliveredEvents(ctx context.Context, limit, maxAttempts in
 	if limit <= 0 {
 		limit = 50
 	}
+	if maxAttempts <= 0 {
+		maxAttempts = 10
+	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, event_type, certificate_id, payload, created_at, delivered_at, attempts, last_error
 		FROM events

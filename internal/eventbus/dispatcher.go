@@ -5,6 +5,10 @@
 // dead-lettering after a cap. The whole thing is a no-op when no webhook URL is
 // configured. The transport is swappable — Phase 2 replaces the webhook sink
 // with a message bus without touching the outbox or the domain logic.
+//
+// Delivery is at-least-once: an event may be re-sent if the process crashes or
+// the delivered-mark write fails after a successful POST. Consumers (EDA
+// rulebooks) MUST be idempotent and deduplicate on the stable event "id".
 package eventbus
 
 import (
@@ -114,7 +118,14 @@ func (d *Dispatcher) RunOnce(ctx context.Context) (delivered, failed int, err er
 			continue
 		}
 		if merr := d.store.MarkEventDelivered(ctx, e.ID); merr != nil {
+			// Posted but couldn't record it: count as a failed attempt so the
+			// dead-letter cap still bounds redelivery (at-least-once — EDA dedups).
 			d.log.Warn("mark event delivered", "event_id", e.ID.String(), "err", merr)
+			if ferr := d.store.MarkEventFailed(ctx, e.ID, "delivered but not recorded: "+merr.Error()); ferr != nil {
+				d.log.Warn("mark event failed", "event_id", e.ID.String(), "err", ferr)
+			}
+			failed++
+			continue
 		}
 		delivered++
 	}

@@ -17,14 +17,19 @@ import (
 )
 
 type fakeStore struct {
-	mu        sync.Mutex
-	events    []store.Event
-	delivered []uuid.UUID
-	failed    map[uuid.UUID]string
-	listErr   error
+	mu             sync.Mutex
+	events         []store.Event
+	delivered      []uuid.UUID
+	failed         map[uuid.UUID]string
+	listErr        error
+	deliveredErr   error
+	gotBatch       int
+	gotMaxAttempts int
 }
 
-func (f *fakeStore) ListUndeliveredEvents(_ context.Context, _, _ int) ([]store.Event, error) {
+func (f *fakeStore) ListUndeliveredEvents(_ context.Context, limit, maxAttempts int) ([]store.Event, error) {
+	f.gotBatch = limit
+	f.gotMaxAttempts = maxAttempts
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
@@ -34,6 +39,9 @@ func (f *fakeStore) ListUndeliveredEvents(_ context.Context, _, _ int) ([]store.
 func (f *fakeStore) MarkEventDelivered(_ context.Context, id uuid.UUID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.deliveredErr != nil {
+		return f.deliveredErr
+	}
 	f.delivered = append(f.delivered, id)
 	return nil
 }
@@ -149,5 +157,75 @@ func TestRun_StopsOnContextCancel(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("Run did not stop on context cancel")
+	}
+}
+
+func TestRunOnce_ListErrorAborts(t *testing.T) {
+	t.Parallel()
+
+	fs := &fakeStore{listErr: context.Canceled}
+	d := New(Config{WebhookURL: "http://unused"}, fs, testLogger())
+	if _, _, err := d.RunOnce(context.Background()); err == nil {
+		t.Fatal("expected RunOnce to return the store read error")
+	}
+}
+
+func TestRunOnce_MarkDeliveredFailureCountsFailed(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	e := event()
+	fs := &fakeStore{events: []store.Event{e}, deliveredErr: context.Canceled}
+	d := New(Config{WebhookURL: srv.URL}, fs, testLogger())
+
+	delivered, failed, err := d.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	// Posted OK but couldn't record delivery -> treated as failed so the
+	// dead-letter cap bounds redelivery.
+	if delivered != 0 || failed != 1 {
+		t.Fatalf("delivered=%d failed=%d, want 0/1", delivered, failed)
+	}
+	if _, ok := fs.failed[e.ID]; !ok {
+		t.Fatal("expected the event to be marked failed when delivery couldn't be recorded")
+	}
+}
+
+func TestRunOnce_NoTokenNoAuthHeader(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Errorf("Authorization header should be absent when no token is configured")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	fs := &fakeStore{events: []store.Event{event()}}
+	d := New(Config{WebhookURL: srv.URL}, fs, testLogger())
+	if _, _, err := d.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+}
+
+func TestNew_Defaults(t *testing.T) {
+	t.Parallel()
+
+	fs := &fakeStore{}
+	d := New(Config{WebhookURL: "http://unused"}, fs, testLogger())
+	if _, _, err := d.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if fs.gotBatch != 50 || fs.gotMaxAttempts != 10 {
+		t.Fatalf("defaults not applied: batch=%d maxAttempts=%d, want 50/10", fs.gotBatch, fs.gotMaxAttempts)
+	}
+	if d.cfg.Interval != 15*time.Second {
+		t.Fatalf("interval default = %v, want 15s", d.cfg.Interval)
 	}
 }

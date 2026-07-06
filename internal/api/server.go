@@ -731,6 +731,9 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
+	if limit > 500 {
+		limit = 500 // keep the echoed limit consistent with the store's cap
+	}
 	events, err := s.resources.ListEvents(r.Context(), limit)
 	if err != nil {
 		s.writeServerError(w, r, err, "failed to list events")

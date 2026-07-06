@@ -546,17 +546,19 @@ func (s *Store) GetIssuerPEMForCert(ctx context.Context, issuerDN string) (strin
 	return pemStr, nil
 }
 
-// MarkRevokedViaCRL flips a certificate to revoked based on a signature-verified
-// CRL check. Returns ErrCertificateNotFound if the id is unknown.
-func (s *Store) MarkRevokedViaCRL(ctx context.Context, id uuid.UUID) error {
+// MarkRevoked flips a certificate to revoked based on a signature-verified
+// revocation check. source is the mechanism ("crl" or "ocsp") and is recorded
+// as revocation_status = "revoked_via_<source>". Returns ErrCertificateNotFound
+// if the id is unknown.
+func (s *Store) MarkRevoked(ctx context.Context, id uuid.UUID, source string) error {
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE certificates SET
 			status = 'revoked',
-			revocation_status = 'revoked_via_crl',
+			revocation_status = $2,
 			revocation_checked_at = NOW(),
 			updated_at = NOW()
 		WHERE id = $1
-	`, id)
+	`, id, "revoked_via_"+source)
 	if err != nil {
 		return err
 	}

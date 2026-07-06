@@ -26,8 +26,8 @@ const (
 // Result is a single revocation check outcome.
 type Result struct {
 	Status    Status     `json:"status"`
-	Source    string     `json:"source"`   // "crl"
-	Verified  bool       `json:"verified"` // CRL signature verified against the issuer
+	Source    string     `json:"source"`   // "crl" or "ocsp"
+	Verified  bool       `json:"verified"` // response/CRL signature verified against the issuer
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
 	CRLURL    string     `json:"crl_url,omitempty"`
 }
@@ -49,7 +49,7 @@ func CheckCRL(ctx context.Context, client *http.Client, serialHex string, crlURL
 		return res, fmt.Errorf("invalid serial %q", serialHex)
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
+		client = defaultClient()
 	}
 
 	var crl *x509.RevocationList
@@ -109,6 +109,18 @@ func fetchCRL(ctx context.Context, client *http.Client, url string) ([]byte, err
 	}
 	// Cap the read to protect against oversized/hostile CRLs.
 	return io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+}
+
+// defaultClient is the fallback HTTP client for revocation fetches: a bounded
+// timeout with redirects disabled, since the fetched URLs are attacker-influenced
+// (taken from the scanned certificate).
+func defaultClient() *http.Client {
+	return &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 func parseCert(pemStr string) *x509.Certificate {

@@ -1,5 +1,9 @@
 # Design: CRL revocation for shadow certs (#40)
 
+> **Update (#42):** OCSP added as the preferred check (signed/authoritative); the
+> `revocation-check` endpoint now runs `revocation.Check` = OCSP-first, CRL-fallback.
+> See `2026-07-06-ocsp-revocation-design` notes below / issue #42.
+
 - **Issue:** #40 (extends v1.1b revocation beyond Vault-issued certs)
 - **Status:** Implemented (slice 1: CRL). OCSP is a follow-up.
 - **Builds on:** revocation columns (`status`, `revocation_status`) already exist.

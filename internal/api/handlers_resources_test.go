@@ -104,7 +104,7 @@ func (f *fakeResourceStore) GetIssuerPEMForCert(_ context.Context, _ string) (st
 	return f.issuerPEM, f.issuerPEMErr
 }
 
-func (f *fakeResourceStore) MarkRevokedViaCRL(_ context.Context, _ uuid.UUID) error {
+func (f *fakeResourceStore) MarkRevoked(_ context.Context, _ uuid.UUID, _ string) error {
 	f.markRevokedN++
 	return f.markRevokedErr
 }
@@ -426,23 +426,23 @@ func TestHandleGetCertificateChoose_Statuses(t *testing.T) {
 func TestHandleRevocationCheck_Statuses(t *testing.T) {
 	t.Parallel()
 
-	revokedVerified := func(context.Context, string, []string, string) (revocation.Result, error) {
-		return revocation.Result{Status: revocation.StatusRevoked, Verified: true, Source: "crl"}, nil
+	revokedVerified := func(context.Context, revocation.CheckInput) (revocation.Result, error) {
+		return revocation.Result{Status: revocation.StatusRevoked, Verified: true, Source: "ocsp"}, nil
 	}
-	revokedUnverified := func(context.Context, string, []string, string) (revocation.Result, error) {
+	revokedUnverified := func(context.Context, revocation.CheckInput) (revocation.Result, error) {
 		return revocation.Result{Status: revocation.StatusRevoked, Verified: false, Source: "crl"}, nil
 	}
-	good := func(context.Context, string, []string, string) (revocation.Result, error) {
-		return revocation.Result{Status: revocation.StatusGood, Verified: true, Source: "crl"}, nil
+	good := func(context.Context, revocation.CheckInput) (revocation.Result, error) {
+		return revocation.Result{Status: revocation.StatusGood, Verified: true, Source: "ocsp"}, nil
 	}
-	checkErr := func(context.Context, string, []string, string) (revocation.Result, error) {
+	checkErr := func(context.Context, revocation.CheckInput) (revocation.Result, error) {
 		return revocation.Result{}, errors.New("fetch failed")
 	}
 
 	tests := []struct {
 		name        string
 		res         *fakeResourceStore
-		check       crlChecker
+		check       revChecker
 		id          string
 		want        int
 		wantPersist int
@@ -460,7 +460,7 @@ func TestHandleRevocationCheck_Statuses(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			srv := newResourceServer(tt.res)
-			srv.crlCheck = tt.check
+			srv.revCheck = tt.check
 			rec := httptest.NewRecorder()
 			srv.handleRevocationCheck(rec, idRequest(http.MethodPost, tt.id))
 			if rec.Code != tt.want {

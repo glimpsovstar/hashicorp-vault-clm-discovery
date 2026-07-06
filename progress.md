@@ -101,8 +101,13 @@ North star and roadmap: `docs/program-context.md`.
   - ~~PR 3a — persist per-cert renewal config~~ — DONE (#54 / PR #55): migration
     000005 `renewal_config JSONB`, `store.SetRenewalConfig`, optional `renewal`
     object on catalog-import. Survives rescans. Feeds the AAP dynamic inventory.
-  - PR 3b — `POST /renew-expiring` batch auto-renewal (< N days) using
-    `renewal_config` + closed-loop verify (rescan → reconcile → managed_in_vault).
+  - ~~PR 3b — `POST /renew-expiring` batch auto-renewal~~ — DONE (#58 / PR #60):
+    `store.ListRenewable` + consent-gated batch endpoint (defaults to
+    EXPIRING_SOON_DAYS), one shared `launchRenewal`/`validateRenewalLaunch` path
+    with the on-demand renew. Closed-loop verify = existing rescan+reconcile.
+  - **NEXT: AAP dynamic-inventory endpoint** (read-only; ADR 0001) — AAP pulls
+    eligible hosts + hostvars built from `renewal_config`.
+  - Then: transactional outbox + Ansible EDA webhook (event Phase 1).
   - AAP contract captured in memory (repo/clm-discovery.md); creds live on the
     user's Mac (TF-deployed AAP), never committed.
 

@@ -76,13 +76,31 @@ North star and roadmap: `docs/program-context.md`.
 
 ## In progress
 
-- Nothing actively coding. On `main`, working tree clean. No open issues.
+- **Paused** (2026-07-06) pending user go-ahead. Direction confirmed below.
 
-## Next
+## Next (confirmed order)
 
-1. Private-IP deny on the CRL/OCSP fetch address; OCSP stapling capture at scan.
-2. **v2** — cloud CA sources (ACM, etc.).
-3. Mode C full automation (orchestrate issue→deploy→verify) — v1.3+.
+1. **Hardening (first):**
+   - Private-IP deny on the CRL/OCSP fetch — resolve host, reject loopback/
+     link-local/RFC-1918 (closes residual blind-SSRF on the attacker-influenced
+     CRL/OCSP URL from the scanned cert).
+   - OCSP stapling capture at scan — read the server's stapled OCSP response
+     during the existing TLS probe; populate revocation status automatically.
+2. **Mode C full automation** — the IBM/HashiCorp/Red Hat "Eliminate Certificate
+   Risk at Scale" solution brief closed loop (Vault issues/governs; **AAP**
+   deploys/rotates/verifies; CLM = "monitor inventory + orchestrate + verify").
+   Builds on the renewal kit (#44) — turn the generated AAP playbook into a
+   **triggered** action:
+   - `internal/aap` client (launch job template `/api/v2/job_templates/{id}/launch`
+     + poll job status; mockable/httptest-tested);
+   - **on-demand `POST /certificates/{id}/renew` + auto-policy** (renew when
+     < N days to expiry);
+   - closed-loop verify (rescan -> reconcile -> managed_in_vault).
+   - **User HAS an AAP Controller** and will provide URL + token (like the HCP
+     cluster) for end-to-end validation.
+3. **v2 cloud CA sources** — read-only collectors for ACM / Azure Key Vault /
+   GCP Certificate Manager into the same inventory (single pane; closes shadow-CA
+   blind spot).
 
 ## HCP note
 - `hcpvenv` alias token is stale/expired — do NOT use it. Mint fresh via TPM:

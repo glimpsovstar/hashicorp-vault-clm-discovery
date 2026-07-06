@@ -174,6 +174,25 @@ export function checkRevocation(id: string) {
   });
 }
 
+export type RenewalArtifact = {
+  filename: string;
+  language: string;
+  content: string;
+};
+
+// getRenewalKit generates Mode C reissue+deploy artifacts (vault-agent / AAP).
+export function getRenewalKit(
+  id: string,
+  params: { target: string; role: string; mount?: string; service?: string }
+) {
+  const qs = new URLSearchParams({ target: params.target, role: params.role });
+  if (params.mount) qs.set("mount", params.mount);
+  if (params.service) qs.set("service", params.service);
+  return fetchJSON<{ target: string; artifacts: RenewalArtifact[] }>(
+    `/api/v1/certificates/${id}/renewal-kit?${qs.toString()}`
+  );
+}
+
 export function listScans() {
   return fetchJSON<{ items: Scan[] }>("/api/v1/scans");
 }

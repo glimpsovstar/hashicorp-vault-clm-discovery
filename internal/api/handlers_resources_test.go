@@ -473,6 +473,41 @@ func TestHandleRevocationCheck_Statuses(t *testing.T) {
 	}
 }
 
+func TestHandleRenewalKit_Statuses(t *testing.T) {
+	t.Parallel()
+
+	cn := "app.example.com"
+	tests := []struct {
+		name  string
+		res   *fakeResourceStore
+		id    string
+		query string
+		want  int
+	}{
+		{"invalid id", &fakeResourceStore{}, "nope", "?target=agent&role=web", http.StatusBadRequest},
+		{"not found", &fakeResourceStore{certErr: store.ErrCertificateNotFound}, uuid.New().String(), "?target=agent&role=web", http.StatusNotFound},
+		{"missing role", &fakeResourceStore{cert: store.Certificate{SubjectCN: &cn}}, uuid.New().String(), "?target=agent", http.StatusBadRequest},
+		{"success agent", &fakeResourceStore{cert: store.Certificate{SubjectCN: &cn}}, uuid.New().String(), "?target=agent&role=web", http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequest(http.MethodGet, "/"+tt.query, nil)
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", tt.id)
+			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+			rec := httptest.NewRecorder()
+			newResourceServer(tt.res).handleRenewalKit(rec, req)
+			if rec.Code != tt.want {
+				t.Fatalf("status = %d, want %d", rec.Code, tt.want)
+			}
+			if tt.want == http.StatusOK && !strings.Contains(rec.Body.String(), "vault-agent.hcl") {
+				t.Fatalf("success body missing artifact: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
 // TestCertificateRoutes_Registered exercises the real Router so a dropped route
 // (e.g. DELETE removed while adding catalog-import) fails loudly instead of only
 // through direct handler calls.
@@ -490,6 +525,9 @@ func TestCertificateRoutes_Registered(t *testing.T) {
 	}{
 		{http.MethodPost, "/api/v1/certificates/" + id + "/catalog-import", `{"consent":true}`, http.StatusOK},
 		{http.MethodGet, "/api/v1/certificates/" + id + "/choose", "", http.StatusOK},
+		// default fake cert has no SubjectCN, so renewal-kit generation 400s — which
+		// still proves the route is registered (not 404/405).
+		{http.MethodGet, "/api/v1/certificates/" + id + "/renewal-kit?target=agent&role=web", "", http.StatusBadRequest},
 		{http.MethodPost, "/api/v1/certificates/" + id + "/revocation-check", "", http.StatusOK},
 		{http.MethodDelete, "/api/v1/certificates/" + id, "", http.StatusNoContent},
 		{http.MethodDelete, "/api/v1/issuers/" + id, "", http.StatusNoContent},

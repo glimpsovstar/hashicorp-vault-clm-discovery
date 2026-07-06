@@ -16,6 +16,7 @@ import {
 import EnrichmentForm from "./enrichment-form";
 import CatalogImportButton from "./catalog-import-button";
 import RevocationCheckButton from "./revocation-check-button";
+import RenewalKit from "./renewal-kit";
 
 export default async function CertificateDetailPage({
   params,
@@ -156,6 +157,8 @@ export default async function CertificateDetailPage({
           </div>
         </div>
       </section>
+
+      <RenewalKit cert={cert} />
 
       <section className="panel">
         <div className="panel-header">

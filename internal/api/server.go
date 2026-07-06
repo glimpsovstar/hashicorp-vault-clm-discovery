@@ -18,6 +18,7 @@ import (
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/config"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/lifecycle"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/renewal"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/revocation"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanrunner"
@@ -128,6 +129,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/certificates/{id}", s.handleGetCertificate)
 		r.Get("/certificates/{id}/pem", s.handleGetCertificatePEM)
 		r.Get("/certificates/{id}/choose", s.handleGetCertificateChoose)
+		r.Get("/certificates/{id}/renewal-kit", s.handleRenewalKit)
 		r.Post("/certificates/{id}/revocation-check", s.handleRevocationCheck)
 		r.Patch("/certificates/{id}", s.handlePatchCertificate)
 		r.Post("/certificates/{id}/catalog-import", s.handleCatalogImport)
@@ -392,6 +394,52 @@ func (s *Server) handleGetCertificateChoose(w http.ResponseWriter, r *http.Reque
 		IsCA:          cert.IsCA,
 	})
 	writeJSON(w, http.StatusOK, rec)
+}
+
+// handleRenewalKit generates Mode C reissue+deploy artifacts (vault-agent HCL or
+// an AAP playbook) for a certificate and a chosen Vault PKI role. Read-only:
+// CLM generates the artifacts; the operator runs them, and CLM later verifies via
+// rescan + reconcile.
+func (s *Server) handleRenewalKit(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid certificate id")
+		return
+	}
+	cert, err := s.resources.GetCertificate(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrCertificateNotFound) {
+			writeError(w, r, http.StatusNotFound, "certificate not found")
+			return
+		}
+		s.writeServerError(w, r, err, "failed to load certificate")
+		return
+	}
+
+	target := renewal.Target(strings.ToLower(r.URL.Query().Get("target")))
+	if target == "" {
+		target = renewal.TargetAgent
+	}
+	mount := strings.TrimSpace(r.URL.Query().Get("mount"))
+	if mount == "" {
+		mount = "pki"
+	}
+	cn := ""
+	if cert.SubjectCN != nil {
+		cn = *cert.SubjectCN
+	}
+
+	arts, err := renewal.Generate(target, renewal.KitInput{
+		CommonName: cn,
+		Mount:      mount,
+		Role:       strings.TrimSpace(r.URL.Query().Get("role")),
+		Service:    strings.TrimSpace(r.URL.Query().Get("service")),
+	})
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"target": target, "artifacts": arts})
 }
 
 // handleRevocationCheck runs a CRL revocation check for a discovered cert. It

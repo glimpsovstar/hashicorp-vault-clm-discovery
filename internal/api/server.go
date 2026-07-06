@@ -35,6 +35,7 @@ type resourceStore interface {
 	GetCertificate(ctx context.Context, id uuid.UUID) (store.Certificate, error)
 	ListCertificates(ctx context.Context, f store.CertificateFilter) ([]store.Certificate, int, error)
 	ListRenewable(ctx context.Context, withinDays int) ([]store.Certificate, error)
+	ListEvents(ctx context.Context, limit int) ([]store.Event, error)
 	SetManagedStatus(ctx context.Context, id uuid.UUID, status string) (store.Certificate, error)
 	SetRenewalConfig(ctx context.Context, id uuid.UUID, cfg store.RenewalConfig) (store.Certificate, error)
 	GetIssuer(ctx context.Context, id uuid.UUID) (store.Issuer, error)
@@ -196,6 +197,7 @@ func (s *Server) Router() http.Handler {
 		r.Post("/reconcile", s.handleReconcile)
 		r.Post("/renew-expiring", s.handleRenewExpiring)
 		r.Get("/inventory", s.handleInventory)
+		r.Get("/events", s.handleListEvents)
 
 		r.Get("/blindspot", s.handleGetBlindSpot)
 		r.Get("/compliance/summary", s.handleGetComplianceSummary)
@@ -719,6 +721,25 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, inventory.Build(certs))
+}
+
+// handleListEvents returns recent outbox events (read-only), newest first.
+func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if q := strings.TrimSpace(r.URL.Query().Get("limit")); q != "" {
+		if n, err := strconv.Atoi(q); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 500 {
+		limit = 500 // keep the echoed limit consistent with the store's cap
+	}
+	events, err := s.resources.ListEvents(r.Context(), limit)
+	if err != nil {
+		s.writeServerError(w, r, err, "failed to list events")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": events, "limit": limit})
 }
 
 // handleRevocationCheck runs a CRL revocation check for a discovered cert. It

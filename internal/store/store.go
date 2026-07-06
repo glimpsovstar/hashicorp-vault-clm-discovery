@@ -116,6 +116,20 @@ type RenewalConfig struct {
 	AltNames    string `json:"alt_names,omitempty"`
 }
 
+// Event is a certificate-lifecycle event in the outbox (ADR 0001). It is written
+// transactionally with the state change that produced it and later delivered to
+// Ansible EDA by the dispatcher.
+type Event struct {
+	ID            uuid.UUID       `json:"id"`
+	EventType     string          `json:"event_type"`
+	CertificateID *uuid.UUID      `json:"certificate_id"`
+	Payload       json.RawMessage `json:"payload"`
+	CreatedAt     time.Time       `json:"created_at"`
+	DeliveredAt   *time.Time      `json:"delivered_at"`
+	Attempts      int             `json:"attempts"`
+	LastError     *string         `json:"last_error"`
+}
+
 type Observation struct {
 	ID            uuid.UUID `json:"id"`
 	CertificateID uuid.UUID `json:"certificate_id"`
@@ -608,10 +622,18 @@ func (s *Store) GetIssuerPEMForCert(ctx context.Context, issuerDN string) (strin
 
 // MarkRevoked flips a certificate to revoked based on a signature-verified
 // revocation check. source is the mechanism ("crl", "ocsp", or "ocsp_stapled")
-// and is recorded as revocation_status = "revoked_via_<source>". Returns
-// ErrCertificateNotFound if the id is unknown.
+// and is recorded as revocation_status = "revoked_via_<source>". It also writes a
+// cert.revoked event in the SAME transaction (outbox pattern, ADR 0001) so a
+// committed revocation can never lose its event. Returns ErrCertificateNotFound
+// if the id is unknown.
 func (s *Store) MarkRevoked(ctx context.Context, id uuid.UUID, source string) error {
-	tag, err := s.pool.Exec(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	tag, err := tx.Exec(ctx, `
 		UPDATE certificates SET
 			status = 'revoked',
 			revocation_status = $2,
@@ -625,7 +647,56 @@ func (s *Store) MarkRevoked(ctx context.Context, id uuid.UUID, source string) er
 	if tag.RowsAffected() == 0 {
 		return ErrCertificateNotFound
 	}
-	return nil
+
+	payload, err := json.Marshal(map[string]any{
+		"source":            source,
+		"revocation_status": "revoked_via_" + source,
+	})
+	if err != nil {
+		return err
+	}
+	if err := appendEventTx(ctx, tx, "cert.revoked", &id, payload); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// appendEventTx inserts an outbox event within the given transaction.
+func appendEventTx(ctx context.Context, tx pgx.Tx, eventType string, certID *uuid.UUID, payload []byte) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO events (event_type, certificate_id, payload) VALUES ($1, $2, $3)
+	`, eventType, certID, payload)
+	return err
+}
+
+// ListEvents returns the most recent outbox events (newest first), capped by
+// limit (default 100, max 500).
+func (s *Store) ListEvents(ctx context.Context, limit int) ([]Event, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, event_type, certificate_id, payload, created_at, delivered_at, attempts, last_error
+		FROM events ORDER BY created_at DESC LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	events := []Event{}
+	for rows.Next() {
+		var e Event
+		if err := rows.Scan(&e.ID, &e.EventType, &e.CertificateID, &e.Payload,
+			&e.CreatedAt, &e.DeliveredAt, &e.Attempts, &e.LastError); err != nil {
+			return nil, err
+		}
+		events = append(events, e)
+	}
+	return events, rows.Err()
 }
 
 // GetIssuer loads a single issuer by id, returning ErrIssuerNotFound if absent.

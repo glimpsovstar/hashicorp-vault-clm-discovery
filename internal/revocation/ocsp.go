@@ -49,7 +49,7 @@ func CheckOCSP(ctx context.Context, client *http.Client, leafPEM, issuerPEM stri
 		return res, fmt.Errorf("create ocsp request: %w", err)
 	}
 	if client == nil {
-		client = defaultClient()
+		client = NewFetchClient()
 	}
 
 	for _, server := range ocspServers {

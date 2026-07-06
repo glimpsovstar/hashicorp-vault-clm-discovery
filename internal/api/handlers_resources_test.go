@@ -571,6 +571,8 @@ func TestCertificateRoutes_Registered(t *testing.T) {
 		{http.MethodPost, "/api/v1/issuers/" + id + "/import", `{"consent":true,"mount":"pki"}`, http.StatusServiceUnavailable},
 		// renewer is nil on the resource-only server -> 503 proves registration.
 		{http.MethodPost, "/api/v1/renew-expiring", `{"consent":true}`, http.StatusServiceUnavailable},
+		// inventory is read-only and needs no AAP -> 200 proves registration.
+		{http.MethodGet, "/api/v1/inventory", "", http.StatusOK},
 	}
 	for _, c := range cases {
 		var body io.Reader

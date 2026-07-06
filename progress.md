@@ -109,7 +109,13 @@ North star and roadmap: `docs/program-context.md`.
     renders the Ansible `--list` JSON (host=CN, issue-role hostvars + clm_* meta,
     `ansible_connection: local`, `clm_renewable`/`svc_*` groups); `GET /inventory`
     from `store.ListRenewable` with `?within_days=N`.
-  - **NEXT: transactional outbox + Ansible EDA webhook** (event Phase 1, ADR 0001).
+  - ~~Event outbox Phase 1a~~ — DONE (#63 / PR #64): migration 000006 `events`
+    table, `store.Event`, transactional `MarkRevoked` emits `cert.revoked` in the
+    same tx, `GET /events`.
+  - ~~Event dispatcher Phase 1b~~ — DONE (#65 / PR #66): `internal/eventbus`
+    delivers outbox events to an Ansible EDA webhook (at-least-once, dead-letter
+    after N attempts), gated by `EDA_WEBHOOK_URL`, drained on shutdown.
+  - **Event Phase 1 COMPLETE.** Phase 2 (message bus) deferred until a 2nd consumer.
   - AAP contract captured in memory (repo/clm-discovery.md); creds live on the
     user's Mac (TF-deployed AAP), never committed.
 
@@ -133,13 +139,12 @@ North star and roadmap: `docs/program-context.md`.
 2. **Mode C full automation** (Vault issues/governs; **AAP** deploys/rotates/
    verifies; CLM = monitor + orchestrate + verify):
    - ~~AAP client~~ (#50), ~~renew endpoint~~ (#52), ~~renewal-config persistence~~ (#54).
-   - **PR 3b:** `POST /renew-expiring` batch auto-renewal + closed-loop verify.
-   - **AAP dynamic-inventory endpoint** (read-only; ADR 0001).
-   - **Transactional outbox + Ansible EDA webhook** (event Phase 1; ADR 0001).
-   - **Message bus transport** (event Phase 2; ADR 0001) — when a 2nd consumer exists.
-   - closed-loop verify (rescan -> reconcile -> managed_in_vault).
-   - **User HAS an AAP Controller** and will provide URL + token (like the HCP
-     cluster) for end-to-end validation.
+   - ~~`POST /renew-expiring` batch auto-renewal~~ (#58).
+   - ~~AAP dynamic-inventory endpoint~~ (#61).
+   - ~~Transactional outbox~~ (#63) + ~~Ansible EDA webhook dispatcher~~ (#65) — event Phase 1 DONE.
+   - **Message bus transport** (event Phase 2; ADR 0001) — deferred until a 2nd consumer exists.
+   - **Live validation** against the user's real AAP Controller + EDA webhook —
+     user provides URL + token (like the HCP cluster); pending.
 3. **v2 cloud CA sources** — read-only collectors for ACM / Azure Key Vault /
    GCP Certificate Manager into the same inventory (single pane; closes shadow-CA
    blind spot).

@@ -73,10 +73,28 @@ CLM issuing certs, bulk reissue/deploy (C is v1.3+ docs), HCP inventory backfill
   (`managed_status`, `vault_pki_mount`, `vault_issuer_ref`, last reconcile).
   Uses fields already on the cert. Copy explains reconcile drives it.
 
-### Mode C — deferred
+### Mode C — reissue & deploy (v1.3+, reference only)
 
-Decision-tree doc links to a vault-agent/AAP reference architecture section; no
-code.
+Mode C replaces a discovered/expiring cert with a **Vault-issued** leaf and
+deploys it, then CLM rescans to verify. It is **not** implemented in v1.2 (CLM
+does not issue or deploy certs — Vault PKI owns issuance). This section is the
+reference path so the Choose wizard can point operators at it.
+
+Reference architecture (deploy + renew leaves against a Vault PKI role):
+
+- **vault-agent** — a sidecar/host agent authenticates (AppRole/K8s/JWT), renders
+  the leaf from a `pki/issue/<role>` template, writes cert+key, and reloads the
+  consuming service on renewal. See
+  [Vault Agent](https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent)
+  and the [PKI + Agent tutorial](https://developer.hashicorp.com/vault/tutorials/pki).
+- **Ansible Automation Platform (AAP)** — a playbook obtains the leaf via the
+  Vault lookup/`community.hashi_vault` collection and distributes it to managed
+  hosts, then triggers a service reload; scheduled jobs handle renewal.
+
+**CLM's role in Mode C:** none at issue/deploy time. After deployment, a CLM
+**rescan** observes the new Vault-issued leaf on the wire, and **reconcile**
+(#23/#32) matches it → `managed_in_vault`, closing the loop. Full automation
+(orchestrating issue → deploy → verify) is tracked for v1.3+.
 
 ## Required Vault policy (mode B)
 

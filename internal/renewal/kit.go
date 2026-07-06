@@ -62,6 +62,15 @@ func validate(in KitInput) error {
 	return nil
 }
 
+// Validate reports whether the kit input is safe to use (CN is a DNS hostname,
+// mount and role are safe Vault path segments). Exported so the AAP renew
+// orchestrator reuses the exact same checks before launching a job.
+func Validate(in KitInput) error { return validate(in) }
+
+// ValidService reports whether an optional service name is safe. An empty
+// service is allowed (it just means "no service override").
+func ValidService(s string) bool { return s == "" || validName(s) }
+
 // validCommonName restricts the CN to a DNS hostname (optionally a single leading
 // wildcard label). The CN originates from the scanned certificate's subject_cn
 // (attacker-controlled), so this prevents newline/quote/`}}` injection into the

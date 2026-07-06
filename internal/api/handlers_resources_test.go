@@ -529,6 +529,9 @@ func TestCertificateRoutes_Registered(t *testing.T) {
 		// still proves the route is registered (not 404/405).
 		{http.MethodGet, "/api/v1/certificates/" + id + "/renewal-kit?target=agent&role=web", "", http.StatusBadRequest},
 		{http.MethodPost, "/api/v1/certificates/" + id + "/revocation-check", "", http.StatusOK},
+		// renewer is nil on the resource-only server, so the route resolving to
+		// 503 (not 404/405) proves it is registered.
+		{http.MethodPost, "/api/v1/certificates/" + id + "/renew", `{"consent":true,"role":"web"}`, http.StatusServiceUnavailable},
 		{http.MethodDelete, "/api/v1/certificates/" + id, "", http.StatusNoContent},
 		{http.MethodDelete, "/api/v1/issuers/" + id, "", http.StatusNoContent},
 		// importer is nil on the resource-only server, so the route resolving to

@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/google/uuid"
 
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/aap"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/config"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/lifecycle"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/renewal"
@@ -52,6 +53,52 @@ type issuerImporter interface {
 // the handler is testable without outbound HTTP.
 type revChecker func(ctx context.Context, in revocation.CheckInput) (revocation.Result, error)
 
+// RenewRef identifies the AAP job launched for a renewal.
+type RenewRef struct {
+	JobID    int  `json:"job_id"`
+	Workflow bool `json:"workflow"`
+}
+
+// renewLauncher launches a Vault+AAP renewal (Mode C). It resolves the
+// configured template by name and launches it with the given extra_vars. nil
+// when AAP is not configured, which the handler maps to 503. Injectable so the
+// handler is testable without a live Controller.
+type renewLauncher interface {
+	Renew(ctx context.Context, extraVars map[string]any) (RenewRef, error)
+}
+
+// aapRenewer is the production renewLauncher backed by an AAP Controller client.
+type aapRenewer struct {
+	client       *aap.Client
+	templateName string
+	workflow     bool
+}
+
+func (a *aapRenewer) Renew(ctx context.Context, extraVars map[string]any) (RenewRef, error) {
+	var (
+		id  int
+		err error
+	)
+	if a.workflow {
+		id, err = a.client.FindWorkflowJobTemplate(ctx, a.templateName)
+	} else {
+		id, err = a.client.FindJobTemplate(ctx, a.templateName)
+	}
+	if err != nil {
+		return RenewRef{}, err
+	}
+	var res aap.LaunchResult
+	if a.workflow {
+		res, err = a.client.LaunchWorkflowJobTemplate(ctx, id, extraVars)
+	} else {
+		res, err = a.client.LaunchJobTemplate(ctx, id, extraVars)
+	}
+	if err != nil {
+		return RenewRef{}, err
+	}
+	return RenewRef{JobID: res.JobID, Workflow: res.Workflow}, nil
+}
+
 type Server struct {
 	cfg        config.Config
 	store      *store.Store
@@ -65,6 +112,7 @@ type Server struct {
 	resources  resourceStore
 	importer   issuerImporter
 	revCheck   revChecker
+	renewer    renewLauncher
 }
 
 func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slog.Logger) *Server {
@@ -83,6 +131,17 @@ func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slo
 			s.importer = vc
 		} else {
 			log.Warn("vault client init failed", "err", err)
+		}
+	}
+	if cfg.AAPURL != "" {
+		if ac, err := aap.NewClient(aap.Config{
+			BaseURL:       cfg.AAPURL,
+			Token:         cfg.AAPToken,
+			SkipTLSVerify: cfg.AAPSkipTLSVerify,
+		}); err == nil {
+			s.renewer = &aapRenewer{client: ac, templateName: cfg.AAPRenewTemplate, workflow: cfg.AAPRenewWorkflow}
+		} else {
+			log.Warn("aap client init failed", "err", err)
 		}
 	}
 	s.worker = NewScanWorker(s)
@@ -122,6 +181,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/certificates/{id}/choose", s.handleGetCertificateChoose)
 		r.Get("/certificates/{id}/renewal-kit", s.handleRenewalKit)
 		r.Post("/certificates/{id}/revocation-check", s.handleRevocationCheck)
+		r.Post("/certificates/{id}/renew", s.handleRenewCertificate)
 		r.Patch("/certificates/{id}", s.handlePatchCertificate)
 		r.Post("/certificates/{id}/catalog-import", s.handleCatalogImport)
 		r.Delete("/certificates/{id}", s.handleDeleteCertificate)
@@ -431,6 +491,112 @@ func (s *Server) handleRenewalKit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"target": target, "artifacts": arts})
+}
+
+// handleRenewCertificate launches a Vault+AAP renewal for a certificate (Mode C
+// full automation). CLM resolves the configured AAP template by name and
+// launches it with extra_vars derived from the cert (CN) and the requested Vault
+// PKI coordinates; AAP issues from Vault and deploys. Consent-gated. Returns 503
+// when AAP is not configured. CLM confirms the outcome via a later rescan +
+// reconcile (closed loop, PR 3).
+func (s *Server) handleRenewCertificate(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid certificate id")
+		return
+	}
+	if s.renewer == nil {
+		writeError(w, r, http.StatusServiceUnavailable, "AAP not configured")
+		return
+	}
+
+	var body struct {
+		Consent     bool   `json:"consent"`
+		Mount       string `json:"mount"`
+		Role        string `json:"role"`
+		Service     string `json:"service"`
+		TargetHosts string `json:"target_hosts"`
+		TTL         string `json:"ttl"`
+		AltNames    string `json:"alt_names"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if !body.Consent {
+		writeError(w, r, http.StatusBadRequest, "consent required to launch a renewal")
+		return
+	}
+
+	cert, err := s.resources.GetCertificate(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrCertificateNotFound) {
+			writeError(w, r, http.StatusNotFound, "certificate not found")
+			return
+		}
+		s.writeServerError(w, r, err, "failed to load certificate")
+		return
+	}
+
+	cn := ""
+	if cert.SubjectCN != nil {
+		cn = *cert.SubjectCN
+	}
+	mount := strings.TrimSpace(body.Mount)
+	if mount == "" {
+		mount = s.cfg.AAPDefaultMount
+	}
+
+	// Validate every value that flows to AAP with the same checks the renewal-kit
+	// generator uses (the CN comes from the scanned cert and is attacker-shaped).
+	kit := renewal.KitInput{CommonName: cn, Mount: mount, Role: strings.TrimSpace(body.Role), Service: strings.TrimSpace(body.Service)}
+	if err := renewal.Validate(kit); err != nil {
+		writeError(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !renewal.ValidService(strings.TrimSpace(body.Service)) {
+		writeError(w, r, http.StatusBadRequest, "invalid service")
+		return
+	}
+	if !renewal.ValidService(strings.TrimSpace(body.TargetHosts)) {
+		writeError(w, r, http.StatusBadRequest, "invalid target_hosts")
+		return
+	}
+
+	// extra_vars maps onto the vault-ansible-clm issue role's contract. Vault
+	// AppRole creds are injected by an AAP credential, never passed by CLM.
+	extraVars := map[string]any{
+		"cert_common_name_override": cn,
+		"vault_pki_mount":           mount,
+		"vault_pki_role":            kit.Role,
+	}
+	if kit.Service != "" {
+		extraVars["cert_service_type"] = kit.Service
+	}
+	if th := strings.TrimSpace(body.TargetHosts); th != "" {
+		extraVars["target_hosts"] = th
+	}
+	if ttl := strings.TrimSpace(body.TTL); ttl != "" {
+		extraVars["vault_cert_ttl"] = ttl
+	}
+	if an := strings.TrimSpace(body.AltNames); an != "" {
+		extraVars["cert_alt_names_override"] = an
+	}
+
+	ref, err := s.renewer.Renew(r.Context(), extraVars)
+	if err != nil {
+		s.log.Warn("aap renewal launch failed", "action", "renew", "certificate_id", id.String(), "err", err)
+		writeError(w, r, http.StatusBadGateway, "failed to launch AAP renewal")
+		return
+	}
+	s.log.Info("aap renewal launched", "action", "renew", "certificate_id", id.String(), "job_id", ref.JobID, "workflow", ref.Workflow)
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"status":      "launched",
+		"job":         ref,
+		"common_name": cn,
+		"mount":       mount,
+		"role":        kit.Role,
+	})
 }
 
 // handleRevocationCheck runs a CRL revocation check for a discovered cert. It

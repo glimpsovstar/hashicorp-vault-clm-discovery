@@ -10,6 +10,7 @@ import (
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/cert"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/logging"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/revocation"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
 )
@@ -112,7 +113,8 @@ func (r *Runner) Run(ctx context.Context, job Job) error {
 				stats.RecordProbeSuccess()
 				mu.Unlock()
 
-				if _, err := r.store.UpsertCertificate(ctx, job.ScanID, result.Certificate, result.Observation); err != nil {
+				certID, err := r.store.UpsertCertificate(ctx, job.ScanID, result.Certificate, result.Observation)
+				if err != nil {
 					mu.Lock()
 					stats.RecordUpsertFailure(t, err.Error())
 					mu.Unlock()
@@ -132,6 +134,18 @@ func (r *Runner) Run(ctx context.Context, job Job) error {
 				stats.RecordCertFound()
 				curCerts := stats.CertsFound
 				mu.Unlock()
+
+				// A stapled OCSP response is verified against the presented issuer, so a
+				// verified-revoked result is trustworthy: persist it immediately.
+				if result.Revocation.Verified && result.Revocation.Status == revocation.StatusRevoked {
+					if err := r.store.MarkRevoked(ctx, certID, result.Revocation.Source); err != nil {
+						log.Warn("mark revoked from stapled OCSP",
+							append(targetAttrs(t, result.Observation.SNI, &result.Certificate), "err", err)...)
+					} else {
+						log.Info("certificate revoked (stapled OCSP)",
+							targetAttrs(t, result.Observation.SNI, &result.Certificate)...)
+					}
+				}
 
 				for _, ca := range result.Chain {
 					if ca.IsCA {

@@ -311,7 +311,8 @@ func (s *Store) UpsertCertificate(ctx context.Context, scanID uuid.UUID, parsed 
 			last_seen = EXCLUDED.last_seen,
 			days_until_expiry = EXCLUDED.days_until_expiry,
 			status = CASE
-				WHEN certificates.revocation_status = 'revoked_in_vault' THEN certificates.status
+				WHEN certificates.revocation_status = 'revoked_in_vault'
+					OR certificates.revocation_status LIKE 'revoked_via_%' THEN certificates.status
 				ELSE EXCLUDED.status
 			END,
 			cert_scope = EXCLUDED.cert_scope,
@@ -547,9 +548,9 @@ func (s *Store) GetIssuerPEMForCert(ctx context.Context, issuerDN string) (strin
 }
 
 // MarkRevoked flips a certificate to revoked based on a signature-verified
-// revocation check. source is the mechanism ("crl" or "ocsp") and is recorded
-// as revocation_status = "revoked_via_<source>". Returns ErrCertificateNotFound
-// if the id is unknown.
+// revocation check. source is the mechanism ("crl", "ocsp", or "ocsp_stapled")
+// and is recorded as revocation_status = "revoked_via_<source>". Returns
+// ErrCertificateNotFound if the id is unknown.
 func (s *Store) MarkRevoked(ctx context.Context, id uuid.UUID, source string) error {
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE certificates SET

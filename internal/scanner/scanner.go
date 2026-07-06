@@ -190,9 +190,10 @@ func (s *Scanner) Probe(ctx context.Context, target Target) ProbeResult {
 	result.Certificate = parsed
 	result.Chain = chain
 
-	// Capture a stapled OCSP response if the server sent one. It is signed by the
-	// issuer, so a verified-revoked result is authoritative without any outbound
-	// request (and no SSRF surface, unlike the on-demand revocation check).
+	// Capture a stapled OCSP response if the server sent one. ParseStapledOCSP
+	// binds the leaf to the presented issuer and verifies the staple signature, so
+	// a verified-revoked result is trustworthy without any outbound request (and no
+	// SSRF surface, unlike the on-demand revocation check).
 	if len(state.OCSPResponse) > 0 {
 		issuerPEM := ""
 		if len(chain) > 0 {

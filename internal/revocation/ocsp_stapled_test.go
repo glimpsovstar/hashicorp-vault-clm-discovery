@@ -97,6 +97,38 @@ func TestParseStapledOCSP_WrongIssuerNotVerified(t *testing.T) {
 	}
 }
 
+func TestParseStapledOCSP_RogueCANotBoundToLeaf(t *testing.T) {
+	t.Parallel()
+
+	// The leaf is issued by the real CA, but the attacker presents their own CA
+	// as the issuer and staples a validly-signed "revoked" response carrying the
+	// leaf's serial. ParseResponseForCert alone would accept it; the leaf<->issuer
+	// binding must reject it (fail closed, no false revocation).
+	realCA := newTestCA(t)
+	rogue := newTestCA(t)
+	leaf, leafPEM := leafSignedBy(t, realCA, big.NewInt(0x95))
+
+	tmpl := ocsp.Response{
+		Status:       ocsp.Revoked,
+		SerialNumber: leaf.SerialNumber,
+		ThisUpdate:   time.Now().Add(-time.Minute),
+		NextUpdate:   time.Now().Add(time.Hour),
+		RevokedAt:    time.Now().Add(-time.Minute),
+	}
+	staple, err := ocsp.CreateResponse(rogue.cert, rogue.cert, tmpl, rogue.key)
+	if err != nil {
+		t.Fatalf("CreateResponse: %v", err)
+	}
+
+	res, err := ParseStapledOCSP(staple, leafPEM, rogue.certPEM)
+	if err != nil {
+		t.Fatalf("ParseStapledOCSP: %v", err)
+	}
+	if res.Status != StatusUnknown || res.Verified {
+		t.Fatalf("expected unknown+unverified when leaf not issued by presented issuer, got %+v", res)
+	}
+}
+
 func TestParseStapledOCSP_EmptyOrMissingInputs(t *testing.T) {
 	t.Parallel()
 

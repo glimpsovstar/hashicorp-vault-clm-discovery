@@ -85,10 +85,12 @@ func CheckOCSP(ctx context.Context, client *http.Client, leafPEM, issuerPEM stri
 
 // ParseStapledOCSP interprets an OCSP response that a server stapled during the
 // TLS handshake (tls.ConnectionState.OCSPResponse). Unlike CheckOCSP it makes no
-// network call — the bytes were delivered by the peer — but it still verifies the
-// signature against the issuer via ocsp.ParseResponseForCert, so a revoked result
-// is authoritative. Returns StatusUnknown (unverified) when there is no staple,
-// no leaf/issuer, or the staple cannot be parsed/verified for this leaf.
+// network call — the bytes were delivered by the peer. It fails closed: the leaf
+// must actually be signed by the supplied issuer (the presented chain is
+// untrusted), and the response signature must verify against that issuer via
+// ocsp.ParseResponseForCert. Returns StatusUnknown (unverified) when there is no
+// staple, no leaf/issuer, the leaf is not issued by issuer, or the staple cannot
+// be parsed/verified for this leaf.
 func ParseStapledOCSP(stapled []byte, leafPEM, issuerPEM string) (Result, error) {
 	res := Result{Status: StatusUnknown, Source: "ocsp_stapled"}
 	if len(stapled) == 0 || leafPEM == "" || issuerPEM == "" {
@@ -97,6 +99,12 @@ func ParseStapledOCSP(stapled []byte, leafPEM, issuerPEM string) (Result, error)
 	leaf := parseCert(leafPEM)
 	issuer := parseCert(issuerPEM)
 	if leaf == nil || issuer == nil {
+		return res, nil
+	}
+	// Bind leaf to issuer. ParseResponseForCert only checks that the staple is
+	// signed by issuer and carries the leaf's serial; without this an attacker
+	// could pair a self-controlled CA with a self-signed "revoked" staple.
+	if err := leaf.CheckSignatureFrom(issuer); err != nil {
 		return res, nil
 	}
 	ocspResp, err := ocsp.ParseResponseForCert(stapled, leaf, issuer)

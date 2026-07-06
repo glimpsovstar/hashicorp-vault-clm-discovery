@@ -135,8 +135,8 @@ func (r *Runner) Run(ctx context.Context, job Job) error {
 				curCerts := stats.CertsFound
 				mu.Unlock()
 
-				// A stapled OCSP response is issuer-signed, so a verified-revoked
-				// result is authoritative: persist it immediately.
+				// A stapled OCSP response is verified against the presented issuer, so a
+				// verified-revoked result is trustworthy: persist it immediately.
 				if result.Revocation.Verified && result.Revocation.Status == revocation.StatusRevoked {
 					if err := r.store.MarkRevoked(ctx, certID, result.Revocation.Source); err != nil {
 						log.Warn("mark revoked from stapled OCSP",

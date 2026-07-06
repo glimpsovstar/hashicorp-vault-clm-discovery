@@ -47,6 +47,8 @@ type fakeResourceStore struct {
 	markRevokedN     int
 	setRenewalErr    error
 	gotRenewalConfig *store.RenewalConfig
+	renewable        []store.Certificate
+	renewableErr     error
 	deleteScanErr    error
 	deleteCertErr    error
 	deleteIssuerErr  error
@@ -74,6 +76,13 @@ func (f *fakeResourceStore) ListCertificates(_ context.Context, filter store.Cer
 		return nil, 0, f.listErr
 	}
 	return f.certs, len(f.certs), nil
+}
+
+func (f *fakeResourceStore) ListRenewable(_ context.Context, _ int) ([]store.Certificate, error) {
+	if f.renewableErr != nil {
+		return nil, f.renewableErr
+	}
+	return f.renewable, nil
 }
 
 func (f *fakeResourceStore) SetManagedStatus(_ context.Context, _ uuid.UUID, status string) (store.Certificate, error) {
@@ -560,6 +569,8 @@ func TestCertificateRoutes_Registered(t *testing.T) {
 		// importer is nil on the resource-only server, so the route resolving to
 		// 503 (not 404/405) proves it is registered.
 		{http.MethodPost, "/api/v1/issuers/" + id + "/import", `{"consent":true,"mount":"pki"}`, http.StatusServiceUnavailable},
+		// renewer is nil on the resource-only server -> 503 proves registration.
+		{http.MethodPost, "/api/v1/renew-expiring", `{"consent":true}`, http.StatusServiceUnavailable},
 	}
 	for _, c := range cases {
 		var body io.Reader

@@ -33,6 +33,7 @@ type resourceStore interface {
 	GetScan(ctx context.Context, id uuid.UUID) (store.Scan, error)
 	GetCertificate(ctx context.Context, id uuid.UUID) (store.Certificate, error)
 	ListCertificates(ctx context.Context, f store.CertificateFilter) ([]store.Certificate, int, error)
+	ListRenewable(ctx context.Context, withinDays int) ([]store.Certificate, error)
 	SetManagedStatus(ctx context.Context, id uuid.UUID, status string) (store.Certificate, error)
 	SetRenewalConfig(ctx context.Context, id uuid.UUID, cfg store.RenewalConfig) (store.Certificate, error)
 	GetIssuer(ctx context.Context, id uuid.UUID) (store.Issuer, error)
@@ -192,6 +193,7 @@ func (s *Server) Router() http.Handler {
 		r.Delete("/issuers/{id}", s.handleDeleteIssuer)
 
 		r.Post("/reconcile", s.handleReconcile)
+		r.Post("/renew-expiring", s.handleRenewExpiring)
 
 		r.Get("/blindspot", s.handleGetBlindSpot)
 		r.Get("/compliance/summary", s.handleGetComplianceSummary)
@@ -548,51 +550,22 @@ func (s *Server) handleRenewCertificate(w http.ResponseWriter, r *http.Request) 
 		mount = s.cfg.AAPDefaultMount
 	}
 
-	// Validate every value that flows to AAP with the same checks the renewal-kit
-	// generator uses (the CN comes from the scanned cert and is attacker-shaped).
-	kit := renewal.KitInput{CommonName: cn, Mount: mount, Role: strings.TrimSpace(body.Role), Service: strings.TrimSpace(body.Service)}
-	if err := renewal.Validate(kit); err != nil {
+	cfg := store.RenewalConfig{
+		Role:        strings.TrimSpace(body.Role),
+		Mount:       mount,
+		Service:     strings.TrimSpace(body.Service),
+		TargetHosts: strings.TrimSpace(body.TargetHosts),
+		TTL:         strings.TrimSpace(body.TTL),
+		AltNames:    strings.TrimSpace(body.AltNames),
+	}
+	// The CN comes from the scanned cert (attacker-shaped) and every field flows
+	// into AAP extra_vars (Ansible Jinja2-evaluates them), so validate all of it.
+	if err := validateRenewalLaunch(cn, cfg); err != nil {
 		writeError(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	if !renewal.ValidService(strings.TrimSpace(body.Service)) {
-		writeError(w, r, http.StatusBadRequest, "invalid service")
-		return
-	}
-	if !renewal.ValidService(strings.TrimSpace(body.TargetHosts)) {
-		writeError(w, r, http.StatusBadRequest, "invalid target_hosts")
-		return
-	}
-	if !renewal.ValidTTL(strings.TrimSpace(body.TTL)) {
-		writeError(w, r, http.StatusBadRequest, "invalid ttl")
-		return
-	}
-	if !renewal.ValidAltNames(strings.TrimSpace(body.AltNames)) {
-		writeError(w, r, http.StatusBadRequest, "invalid alt_names")
-		return
-	}
 
-	// extra_vars maps onto the vault-ansible-clm issue role's contract. Vault
-	// AppRole creds are injected by an AAP credential, never passed by CLM.
-	extraVars := map[string]any{
-		"cert_common_name_override": cn,
-		"vault_pki_mount":           mount,
-		"vault_pki_role":            kit.Role,
-	}
-	if kit.Service != "" {
-		extraVars["cert_service_type"] = kit.Service
-	}
-	if th := strings.TrimSpace(body.TargetHosts); th != "" {
-		extraVars["target_hosts"] = th
-	}
-	if ttl := strings.TrimSpace(body.TTL); ttl != "" {
-		extraVars["vault_cert_ttl"] = ttl
-	}
-	if an := strings.TrimSpace(body.AltNames); an != "" {
-		extraVars["cert_alt_names_override"] = an
-	}
-
-	ref, err := s.renewer.Renew(r.Context(), extraVars)
+	ref, err := s.launchRenewal(r.Context(), cn, cfg)
 	if err != nil {
 		s.log.Warn("aap renewal launch failed", "action", "renew", "certificate_id", id.String(), "err", err)
 		writeError(w, r, http.StatusBadGateway, "failed to launch AAP renewal")
@@ -604,7 +577,125 @@ func (s *Server) handleRenewCertificate(w http.ResponseWriter, r *http.Request) 
 		"job":         ref,
 		"common_name": cn,
 		"mount":       mount,
-		"role":        kit.Role,
+		"role":        cfg.Role,
+	})
+}
+
+// validateRenewalLaunch validates a CN + renewal config before it flows to AAP.
+// The CN is from the scanned cert (attacker-shaped); mount/role/service/
+// target_hosts/ttl/alt_names all become AAP extra_vars, which Ansible
+// Jinja2-evaluates, so each is checked (ttl/alt_names guard against SSTI).
+func validateRenewalLaunch(cn string, cfg store.RenewalConfig) error {
+	if err := renewal.Validate(renewal.KitInput{CommonName: cn, Mount: cfg.Mount, Role: cfg.Role, Service: cfg.Service}); err != nil {
+		return err
+	}
+	if !renewal.ValidService(cfg.Service) {
+		return errors.New("invalid service")
+	}
+	if !renewal.ValidService(cfg.TargetHosts) {
+		return errors.New("invalid target_hosts")
+	}
+	if !renewal.ValidTTL(cfg.TTL) {
+		return errors.New("invalid ttl")
+	}
+	if !renewal.ValidAltNames(cfg.AltNames) {
+		return errors.New("invalid alt_names")
+	}
+	return nil
+}
+
+// renewExtraVars maps a cert CN + Vault PKI coordinates onto the vault-ansible-clm
+// issue role's extra_vars. Vault AppRole creds are injected by an AAP credential,
+// never passed by CLM. Callers MUST validate cfg first (validateRenewalLaunch).
+func renewExtraVars(cn string, cfg store.RenewalConfig) map[string]any {
+	extra := map[string]any{
+		"cert_common_name_override": cn,
+		"vault_pki_mount":           cfg.Mount,
+		"vault_pki_role":            cfg.Role,
+	}
+	if cfg.Service != "" {
+		extra["cert_service_type"] = cfg.Service
+	}
+	if cfg.TargetHosts != "" {
+		extra["target_hosts"] = cfg.TargetHosts
+	}
+	if cfg.TTL != "" {
+		extra["vault_cert_ttl"] = cfg.TTL
+	}
+	if cfg.AltNames != "" {
+		extra["cert_alt_names_override"] = cfg.AltNames
+	}
+	return extra
+}
+
+// launchRenewal is the single path both the on-demand and batch renew endpoints
+// use to fire an AAP renewal. Callers MUST validate cfg first.
+func (s *Server) launchRenewal(ctx context.Context, cn string, cfg store.RenewalConfig) (RenewRef, error) {
+	return s.renewer.Renew(ctx, renewExtraVars(cn, cfg))
+}
+
+// handleRenewExpiring is the expiry-threshold auto-policy: it launches a Vault+AAP
+// renewal for every tracked cert whose stored renewal config is set and that
+// expires within N days (defaults to EXPIRING_SOON_DAYS). Explicit, consent-gated
+// trigger (like /reconcile); no background scheduler. Verification is the existing
+// rescan + reconcile monitor cycle.
+func (s *Server) handleRenewExpiring(w http.ResponseWriter, r *http.Request) {
+	if s.renewer == nil {
+		writeError(w, r, http.StatusServiceUnavailable, "AAP not configured")
+		return
+	}
+	var body struct {
+		Consent    bool `json:"consent"`
+		WithinDays int  `json:"within_days"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if !body.Consent {
+		writeError(w, r, http.StatusBadRequest, "consent required to launch renewals")
+		return
+	}
+	within := body.WithinDays
+	if within <= 0 {
+		within = s.cfg.ExpiringSoonDays
+	}
+
+	certs, err := s.resources.ListRenewable(r.Context(), within)
+	if err != nil {
+		s.writeServerError(w, r, err, "failed to list renewable certificates")
+		return
+	}
+
+	launched := make([]map[string]any, 0, len(certs))
+	failed := make([]map[string]any, 0)
+	for _, c := range certs {
+		if c.RenewalConfig == nil { // defensive; the query already filters this out
+			continue
+		}
+		cn := ""
+		if c.SubjectCN != nil {
+			cn = *c.SubjectCN
+		}
+		cfg := *c.RenewalConfig
+		if verr := validateRenewalLaunch(cn, cfg); verr != nil {
+			failed = append(failed, map[string]any{"certificate_id": c.ID, "common_name": cn, "error": verr.Error()})
+			continue
+		}
+		ref, lerr := s.launchRenewal(r.Context(), cn, cfg)
+		if lerr != nil {
+			s.log.Warn("aap renewal launch failed", "action", "renew_expiring", "certificate_id", c.ID.String(), "err", lerr)
+			failed = append(failed, map[string]any{"certificate_id": c.ID, "common_name": cn, "error": "failed to launch AAP renewal"})
+			continue
+		}
+		launched = append(launched, map[string]any{"certificate_id": c.ID, "common_name": cn, "job": ref})
+	}
+	s.log.Info("renew-expiring batch", "action", "renew_expiring", "within_days", within, "eligible", len(certs), "launched", len(launched), "failed", len(failed))
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"within_days": within,
+		"eligible":    len(certs),
+		"launched":    launched,
+		"failed":      failed,
 	})
 }
 

@@ -469,6 +469,49 @@ func (s *Store) GetCertificate(ctx context.Context, id uuid.UUID) (Certificate, 
 	return cert, err
 }
 
+// ListRenewable returns the certificates eligible for Mode C auto-renewal: they
+// have stored renewal config, are tracked in CLM (imported or managed in Vault),
+// are not revoked, are not a CA, and expire within withinDays. Ordered by
+// soonest expiry first so the most urgent renewals launch first.
+func (s *Store) ListRenewable(ctx context.Context, withinDays int) ([]Certificate, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT c.id, c.serial_number, c.fingerprint_sha256, c.subject_cn, c.subject_alt_names,
+			c.issuer_dn, c.authority_key_id, c.not_before, c.not_after, c.key_type, c.key_bits,
+			c.signature_algorithm, c.is_ca, c.key_usage, c.ext_key_usage, c.pem,
+			c.days_until_expiry, c.status::text, c.revocation_status, c.revocation_checked_at,
+			c.crl_distribution_points, c.ocsp_servers, c.first_discovered, c.last_seen,
+			c.hostname_matches_san, c.chain_status::text, c.managed_status::text, c.cert_scope::text,
+			c.vault_issuer_ref, c.vault_pki_mount, c.owner, c.team, c.environment, c.tags,
+			c.risk_score, c.remediation_state::text, c.created_at, c.updated_at,
+			c.renewal_config,
+			(SELECT COUNT(*) FROM certificate_observations o WHERE o.certificate_id = c.id)
+		FROM certificates c
+		WHERE c.renewal_config IS NOT NULL
+			AND c.managed_status IN ('imported', 'managed_in_vault')
+			AND c.status <> 'revoked'
+			AND c.is_ca = FALSE
+			AND c.days_until_expiry <= $1
+		ORDER BY c.days_until_expiry ASC
+	`, withinDays)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var certs []Certificate
+	for rows.Next() {
+		c, err := scanCertificate(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		certs = append(certs, c)
+	}
+	if certs == nil {
+		certs = []Certificate{}
+	}
+	return certs, rows.Err()
+}
+
 func (s *Store) GetCertificateObservations(ctx context.Context, certID uuid.UUID) ([]Observation, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, certificate_id, scan_id, ip, port, hostname, sni, tls_version, cipher_suite, observed_at

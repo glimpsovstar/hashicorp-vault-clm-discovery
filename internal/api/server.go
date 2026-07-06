@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -71,15 +70,7 @@ type Server struct {
 func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slog.Logger) *Server {
 	s := &Server{cfg: cfg, store: st, scanner: sc, log: log, blindSpot: st, compliance: st, report: st, resources: st}
 	s.revCheck = func(ctx context.Context, in revocation.CheckInput) (revocation.Result, error) {
-		// Do not follow redirects: the OCSP/CRL URLs are attacker-influenced (from
-		// the scanned cert), and a redirect could pivot into internal networks (SSRF).
-		client := &http.Client{
-			Timeout: 10 * time.Second,
-			CheckRedirect: func(*http.Request, []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		}
-		return revocation.Check(ctx, client, in)
+		return revocation.Check(ctx, revocation.NewFetchClient(), in)
 	}
 	if cfg.VaultAddr != "" {
 		if vc, err := vault.NewClient(vault.Config{

@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	neturl "net/url"
+	"syscall"
 	"time"
 )
 
@@ -49,7 +51,7 @@ func CheckCRL(ctx context.Context, client *http.Client, serialHex string, crlURL
 		return res, fmt.Errorf("invalid serial %q", serialHex)
 	}
 	if client == nil {
-		client = defaultClient()
+		client = NewFetchClient()
 	}
 
 	var crl *x509.RevocationList
@@ -111,16 +113,51 @@ func fetchCRL(ctx context.Context, client *http.Client, url string) ([]byte, err
 	return io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 }
 
-// defaultClient is the fallback HTTP client for revocation fetches: a bounded
-// timeout with redirects disabled, since the fetched URLs are attacker-influenced
-// (taken from the scanned certificate).
-func defaultClient() *http.Client {
+// NewFetchClient returns the hardened HTTP client for revocation (CRL/OCSP)
+// fetches: a bounded timeout, redirects disabled, and a dialer that refuses
+// non-public addresses. The fetched URLs come from the scanned certificate
+// (attacker-influenced), so this closes blind-SSRF into internal networks; the
+// address check runs post-resolution, so DNS rebinding to an internal IP is also
+// blocked.
+func NewFetchClient() *http.Client {
+	dialer := &net.Dialer{
+		Timeout: 10 * time.Second,
+		Control: func(_, address string, _ syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return err
+			}
+			ip := net.ParseIP(host)
+			if ip == nil {
+				return fmt.Errorf("refusing to dial non-IP address %q", host)
+			}
+			if !isPublicIP(ip) {
+				return fmt.Errorf("refusing to connect to non-public address %s", ip)
+			}
+			return nil
+		},
+	}
 	return &http.Client{
 		Timeout: 10 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
+		Transport: &http.Transport{
+			DialContext:           dialer.DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 10 * time.Second,
+		},
 	}
+}
+
+// isPublicIP reports whether ip is a routable public address (not loopback,
+// unspecified, link-local, or private RFC-1918/ULA).
+func isPublicIP(ip net.IP) bool {
+	if ip.IsLoopback() || ip.IsUnspecified() ||
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
+		return false
+	}
+	return true
 }
 
 func parseCert(pemStr string) *x509.Certificate {

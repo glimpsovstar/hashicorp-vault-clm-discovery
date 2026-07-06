@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -145,6 +146,21 @@ func TestCheckCRL_InvalidSerial(t *testing.T) {
 
 	if _, err := CheckCRL(context.Background(), http.DefaultClient, "zzzz", []string{"http://x"}, ""); err == nil {
 		t.Fatal("expected error for invalid serial")
+	}
+}
+
+func TestNewFetchClient_DeniesLoopback(t *testing.T) {
+	t.Parallel()
+
+	// httptest listens on a loopback address; the hardened client must refuse to
+	// dial it (blind-SSRF guard).
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(srv.Close)
+
+	if _, err := NewFetchClient().Get(srv.URL); err == nil {
+		t.Fatal("expected NewFetchClient to refuse a loopback address")
+	} else if !strings.Contains(err.Error(), "non-public") {
+		t.Fatalf("error = %v, want a non-public-address denial", err)
 	}
 }
 

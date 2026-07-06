@@ -30,24 +30,26 @@ func (f *fakeImporter) ImportIssuerBundle(context.Context, string, string) (vaul
 }
 
 type fakeResourceStore struct {
-	scan            store.Scan
-	scanErr         error
-	cert            store.Certificate
-	certErr         error
-	certs           []store.Certificate
-	listErr         error
-	setStatusResult store.Certificate
-	setStatusErr    error
-	issuer          store.Issuer
-	issuerErr       error
-	setIssuerRefErr error
-	issuerPEM       string
-	issuerPEMErr    error
-	markRevokedErr  error
-	markRevokedN    int
-	deleteScanErr   error
-	deleteCertErr   error
-	deleteIssuerErr error
+	scan             store.Scan
+	scanErr          error
+	cert             store.Certificate
+	certErr          error
+	certs            []store.Certificate
+	listErr          error
+	setStatusResult  store.Certificate
+	setStatusErr     error
+	issuer           store.Issuer
+	issuerErr        error
+	setIssuerRefErr  error
+	issuerPEM        string
+	issuerPEMErr     error
+	markRevokedErr   error
+	markRevokedN     int
+	setRenewalErr    error
+	gotRenewalConfig *store.RenewalConfig
+	deleteScanErr    error
+	deleteCertErr    error
+	deleteIssuerErr  error
 }
 
 func (f *fakeResourceStore) GetCertificate(_ context.Context, _ uuid.UUID) (store.Certificate, error) {
@@ -80,6 +82,17 @@ func (f *fakeResourceStore) SetManagedStatus(_ context.Context, _ uuid.UUID, sta
 	}
 	c := f.setStatusResult
 	c.ManagedStatus = status
+	return c, nil
+}
+
+func (f *fakeResourceStore) SetRenewalConfig(_ context.Context, _ uuid.UUID, cfg store.RenewalConfig) (store.Certificate, error) {
+	if f.setRenewalErr != nil {
+		return store.Certificate{}, f.setRenewalErr
+	}
+	f.gotRenewalConfig = &cfg
+	c := f.setStatusResult
+	c.ManagedStatus = "imported"
+	c.RenewalConfig = &cfg
 	return c, nil
 }
 
@@ -320,11 +333,12 @@ func TestHandleCatalogImport_Statuses(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name string
-		res  *fakeResourceStore
-		id   string
-		body string
-		want int
+		name            string
+		res             *fakeResourceStore
+		id              string
+		body            string
+		want            int
+		wantRenewalRole string
 	}{
 		{name: "invalid id", res: &fakeResourceStore{}, id: "nope", body: `{"consent":true}`, want: http.StatusBadRequest},
 		{name: "bad body", res: &fakeResourceStore{}, id: uuid.New().String(), body: `{`, want: http.StatusBadRequest},
@@ -333,6 +347,10 @@ func TestHandleCatalogImport_Statuses(t *testing.T) {
 		{name: "managed in vault", res: &fakeResourceStore{setStatusErr: store.ErrManagedByVault}, id: uuid.New().String(), body: `{"consent":true}`, want: http.StatusConflict},
 		{name: "db error", res: &fakeResourceStore{setStatusErr: context.Canceled}, id: uuid.New().String(), body: `{"consent":true}`, want: http.StatusInternalServerError},
 		{name: "success", res: &fakeResourceStore{}, id: uuid.New().String(), body: `{"consent":true}`, want: http.StatusOK},
+		{name: "success with renewal", res: &fakeResourceStore{}, id: uuid.New().String(), body: `{"consent":true,"renewal":{"role":"web-server","mount":"pki-int","service":"nginx"}}`, want: http.StatusOK, wantRenewalRole: "web-server"},
+		{name: "renewal missing role", res: &fakeResourceStore{}, id: uuid.New().String(), body: `{"consent":true,"renewal":{"mount":"pki-int"}}`, want: http.StatusBadRequest},
+		{name: "renewal ssti ttl", res: &fakeResourceStore{}, id: uuid.New().String(), body: `{"consent":true,"renewal":{"role":"web","mount":"pki","ttl":"{{ x }}"}}`, want: http.StatusBadRequest},
+		{name: "renewal store error", res: &fakeResourceStore{setRenewalErr: context.Canceled}, id: uuid.New().String(), body: `{"consent":true,"renewal":{"role":"web","mount":"pki-int"}}`, want: http.StatusInternalServerError},
 	}
 
 	for _, tt := range tests {
@@ -341,10 +359,15 @@ func TestHandleCatalogImport_Statuses(t *testing.T) {
 			rec := httptest.NewRecorder()
 			newResourceServer(tt.res).handleCatalogImport(rec, idRequestBody(http.MethodPost, tt.id, tt.body))
 			if rec.Code != tt.want {
-				t.Fatalf("status = %d, want %d", rec.Code, tt.want)
+				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tt.want, rec.Body.String())
 			}
 			if tt.want == http.StatusOK && !strings.Contains(rec.Body.String(), `"imported"`) {
 				t.Fatalf("expected managed_status imported in body: %s", rec.Body.String())
+			}
+			if tt.wantRenewalRole != "" {
+				if tt.res.gotRenewalConfig == nil || tt.res.gotRenewalConfig.Role != tt.wantRenewalRole {
+					t.Fatalf("renewal config not persisted: %+v", tt.res.gotRenewalConfig)
+				}
 			}
 		})
 	}

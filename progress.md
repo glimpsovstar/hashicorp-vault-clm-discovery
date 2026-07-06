@@ -90,12 +90,17 @@ North star and roadmap: `docs/program-context.md`.
 
 ## In progress
 
-- **Item 2 — Mode C full automation (Vault + AAP closed loop).** Starting now:
-  `internal/aap` client (launch job template + poll status; httptest-tested),
-  `POST /certificates/{id}/renew` (launch AAP job with renewal-kit params) +
-  auto-policy (renew when < N days to expiry), closed-loop verify
-  (rescan → reconcile → managed_in_vault). User HAS an AAP Controller and will
-  provide URL + token for end-to-end validation.
+- **Item 2 — Mode C full automation (Vault + AAP closed loop).**
+  - ~~PR 1 — `internal/aap` client~~ — DONE (#50 / PR #51): dynamic template
+    discovery by name, launch with extra_vars, status normalization, WaitForJob
+    with transient-failure tolerance. httptest-covered.
+  - PR 2 — `POST /certificates/{id}/renew` + CN/mount/role/service → extra_vars
+    mapping (launch the AAP "CLM - Issue Certificate" JT / Issue→Deploy→Verify
+    workflow). (Starting now.)
+  - PR 3 — expiry-threshold auto-policy (< N days) + closed-loop verify
+    (rescan → reconcile → managed_in_vault).
+  - AAP contract captured in memory (repo/clm-discovery.md); creds live on the
+    user's Mac (TF-deployed AAP), never committed.
 
 ## Next (confirmed order)
 

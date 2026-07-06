@@ -102,12 +102,17 @@ type LaunchResult struct {
 	Workflow bool
 }
 
-// NewClient builds a Controller client. It returns an error only for a
-// malformed base URL; a client with an empty BaseURL is allowed but reports
+// NewClient builds a Controller client. It returns an error for a malformed
+// base URL; a client with an empty BaseURL is allowed but reports
 // Configured()==false so callers can degrade gracefully.
 func NewClient(cfg Config) (*Client, error) {
-	if cfg.BaseURL != "" && !strings.HasPrefix(cfg.BaseURL, "http://") && !strings.HasPrefix(cfg.BaseURL, "https://") {
-		cfg.BaseURL = "https://" + cfg.BaseURL
+	if cfg.BaseURL != "" {
+		if !strings.HasPrefix(cfg.BaseURL, "http://") && !strings.HasPrefix(cfg.BaseURL, "https://") {
+			cfg.BaseURL = "https://" + cfg.BaseURL
+		}
+		if u, err := url.Parse(cfg.BaseURL); err != nil || u.Host == "" {
+			return nil, fmt.Errorf("invalid aap base url %q", cfg.BaseURL)
+		}
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if cfg.SkipTLSVerify {
@@ -148,8 +153,9 @@ func (c *Client) findTemplate(ctx context.Context, kind, name string) (int, erro
 	if err := c.get(ctx, fmt.Sprintf("/api/v2/%s/?%s", kind, q.Encode()), &page); err != nil {
 		return 0, err
 	}
-	// The name filter is a contains-match server-side, so re-check for an exact
-	// name to avoid launching the wrong (prefix-matching) template.
+	// AWX ?name= is exact-match, but re-check r.Name == name as a cheap safety net
+	// (in case a caller ever switches to a substring filter like name__icontains)
+	// so we never launch a prefix/substring-matching template by mistake.
 	var matches []int
 	for _, r := range page.Results {
 		if r.Name == name {
@@ -233,24 +239,36 @@ func (c *Client) JobStatus(ctx context.Context, res LaunchResult) (Status, error
 }
 
 // WaitForJob polls JobStatus every interval until the job reaches a terminal
-// status or ctx is canceled. It returns the terminal status.
+// status or ctx is canceled. Transient poll failures (a network blip or a 5xx)
+// are tolerated so they don't drop tracking of a still-running job; it gives up
+// after maxPollFailures consecutive failures. It returns the last known status.
 func (c *Client) WaitForJob(ctx context.Context, res LaunchResult, interval time.Duration) (Status, error) {
 	if interval <= 0 {
 		interval = 2 * time.Second
 	}
-	// Check once immediately, then on each tick.
+	const maxPollFailures = 5
+	var failures int
+	last := StatusUnknown
 	for {
 		st, err := c.JobStatus(ctx, res)
 		if err != nil {
-			return StatusUnknown, err
+			failures++
+			if failures >= maxPollFailures {
+				return last, fmt.Errorf("aap job %d: %d consecutive poll failures: %w", res.JobID, failures, err)
+			}
+		} else {
+			failures = 0
+			last = st
+			if st.IsTerminal() {
+				return st, nil
+			}
 		}
-		if st.IsTerminal() {
-			return st, nil
-		}
+		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
-			return st, ctx.Err()
-		case <-time.After(interval):
+			timer.Stop()
+			return last, ctx.Err()
+		case <-timer.C:
 		}
 	}
 }

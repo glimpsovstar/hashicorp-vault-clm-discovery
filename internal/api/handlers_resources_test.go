@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/config"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/revocation"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/vault"
@@ -40,6 +41,10 @@ type fakeResourceStore struct {
 	issuer          store.Issuer
 	issuerErr       error
 	setIssuerRefErr error
+	issuerPEM       string
+	issuerPEMErr    error
+	markRevokedErr  error
+	markRevokedN    int
 	deleteScanErr   error
 	deleteCertErr   error
 	deleteIssuerErr error
@@ -93,6 +98,15 @@ func (f *fakeResourceStore) SetIssuerVaultRef(_ context.Context, _ uuid.UUID, is
 	i.VaultIssuerRef = &issuerRef
 	i.VaultPKIMount = &mount
 	return i, nil
+}
+
+func (f *fakeResourceStore) GetIssuerPEMForCert(_ context.Context, _ string) (string, error) {
+	return f.issuerPEM, f.issuerPEMErr
+}
+
+func (f *fakeResourceStore) MarkRevokedViaCRL(_ context.Context, _ uuid.UUID) error {
+	f.markRevokedN++
+	return f.markRevokedErr
 }
 
 func (f *fakeResourceStore) DeleteScan(context.Context, uuid.UUID) error { return f.deleteScanErr }
@@ -409,6 +423,56 @@ func TestHandleGetCertificateChoose_Statuses(t *testing.T) {
 	}
 }
 
+func TestHandleRevocationCheck_Statuses(t *testing.T) {
+	t.Parallel()
+
+	revokedVerified := func(context.Context, string, []string, string) (revocation.Result, error) {
+		return revocation.Result{Status: revocation.StatusRevoked, Verified: true, Source: "crl"}, nil
+	}
+	revokedUnverified := func(context.Context, string, []string, string) (revocation.Result, error) {
+		return revocation.Result{Status: revocation.StatusRevoked, Verified: false, Source: "crl"}, nil
+	}
+	good := func(context.Context, string, []string, string) (revocation.Result, error) {
+		return revocation.Result{Status: revocation.StatusGood, Verified: true, Source: "crl"}, nil
+	}
+	checkErr := func(context.Context, string, []string, string) (revocation.Result, error) {
+		return revocation.Result{}, errors.New("fetch failed")
+	}
+
+	tests := []struct {
+		name        string
+		res         *fakeResourceStore
+		check       crlChecker
+		id          string
+		want        int
+		wantPersist int
+	}{
+		{"invalid id", &fakeResourceStore{}, good, "nope", http.StatusBadRequest, 0},
+		{"not found", &fakeResourceStore{certErr: store.ErrCertificateNotFound}, good, uuid.New().String(), http.StatusNotFound, 0},
+		{"issuer lookup error", &fakeResourceStore{issuerPEMErr: context.Canceled}, good, uuid.New().String(), http.StatusInternalServerError, 0},
+		{"crl check error", &fakeResourceStore{}, checkErr, uuid.New().String(), http.StatusBadGateway, 0},
+		{"good no persist", &fakeResourceStore{}, good, uuid.New().String(), http.StatusOK, 0},
+		{"revoked unverified advisory", &fakeResourceStore{}, revokedUnverified, uuid.New().String(), http.StatusOK, 0},
+		{"revoked verified persists", &fakeResourceStore{}, revokedVerified, uuid.New().String(), http.StatusOK, 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv := newResourceServer(tt.res)
+			srv.crlCheck = tt.check
+			rec := httptest.NewRecorder()
+			srv.handleRevocationCheck(rec, idRequest(http.MethodPost, tt.id))
+			if rec.Code != tt.want {
+				t.Fatalf("status = %d, want %d", rec.Code, tt.want)
+			}
+			if tt.res.markRevokedN != tt.wantPersist {
+				t.Fatalf("MarkRevokedViaCRL calls = %d, want %d", tt.res.markRevokedN, tt.wantPersist)
+			}
+		})
+	}
+}
+
 // TestCertificateRoutes_Registered exercises the real Router so a dropped route
 // (e.g. DELETE removed while adding catalog-import) fails loudly instead of only
 // through direct handler calls.
@@ -426,6 +490,7 @@ func TestCertificateRoutes_Registered(t *testing.T) {
 	}{
 		{http.MethodPost, "/api/v1/certificates/" + id + "/catalog-import", `{"consent":true}`, http.StatusOK},
 		{http.MethodGet, "/api/v1/certificates/" + id + "/choose", "", http.StatusOK},
+		{http.MethodPost, "/api/v1/certificates/" + id + "/revocation-check", "", http.StatusOK},
 		{http.MethodDelete, "/api/v1/certificates/" + id, "", http.StatusNoContent},
 		{http.MethodDelete, "/api/v1/issuers/" + id, "", http.StatusNoContent},
 		// importer is nil on the resource-only server, so the route resolving to

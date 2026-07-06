@@ -159,6 +159,21 @@ export function getChoose(id: string) {
   return fetchJSON<ChooseResult>(`/api/v1/certificates/${id}/choose`);
 }
 
+export type RevocationResult = {
+  status: string;
+  source: string;
+  verified: boolean;
+  revoked_at?: string | null;
+  crl_url?: string;
+};
+
+// checkRevocation runs an on-demand CRL revocation check for a certificate.
+export function checkRevocation(id: string) {
+  return fetchJSON<RevocationResult>(`/api/v1/certificates/${id}/revocation-check`, {
+    method: "POST",
+  });
+}
+
 export function listScans() {
   return fetchJSON<{ items: Scan[] }>("/api/v1/scans");
 }

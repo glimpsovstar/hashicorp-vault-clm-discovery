@@ -15,6 +15,7 @@ import {
 } from "@/lib/api";
 import EnrichmentForm from "./enrichment-form";
 import CatalogImportButton from "./catalog-import-button";
+import RevocationCheckButton from "./revocation-check-button";
 
 export default async function CertificateDetailPage({
   params,
@@ -103,6 +104,9 @@ export default async function CertificateDetailPage({
               <EnrichmentForm cert={cert} />
               <div style={{ marginTop: 16 }}>
                 <CatalogImportButton cert={cert} />
+              </div>
+              <div style={{ marginTop: 16 }}>
+                <RevocationCheckButton cert={cert} />
               </div>
             </div>
           </div>

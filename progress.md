@@ -73,19 +73,26 @@ North star and roadmap: `docs/program-context.md`.
   `GET /certificates/{id}/renewal-kit` + a cert-detail panel. CLM generates, the
   operator deploys, rescan+reconcile verifies. CN validated as a DNS hostname
   (review caught a HIGH template-injection risk). Merged via PR #45.
+- **#46 private-IP deny (blind-SSRF guard)** — `revocation.NewFetchClient()` adds
+  a `net.Dialer.Control` hook that refuses non-public dial addresses (loopback,
+  unspecified, link-local incl. `169.254.169.254`, RFC-1918/ULA, RFC-6598 CGNAT),
+  checked post-DNS so DNS-rebinding is blocked; shared by CRL + OCSP and the API
+  `revCheck`. Redirects disabled, no egress proxy (documented). Merged via PR #47
+  (sub-agent security review: no blockers; CGNAT gap + doc notes fixed).
 
 ## In progress
 
-- **Paused** (2026-07-06) pending user go-ahead. Direction confirmed below.
+- **1b — OCSP stapling capture at scan** — read `tls.ConnectionState.OCSPResponse`
+  during the existing TLS probe; parse/verify against the chain issuer and flow a
+  verified-revoked result into the store. (Starting now.)
 
 ## Next (confirmed order)
 
 1. **Hardening (first):**
-   - Private-IP deny on the CRL/OCSP fetch — resolve host, reject loopback/
-     link-local/RFC-1918 (closes residual blind-SSRF on the attacker-influenced
-     CRL/OCSP URL from the scanned cert).
+   - ~~Private-IP deny on the CRL/OCSP fetch~~ — DONE (#46 / PR #47).
    - OCSP stapling capture at scan — read the server's stapled OCSP response
      during the existing TLS probe; populate revocation status automatically.
+     (IN PROGRESS.)
 2. **Mode C full automation** — the IBM/HashiCorp/Red Hat "Eliminate Certificate
    Risk at Scale" solution brief closed loop (Vault issues/governs; **AAP**
    deploys/rotates/verifies; CLM = "monitor inventory + orchestrate + verify").

@@ -29,6 +29,13 @@ type Config struct {
 	AAPRenewWorkflow bool   `envconfig:"AAP_RENEW_WORKFLOW" default:"false"`
 	AAPSkipTLSVerify bool   `envconfig:"AAP_SKIP_TLS_VERIFY" default:"false"`
 	AAPDefaultMount  string `envconfig:"AAP_DEFAULT_MOUNT" default:"pki"`
+	// Event dispatcher (ADR 0001, event Phase 1b). When EDAWebhookURL is empty the
+	// dispatcher does not start. Token/URL are read from the env and never logged.
+	EDAWebhookURL         string        `envconfig:"EDA_WEBHOOK_URL" default:""`
+	EDAWebhookToken       string        `envconfig:"EDA_WEBHOOK_TOKEN" default:""`
+	EventDispatchInterval time.Duration `envconfig:"EVENT_DISPATCH_INTERVAL" default:"15s"`
+	EventDispatchBatch    int           `envconfig:"EVENT_DISPATCH_BATCH" default:"50"`
+	EventMaxAttempts      int           `envconfig:"EVENT_MAX_ATTEMPTS" default:"10"`
 }
 
 func Load() (Config, error) {

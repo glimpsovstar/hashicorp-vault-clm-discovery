@@ -699,6 +699,52 @@ func (s *Store) ListEvents(ctx context.Context, limit int) ([]Event, error) {
 	return events, rows.Err()
 }
 
+// ListUndeliveredEvents returns undelivered events (oldest first) that have not
+// exhausted their delivery attempts, for the dispatcher to deliver. Events at or
+// beyond maxAttempts are treated as dead-lettered and excluded.
+func (s *Store) ListUndeliveredEvents(ctx context.Context, limit, maxAttempts int) ([]Event, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, event_type, certificate_id, payload, created_at, delivered_at, attempts, last_error
+		FROM events
+		WHERE delivered_at IS NULL AND attempts < $2
+		ORDER BY created_at ASC
+		LIMIT $1
+	`, limit, maxAttempts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	events := []Event{}
+	for rows.Next() {
+		var e Event
+		if err := rows.Scan(&e.ID, &e.EventType, &e.CertificateID, &e.Payload,
+			&e.CreatedAt, &e.DeliveredAt, &e.Attempts, &e.LastError); err != nil {
+			return nil, err
+		}
+		events = append(events, e)
+	}
+	return events, rows.Err()
+}
+
+// MarkEventDelivered stamps an event as delivered.
+func (s *Store) MarkEventDelivered(ctx context.Context, id uuid.UUID) error {
+	_, err := s.pool.Exec(ctx, `UPDATE events SET delivered_at = NOW() WHERE id = $1`, id)
+	return err
+}
+
+// MarkEventFailed records a failed delivery attempt (increments attempts and
+// stores the error) so the dispatcher can back off and eventually dead-letter.
+func (s *Store) MarkEventFailed(ctx context.Context, id uuid.UUID, errMsg string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE events SET attempts = attempts + 1, last_error = $2 WHERE id = $1
+	`, id, errMsg)
+	return err
+}
+
 // GetIssuer loads a single issuer by id, returning ErrIssuerNotFound if absent.
 func (s *Store) GetIssuer(ctx context.Context, id uuid.UUID) (Issuer, error) {
 	var i Issuer

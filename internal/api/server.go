@@ -17,6 +17,7 @@ import (
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/aap"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/config"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/inventory"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/lifecycle"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/renewal"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/revocation"
@@ -194,6 +195,7 @@ func (s *Server) Router() http.Handler {
 
 		r.Post("/reconcile", s.handleReconcile)
 		r.Post("/renew-expiring", s.handleRenewExpiring)
+		r.Get("/inventory", s.handleInventory)
 
 		r.Get("/blindspot", s.handleGetBlindSpot)
 		r.Get("/compliance/summary", s.handleGetComplianceSummary)
@@ -697,6 +699,26 @@ func (s *Server) handleRenewExpiring(w http.ResponseWriter, r *http.Request) {
 		"launched":    launched,
 		"failed":      failed,
 	})
+}
+
+// handleInventory serves an Ansible dynamic inventory of renewable certificates
+// (read-only) so AAP can pull renewal targets from CLM instead of querying Vault
+// directly (ADR 0001). Optional ?within_days=N scopes to certs expiring within N
+// days; by default every cert with stored renewal config is returned.
+func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
+	const allRenewable = 36500 // ~100y: effectively "all with renewal config"
+	within := allRenewable
+	if q := strings.TrimSpace(r.URL.Query().Get("within_days")); q != "" {
+		if n, err := strconv.Atoi(q); err == nil && n > 0 {
+			within = n
+		}
+	}
+	certs, err := s.resources.ListRenewable(r.Context(), within)
+	if err != nil {
+		s.writeServerError(w, r, err, "failed to list renewable certificates")
+		return
+	}
+	writeJSON(w, http.StatusOK, inventory.Build(certs))
 }
 
 // handleRevocationCheck runs a CRL revocation check for a discovered cert. It

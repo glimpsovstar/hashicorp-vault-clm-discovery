@@ -147,3 +147,17 @@ func TestCheckCRL_InvalidSerial(t *testing.T) {
 		t.Fatal("expected error for invalid serial")
 	}
 }
+
+func TestCheckCRL_RejectsNonHTTPScheme(t *testing.T) {
+	t.Parallel()
+
+	// A file:// (or other non-http) CRL URL must not be fetched; with no usable
+	// DP the result is unknown, not an SSRF/file read.
+	res, err := CheckCRL(context.Background(), http.DefaultClient, big.NewInt(1).Text(16), []string{"file:///etc/passwd"}, "")
+	if err != nil {
+		t.Fatalf("CheckCRL: %v", err)
+	}
+	if res.Status != StatusUnknown {
+		t.Fatalf("status = %q, want unknown for non-http scheme", res.Status)
+	}
+}

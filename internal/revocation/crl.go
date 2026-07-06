@@ -10,6 +10,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	neturl "net/url"
 	"time"
 )
 
@@ -88,6 +89,12 @@ func CheckCRL(ctx context.Context, client *http.Client, serialHex string, crlURL
 }
 
 func fetchCRL(ctx context.Context, client *http.Client, url string) ([]byte, error) {
+	// The CRL URL comes from the scanned certificate (attacker-influenced), so
+	// restrict the scheme to http/https to avoid file:// and other SSRF vectors.
+	u, err := neturl.Parse(url)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return nil, fmt.Errorf("unsupported CRL URL scheme")
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err

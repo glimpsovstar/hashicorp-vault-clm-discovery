@@ -54,6 +54,11 @@ source). Uses the existing catalog-import button pattern.
 - Only a **signature-verified** CRL can flip a cert to revoked; MITM of an
   unauthenticated CRL fetch is advisory-only (no state change), bounding impact.
 - Bounded HTTP timeout; the CRL URL comes from the cert's own CRLDistributionPoints.
+- **SSRF:** the CRL URL is attacker-influenced (from the scanned cert). Mitigations:
+  scheme allowlist (`http`/`https` only), redirects disabled on the fetch client,
+  GET-only, response parsed solely as a CRL and never echoed, bounded body read
+  (16MB), and only operator-triggered. Residual blind-SSRF (internal host probing)
+  is a known follow-up (private-IP deny on resolved address).
 
 ## Testing (TDD)
 

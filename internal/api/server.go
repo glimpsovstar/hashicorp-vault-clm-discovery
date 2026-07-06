@@ -70,7 +70,15 @@ type Server struct {
 func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slog.Logger) *Server {
 	s := &Server{cfg: cfg, store: st, scanner: sc, log: log, blindSpot: st, compliance: st, report: st, resources: st}
 	s.crlCheck = func(ctx context.Context, serialHex string, crlURLs []string, issuerPEM string) (revocation.Result, error) {
-		return revocation.CheckCRL(ctx, &http.Client{Timeout: 10 * time.Second}, serialHex, crlURLs, issuerPEM)
+		// Do not follow redirects: the CRL URL is attacker-influenced (from the
+		// scanned cert), and a redirect could pivot into internal networks (SSRF).
+		client := &http.Client{
+			Timeout: 10 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+		return revocation.CheckCRL(ctx, client, serialHex, crlURLs, issuerPEM)
 	}
 	if cfg.VaultAddr != "" {
 		if vc, err := vault.NewClient(vault.Config{

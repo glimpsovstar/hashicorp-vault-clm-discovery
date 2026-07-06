@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/cert"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/revocation"
 )
 
 type Target struct {
@@ -24,7 +25,11 @@ type ProbeResult struct {
 	Certificate cert.ParsedCertificate
 	Chain       []cert.ParsedCertificate
 	Observation cert.Observation
-	Error       error
+	// Revocation is populated from a stapled OCSP response captured during the
+	// handshake, when the server provides one. Zero value means StatusUnknown /
+	// unverified (no staple or not verifiable).
+	Revocation revocation.Result
+	Error      error
 }
 
 type Config struct {
@@ -184,6 +189,20 @@ func (s *Scanner) Probe(ctx context.Context, target Target) ProbeResult {
 
 	result.Certificate = parsed
 	result.Chain = chain
+
+	// Capture a stapled OCSP response if the server sent one. It is signed by the
+	// issuer, so a verified-revoked result is authoritative without any outbound
+	// request (and no SSRF surface, unlike the on-demand revocation check).
+	if len(state.OCSPResponse) > 0 {
+		issuerPEM := ""
+		if len(chain) > 0 {
+			issuerPEM = chain[0].PEM
+		}
+		if rev, err := revocation.ParseStapledOCSP(state.OCSPResponse, parsed.PEM, issuerPEM); err == nil {
+			result.Revocation = rev
+		}
+	}
+
 	result.Observation = cert.Observation{
 		IP:          target.IP,
 		Port:        target.Port,

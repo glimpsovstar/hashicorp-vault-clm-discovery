@@ -17,6 +17,7 @@ type scanStore interface {
 	FailScan(ctx context.Context, id uuid.UUID, errMsg string) error
 	UpsertCertificate(ctx context.Context, scanID uuid.UUID, parsed cert.ParsedCertificate, obs cert.Observation) (uuid.UUID, error)
 	UpsertIssuer(ctx context.Context, ca cert.ParsedCertificate, chainPEMs []string) error
+	MarkRevoked(ctx context.Context, id uuid.UUID, source string) error
 }
 
 type prober interface {

@@ -83,6 +83,40 @@ func CheckOCSP(ctx context.Context, client *http.Client, leafPEM, issuerPEM stri
 	return res, nil
 }
 
+// ParseStapledOCSP interprets an OCSP response that a server stapled during the
+// TLS handshake (tls.ConnectionState.OCSPResponse). Unlike CheckOCSP it makes no
+// network call — the bytes were delivered by the peer — but it still verifies the
+// signature against the issuer via ocsp.ParseResponseForCert, so a revoked result
+// is authoritative. Returns StatusUnknown (unverified) when there is no staple,
+// no leaf/issuer, or the staple cannot be parsed/verified for this leaf.
+func ParseStapledOCSP(stapled []byte, leafPEM, issuerPEM string) (Result, error) {
+	res := Result{Status: StatusUnknown, Source: "ocsp_stapled"}
+	if len(stapled) == 0 || leafPEM == "" || issuerPEM == "" {
+		return res, nil
+	}
+	leaf := parseCert(leafPEM)
+	issuer := parseCert(issuerPEM)
+	if leaf == nil || issuer == nil {
+		return res, nil
+	}
+	ocspResp, err := ocsp.ParseResponseForCert(stapled, leaf, issuer)
+	if err != nil {
+		return res, nil
+	}
+	res.Verified = true
+	switch ocspResp.Status {
+	case ocsp.Good:
+		res.Status = StatusGood
+	case ocsp.Revoked:
+		res.Status = StatusRevoked
+		rt := ocspResp.RevokedAt
+		res.RevokedAt = &rt
+	default:
+		res.Status = StatusUnknown
+	}
+	return res, nil
+}
+
 func postOCSP(ctx context.Context, client *http.Client, server string, reqDER []byte) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, server, bytes.NewReader(reqDER))
 	if err != nil {

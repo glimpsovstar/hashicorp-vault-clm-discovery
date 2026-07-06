@@ -119,6 +119,12 @@ func fetchCRL(ctx context.Context, client *http.Client, url string) ([]byte, err
 // (attacker-influenced), so this closes blind-SSRF into internal networks; the
 // address check runs post-resolution, so DNS rebinding to an internal IP is also
 // blocked.
+//
+// Two deliberate SSRF trade-offs: redirects are not followed (a 3xx is returned
+// as-is and rejected by the caller), and no proxy is configured (an egress proxy
+// would dial the proxy rather than the target, bypassing the dialer guard). Do
+// not add ProxyFromEnvironment or re-enable redirects without re-applying the
+// scheme + address checks on every hop.
 func NewFetchClient() *http.Client {
 	dialer := &net.Dialer{
 		Timeout: 10 * time.Second,
@@ -150,11 +156,16 @@ func NewFetchClient() *http.Client {
 	}
 }
 
+// cgnatRange is the RFC 6598 shared address space (100.64.0.0/10), commonly used
+// inside cloud/carrier networks; net.IP.IsPrivate does not cover it.
+var cgnatRange = net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+
 // isPublicIP reports whether ip is a routable public address (not loopback,
-// unspecified, link-local, or private RFC-1918/ULA).
+// unspecified, link-local, private RFC-1918/ULA, or RFC-6598 CGNAT).
 func isPublicIP(ip net.IP) bool {
 	if ip.IsLoopback() || ip.IsUnspecified() ||
-		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() ||
+		cgnatRange.Contains(ip) {
 		return false
 	}
 	return true

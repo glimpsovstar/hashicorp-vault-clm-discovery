@@ -68,18 +68,21 @@ North star and roadmap: `docs/program-context.md`.
   CA (mode B) successfully, then `terraform destroy` (clean). TPM token step saved
   to memory (`/memories/hcp-vault-access.md`).
 
+- **#44 Mode C renewal kit** — `internal/renewal.Generate` renders vault-agent
+  HCL / AAP playbook to reissue+deploy a cert from a Vault PKI role;
+  `GET /certificates/{id}/renewal-kit` + a cert-detail panel. CLM generates, the
+  operator deploys, rescan+reconcile verifies. CN validated as a DNS hostname
+  (review caught a HIGH template-injection risk). Merged via PR #45.
+
 ## In progress
 
-- **Mode C automation** (next) — reissue & deploy reference (v1.3+). Needs a scope
-  decision (see below) since CLM does not itself deploy to hosts.
+- Nothing actively coding. On `main`, working tree clean. No open issues.
 
 ## Next
 
-1. **Mode C automation** — likely a per-cert "renewal kit" generator (vault-agent
-   HCL template + AAP playbook) for a chosen Vault PKI role; CLM verifies via
-   rescan+reconcile. Scope to confirm at the design gate.
-2. Private-IP deny on the CRL/OCSP fetch address; OCSP stapling capture at scan.
-3. **v2** — cloud CA sources (ACM, etc.).
+1. Private-IP deny on the CRL/OCSP fetch address; OCSP stapling capture at scan.
+2. **v2** — cloud CA sources (ACM, etc.).
+3. Mode C full automation (orchestrate issue→deploy→verify) — v1.3+.
 
 ## HCP note
 - `hcpvenv` alias token is stale/expired — do NOT use it. Mint fresh via TPM:

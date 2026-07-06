@@ -79,20 +79,29 @@ North star and roadmap: `docs/program-context.md`.
   checked post-DNS so DNS-rebinding is blocked; shared by CRL + OCSP and the API
   `revCheck`. Redirects disabled, no egress proxy (documented). Merged via PR #47
   (sub-agent security review: no blockers; CGNAT gap + doc notes fixed).
+- **#48 stapled OCSP capture at scan** — `revocation.ParseStapledOCSP` (pure, no
+  network; fails closed — requires `leaf.CheckSignatureFrom(issuer)` since the
+  scanned chain is untrusted, then verifies the staple signature). Scanner reads
+  `tls.ConnectionState.OCSPResponse`; runner auto-persists via
+  `MarkRevoked(id, "ocsp_stapled")` only when verified-revoked. `UpsertCertificate`
+  now preserves any `revoked_via_*` status across rescans. Merged via PR #49
+  (sub-agent review: both MAJOR findings — leaf↔issuer binding + durable-revoked
+  CASE — fixed pre-merge).
 
 ## In progress
 
-- **1b — OCSP stapling capture at scan** — read `tls.ConnectionState.OCSPResponse`
-  during the existing TLS probe; parse/verify against the chain issuer and flow a
-  verified-revoked result into the store. (Starting now.)
+- **Item 2 — Mode C full automation (Vault + AAP closed loop).** Starting now:
+  `internal/aap` client (launch job template + poll status; httptest-tested),
+  `POST /certificates/{id}/renew` (launch AAP job with renewal-kit params) +
+  auto-policy (renew when < N days to expiry), closed-loop verify
+  (rescan → reconcile → managed_in_vault). User HAS an AAP Controller and will
+  provide URL + token for end-to-end validation.
 
 ## Next (confirmed order)
 
 1. **Hardening (first):**
    - ~~Private-IP deny on the CRL/OCSP fetch~~ — DONE (#46 / PR #47).
-   - OCSP stapling capture at scan — read the server's stapled OCSP response
-     during the existing TLS probe; populate revocation status automatically.
-     (IN PROGRESS.)
+   - ~~OCSP stapling capture at scan~~ — DONE (#48 / PR #49).
 2. **Mode C full automation** — the IBM/HashiCorp/Red Hat "Eliminate Certificate
    Risk at Scale" solution brief closed loop (Vault issues/governs; **AAP**
    deploys/rotates/verifies; CLM = "monitor inventory + orchestrate + verify").

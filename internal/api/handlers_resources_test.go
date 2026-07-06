@@ -104,7 +104,7 @@ func (f *fakeResourceStore) GetIssuerPEMForCert(_ context.Context, _ string) (st
 	return f.issuerPEM, f.issuerPEMErr
 }
 
-func (f *fakeResourceStore) MarkRevokedViaCRL(_ context.Context, _ uuid.UUID) error {
+func (f *fakeResourceStore) MarkRevoked(_ context.Context, _ uuid.UUID, _ string) error {
 	f.markRevokedN++
 	return f.markRevokedErr
 }

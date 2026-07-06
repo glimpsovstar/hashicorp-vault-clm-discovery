@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	neturl "net/url"
-	"time"
 
 	"golang.org/x/crypto/ocsp"
 )
@@ -50,7 +49,7 @@ func CheckOCSP(ctx context.Context, client *http.Client, leafPEM, issuerPEM stri
 		return res, fmt.Errorf("create ocsp request: %w", err)
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
+		client = defaultClient()
 	}
 
 	for _, server := range ocspServers {

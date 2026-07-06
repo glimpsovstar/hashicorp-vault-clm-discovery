@@ -36,7 +36,7 @@ type resourceStore interface {
 	GetIssuer(ctx context.Context, id uuid.UUID) (store.Issuer, error)
 	SetIssuerVaultRef(ctx context.Context, id uuid.UUID, issuerRef, mount string) (store.Issuer, error)
 	GetIssuerPEMForCert(ctx context.Context, issuerDN string) (string, error)
-	MarkRevokedViaCRL(ctx context.Context, id uuid.UUID) error
+	MarkRevoked(ctx context.Context, id uuid.UUID, source string) error
 	DeleteScan(ctx context.Context, id uuid.UUID) error
 	DeleteCertificate(ctx context.Context, id uuid.UUID) error
 	DeleteIssuer(ctx context.Context, id uuid.UUID) error
@@ -428,17 +428,17 @@ func (s *Server) handleRevocationCheck(w http.ResponseWriter, r *http.Request) {
 		CRLURLs:     cert.CRLDistributionPoints,
 	})
 	if err != nil {
-		s.log.Warn("crl revocation check failed", "action", "revocation_check", "certificate_id", id.String(), "err", err)
+		s.log.Warn("revocation check failed", "action", "revocation_check", "certificate_id", id.String(), "err", err)
 		writeError(w, r, http.StatusBadGateway, "revocation check failed")
 		return
 	}
 
 	if result.Status == revocation.StatusRevoked && result.Verified {
-		if err := s.resources.MarkRevokedViaCRL(r.Context(), id); err != nil {
+		if err := s.resources.MarkRevoked(r.Context(), id, result.Source); err != nil {
 			s.writeServerError(w, r, err, "failed to record revocation")
 			return
 		}
-		s.log.Info("certificate revoked via CRL", "action", "revocation_check", "certificate_id", id.String())
+		s.log.Info("certificate revoked", "action", "revocation_check", "certificate_id", id.String(), "source", result.Source)
 	}
 	writeJSON(w, http.StatusOK, result)
 }

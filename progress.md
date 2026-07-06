@@ -55,17 +55,25 @@ North star and roadmap: `docs/program-context.md`.
 - **#38 Choose wizard** — `lifecycle.ChooseRecommendation` (pure, cycle-free)
   maps cert signals to a next-action code; `GET /certificates/{id}/choose` +
   a "Recommended next step" panel on cert detail. Merged via PR #39.
+- **#40 CRL revocation for shadow certs** — `internal/revocation.CheckCRL`
+  (fetch DP, parse, membership, verify sig vs issuer) + `POST /certificates/{id}/
+  revocation-check` (persists revoked only when signature-verified; advisory
+  otherwise) + "Check revocation" button. SSRF-hardened (scheme allowlist, no
+  redirects). Merged via PR #41.
+- **Issue cleanup:** #25 (import A/B/D + mode C docs) and #23 (v1.1 reconcile +
+  v1.1b revocation) closed.
 
 ## In progress
 
-- Nothing actively coding. On `main`, working tree clean.
+- Nothing actively coding. On `main`, working tree clean. No open issues.
 
 ## Next
 
 1. (Optional) run the HCP integration lane against the real cluster with `hcpvenv`
-   creds — writes a `pki-clm-int` mount to the shared HCP Vault, so confirm first.
-2. #25 mode C (reissue) docs → vault-agent/AAP reference (v1.3+).
-3. **OCSP/CRL for shadow (non-Vault) certs**; **v2** cloud CA sources (ACM, etc.).
+   creds — writes a `pki-clm-int` mount to shared HCP Vault, so confirm first.
+2. **OCSP** revocation check (follow-up to #40); private-IP deny on CRL fetch.
+3. #25 mode C automation (vault-agent/AAP), "Choose" auto-execute — v1.3+.
+4. **v2** — cloud CA sources (ACM, etc.).
 
 ## Key context
 

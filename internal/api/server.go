@@ -34,6 +34,7 @@ type resourceStore interface {
 	GetCertificate(ctx context.Context, id uuid.UUID) (store.Certificate, error)
 	ListCertificates(ctx context.Context, f store.CertificateFilter) ([]store.Certificate, int, error)
 	SetManagedStatus(ctx context.Context, id uuid.UUID, status string) (store.Certificate, error)
+	SetRenewalConfig(ctx context.Context, id uuid.UUID, cfg store.RenewalConfig) (store.Certificate, error)
 	GetIssuer(ctx context.Context, id uuid.UUID) (store.Issuer, error)
 	SetIssuerVaultRef(ctx context.Context, id uuid.UUID, issuerRef, mount string) (store.Issuer, error)
 	GetIssuerPEMForCert(ctx context.Context, issuerDN string) (string, error)
@@ -656,8 +657,18 @@ func (s *Server) handleRevocationCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+type renewalConfigRequest struct {
+	Role        string `json:"role"`
+	Mount       string `json:"mount"`
+	Service     string `json:"service"`
+	TargetHosts string `json:"target_hosts"`
+	TTL         string `json:"ttl"`
+	AltNames    string `json:"alt_names"`
+}
+
 type catalogImportRequest struct {
-	Consent bool `json:"consent"`
+	Consent bool                  `json:"consent"`
+	Renewal *renewalConfigRequest `json:"renewal,omitempty"`
 }
 
 // handleCatalogImport implements mode A (catalog): track a discovered cert in
@@ -690,8 +701,62 @@ func (s *Server) handleCatalogImport(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+
+	// Optionally capture the Vault PKI coordinates now so Mode C auto-renewal can
+	// reissue this cert later without re-specifying its role.
+	if req.Renewal != nil {
+		cfg, verr := validateRenewalConfig(*req.Renewal, s.cfg.AAPDefaultMount)
+		if verr != nil {
+			writeError(w, r, http.StatusBadRequest, verr.Error())
+			return
+		}
+		updated, cerr := s.resources.SetRenewalConfig(r.Context(), id, cfg)
+		if cerr != nil {
+			s.writeServerError(w, r, cerr, "failed to store renewal config")
+			return
+		}
+		cert = updated
+	}
+
 	s.log.Info("catalog import", "action", "catalog_import", "certificate_id", id.String(), "managed_status", "imported")
 	writeJSON(w, http.StatusOK, cert)
+}
+
+// validateRenewalConfig validates and normalizes a renewal-config request. The
+// role is required; mount defaults to defaultMount. Every value is checked with
+// the same validators the renew endpoint uses (these flow into AAP extra_vars,
+// which Ansible Jinja2-evaluates).
+func validateRenewalConfig(req renewalConfigRequest, defaultMount string) (store.RenewalConfig, error) {
+	role := strings.TrimSpace(req.Role)
+	mount := strings.TrimSpace(req.Mount)
+	if mount == "" {
+		mount = defaultMount
+	}
+	if role == "" || !renewal.ValidService(role) {
+		return store.RenewalConfig{}, errors.New("invalid or missing renewal role")
+	}
+	if mount == "" || !renewal.ValidService(mount) {
+		return store.RenewalConfig{}, errors.New("invalid renewal mount")
+	}
+	svc := strings.TrimSpace(req.Service)
+	th := strings.TrimSpace(req.TargetHosts)
+	ttl := strings.TrimSpace(req.TTL)
+	an := strings.TrimSpace(req.AltNames)
+	if !renewal.ValidService(svc) {
+		return store.RenewalConfig{}, errors.New("invalid renewal service")
+	}
+	if !renewal.ValidService(th) {
+		return store.RenewalConfig{}, errors.New("invalid renewal target_hosts")
+	}
+	if !renewal.ValidTTL(ttl) {
+		return store.RenewalConfig{}, errors.New("invalid renewal ttl")
+	}
+	if !renewal.ValidAltNames(an) {
+		return store.RenewalConfig{}, errors.New("invalid renewal alt_names")
+	}
+	return store.RenewalConfig{
+		Role: role, Mount: mount, Service: svc, TargetHosts: th, TTL: ttl, AltNames: an,
+	}, nil
 }
 
 func (s *Server) handleListIssuers(w http.ResponseWriter, r *http.Request) {

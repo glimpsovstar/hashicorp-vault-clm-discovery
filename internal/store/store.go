@@ -61,45 +61,59 @@ type Scan struct {
 }
 
 type Certificate struct {
-	ID                    uuid.UUID  `json:"id"`
-	SerialNumber          string     `json:"serial_number"`
-	FingerprintSHA256     string     `json:"fingerprint_sha256"`
-	SubjectCN             *string    `json:"subject_cn"`
-	SubjectAltNames       []string   `json:"subject_alt_names"`
-	IssuerDN              string     `json:"issuer_dn"`
-	AuthorityKeyID        *string    `json:"authority_key_id"`
-	NotBefore             time.Time  `json:"not_before"`
-	NotAfter              time.Time  `json:"not_after"`
-	KeyType               string     `json:"key_type"`
-	KeyBits               int        `json:"key_bits"`
-	SignatureAlgorithm    string     `json:"signature_algorithm"`
-	IsCA                  bool       `json:"is_ca"`
-	KeyUsage              []string   `json:"key_usage"`
-	ExtKeyUsage           []string   `json:"ext_key_usage"`
-	PEM                   string     `json:"pem"`
-	DaysUntilExpiry       int        `json:"days_until_expiry"`
-	Status                string     `json:"status"`
-	RevocationStatus      *string    `json:"revocation_status"`
-	RevocationCheckedAt   *time.Time `json:"revocation_checked_at"`
-	CRLDistributionPoints []string   `json:"crl_distribution_points"`
-	OCSPServers           []string   `json:"ocsp_servers"`
-	FirstDiscovered       time.Time  `json:"first_discovered"`
-	LastSeen              time.Time  `json:"last_seen"`
-	HostnameMatchesSAN    bool       `json:"hostname_matches_san"`
-	ChainStatus           string     `json:"chain_status"`
-	ManagedStatus         string     `json:"managed_status"`
-	CertScope             string     `json:"cert_scope"`
-	VaultIssuerRef        *string    `json:"vault_issuer_ref"`
-	VaultPKIMount         *string    `json:"vault_pki_mount"`
-	Owner                 *string    `json:"owner"`
-	Team                  *string    `json:"team"`
-	Environment           *string    `json:"environment"`
-	Tags                  []string   `json:"tags"`
-	RiskScore             int        `json:"risk_score"`
-	RemediationState      string     `json:"remediation_state"`
-	ObservationCount      int        `json:"observation_count,omitempty"`
-	CreatedAt             time.Time  `json:"created_at"`
-	UpdatedAt             time.Time  `json:"updated_at"`
+	ID                    uuid.UUID      `json:"id"`
+	SerialNumber          string         `json:"serial_number"`
+	FingerprintSHA256     string         `json:"fingerprint_sha256"`
+	SubjectCN             *string        `json:"subject_cn"`
+	SubjectAltNames       []string       `json:"subject_alt_names"`
+	IssuerDN              string         `json:"issuer_dn"`
+	AuthorityKeyID        *string        `json:"authority_key_id"`
+	NotBefore             time.Time      `json:"not_before"`
+	NotAfter              time.Time      `json:"not_after"`
+	KeyType               string         `json:"key_type"`
+	KeyBits               int            `json:"key_bits"`
+	SignatureAlgorithm    string         `json:"signature_algorithm"`
+	IsCA                  bool           `json:"is_ca"`
+	KeyUsage              []string       `json:"key_usage"`
+	ExtKeyUsage           []string       `json:"ext_key_usage"`
+	PEM                   string         `json:"pem"`
+	DaysUntilExpiry       int            `json:"days_until_expiry"`
+	Status                string         `json:"status"`
+	RevocationStatus      *string        `json:"revocation_status"`
+	RevocationCheckedAt   *time.Time     `json:"revocation_checked_at"`
+	CRLDistributionPoints []string       `json:"crl_distribution_points"`
+	OCSPServers           []string       `json:"ocsp_servers"`
+	FirstDiscovered       time.Time      `json:"first_discovered"`
+	LastSeen              time.Time      `json:"last_seen"`
+	HostnameMatchesSAN    bool           `json:"hostname_matches_san"`
+	ChainStatus           string         `json:"chain_status"`
+	ManagedStatus         string         `json:"managed_status"`
+	CertScope             string         `json:"cert_scope"`
+	VaultIssuerRef        *string        `json:"vault_issuer_ref"`
+	VaultPKIMount         *string        `json:"vault_pki_mount"`
+	Owner                 *string        `json:"owner"`
+	Team                  *string        `json:"team"`
+	Environment           *string        `json:"environment"`
+	Tags                  []string       `json:"tags"`
+	RiskScore             int            `json:"risk_score"`
+	RemediationState      string         `json:"remediation_state"`
+	RenewalConfig         *RenewalConfig `json:"renewal_config,omitempty"`
+	ObservationCount      int            `json:"observation_count,omitempty"`
+	CreatedAt             time.Time      `json:"created_at"`
+	UpdatedAt             time.Time      `json:"updated_at"`
+}
+
+// RenewalConfig is the per-certificate Vault PKI coordinates used by Mode C
+// auto-renewal. It is captured when a cert is tracked in CLM and reused by the
+// renew endpoints so a discovered cert can be reissued without re-specifying its
+// role each time.
+type RenewalConfig struct {
+	Role        string `json:"role"`
+	Mount       string `json:"mount"`
+	Service     string `json:"service,omitempty"`
+	TargetHosts string `json:"target_hosts,omitempty"`
+	TTL         string `json:"ttl,omitempty"`
+	AltNames    string `json:"alt_names,omitempty"`
 }
 
 type Observation struct {
@@ -408,6 +422,7 @@ func (s *Store) ListCertificates(ctx context.Context, f CertificateFilter) ([]Ce
 			c.hostname_matches_san, c.chain_status::text, c.managed_status::text, c.cert_scope::text,
 			c.vault_issuer_ref, c.vault_pki_mount, c.owner, c.team, c.environment, c.tags,
 			c.risk_score, c.remediation_state::text, c.created_at, c.updated_at,
+			c.renewal_config,
 			(SELECT COUNT(*) FROM certificate_observations o WHERE o.certificate_id = c.id) AS obs_count
 		FROM certificates c %s ORDER BY c.last_seen DESC LIMIT $%d OFFSET $%d
 	`, where, argN, argN+1)
@@ -443,6 +458,7 @@ func (s *Store) GetCertificate(ctx context.Context, id uuid.UUID) (Certificate, 
 			c.hostname_matches_san, c.chain_status::text, c.managed_status::text, c.cert_scope::text,
 			c.vault_issuer_ref, c.vault_pki_mount, c.owner, c.team, c.environment, c.tags,
 			c.risk_score, c.remediation_state::text, c.created_at, c.updated_at,
+			c.renewal_config,
 			(SELECT COUNT(*) FROM certificate_observations o WHERE o.certificate_id = c.id)
 		FROM certificates c WHERE c.id = $1
 	`, id)
@@ -661,6 +677,7 @@ type scanner interface {
 func scanCertificate(scan func(dest ...any) error) (Certificate, error) {
 	var c Certificate
 	var sansJSON []byte
+	var renewalJSON []byte
 	err := scan(
 		&c.ID, &c.SerialNumber, &c.FingerprintSHA256, &c.SubjectCN, &sansJSON,
 		&c.IssuerDN, &c.AuthorityKeyID, &c.NotBefore, &c.NotAfter, &c.KeyType, &c.KeyBits,
@@ -669,11 +686,36 @@ func scanCertificate(scan func(dest ...any) error) (Certificate, error) {
 		&c.CRLDistributionPoints, &c.OCSPServers, &c.FirstDiscovered, &c.LastSeen,
 		&c.HostnameMatchesSAN, &c.ChainStatus, &c.ManagedStatus, &c.CertScope,
 		&c.VaultIssuerRef, &c.VaultPKIMount, &c.Owner, &c.Team, &c.Environment, &c.Tags,
-		&c.RiskScore, &c.RemediationState, &c.CreatedAt, &c.UpdatedAt, &c.ObservationCount,
+		&c.RiskScore, &c.RemediationState, &c.CreatedAt, &c.UpdatedAt, &renewalJSON, &c.ObservationCount,
 	)
 	if err != nil {
 		return Certificate{}, err
 	}
 	_ = json.Unmarshal(sansJSON, &c.SubjectAltNames)
+	if len(renewalJSON) > 0 {
+		var rc RenewalConfig
+		if json.Unmarshal(renewalJSON, &rc) == nil {
+			c.RenewalConfig = &rc
+		}
+	}
 	return c, nil
+}
+
+// SetRenewalConfig stores the Mode C renewal coordinates for a certificate,
+// returning the updated row. Returns ErrCertificateNotFound if the id is unknown.
+func (s *Store) SetRenewalConfig(ctx context.Context, id uuid.UUID, cfg RenewalConfig) (Certificate, error) {
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return Certificate{}, err
+	}
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE certificates SET renewal_config = $2, updated_at = NOW() WHERE id = $1
+	`, id, data)
+	if err != nil {
+		return Certificate{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		return Certificate{}, ErrCertificateNotFound
+	}
+	return s.GetCertificate(ctx, id)
 }

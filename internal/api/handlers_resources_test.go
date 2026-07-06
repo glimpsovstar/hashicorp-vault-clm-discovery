@@ -50,6 +50,8 @@ type fakeResourceStore struct {
 	renewable        []store.Certificate
 	renewableErr     error
 	gotWithinDays    int
+	events           []store.Event
+	eventsErr        error
 	deleteScanErr    error
 	deleteCertErr    error
 	deleteIssuerErr  error
@@ -85,6 +87,13 @@ func (f *fakeResourceStore) ListRenewable(_ context.Context, withinDays int) ([]
 		return nil, f.renewableErr
 	}
 	return f.renewable, nil
+}
+
+func (f *fakeResourceStore) ListEvents(_ context.Context, _ int) ([]store.Event, error) {
+	if f.eventsErr != nil {
+		return nil, f.eventsErr
+	}
+	return f.events, nil
 }
 
 func (f *fakeResourceStore) SetManagedStatus(_ context.Context, _ uuid.UUID, status string) (store.Certificate, error) {
@@ -575,6 +584,7 @@ func TestCertificateRoutes_Registered(t *testing.T) {
 		{http.MethodPost, "/api/v1/renew-expiring", `{"consent":true}`, http.StatusServiceUnavailable},
 		// inventory is read-only and needs no AAP -> 200 proves registration.
 		{http.MethodGet, "/api/v1/inventory", "", http.StatusOK},
+		{http.MethodGet, "/api/v1/events", "", http.StatusOK},
 	}
 	for _, c := range cases {
 		var body io.Reader

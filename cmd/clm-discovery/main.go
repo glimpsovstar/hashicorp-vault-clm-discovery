@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/api"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/config"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/eventbus"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/logging"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
@@ -48,6 +50,27 @@ func main() {
 		WriteTimeout: 60 * time.Second,
 	}
 
+	// Event dispatcher (ADR 0001, Phase 1b): reactive delivery of outbox events to
+	// Ansible EDA. No-op unless EDA_WEBHOOK_URL is set.
+	dispCtx, dispCancel := context.WithCancel(context.Background())
+	defer dispCancel()
+	var dispWG sync.WaitGroup
+	dispatcher := eventbus.New(eventbus.Config{
+		WebhookURL:  cfg.EDAWebhookURL,
+		Token:       cfg.EDAWebhookToken,
+		Interval:    cfg.EventDispatchInterval,
+		BatchSize:   cfg.EventDispatchBatch,
+		MaxAttempts: cfg.EventMaxAttempts,
+	}, st, logger)
+	if dispatcher.Configured() {
+		logger.Info("starting event dispatcher", "interval", cfg.EventDispatchInterval)
+		dispWG.Add(1)
+		go func() {
+			defer dispWG.Done()
+			dispatcher.Run(dispCtx)
+		}()
+	}
+
 	go func() {
 		logger.Info("starting server", "addr", cfg.Addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -60,6 +83,8 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 
+	dispCancel() // stop the event dispatcher before draining HTTP
+	dispWG.Wait()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = server.Shutdown(shutdownCtx)

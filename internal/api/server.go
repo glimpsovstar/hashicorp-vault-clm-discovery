@@ -562,6 +562,14 @@ func (s *Server) handleRenewCertificate(w http.ResponseWriter, r *http.Request) 
 		writeError(w, r, http.StatusBadRequest, "invalid target_hosts")
 		return
 	}
+	if !renewal.ValidTTL(strings.TrimSpace(body.TTL)) {
+		writeError(w, r, http.StatusBadRequest, "invalid ttl")
+		return
+	}
+	if !renewal.ValidAltNames(strings.TrimSpace(body.AltNames)) {
+		writeError(w, r, http.StatusBadRequest, "invalid alt_names")
+		return
+	}
 
 	// extra_vars maps onto the vault-ansible-clm issue role's contract. Vault
 	// AppRole creds are injected by an AAP credential, never passed by CLM.

@@ -50,6 +50,8 @@ func TestHandleRenewCertificate_Statuses(t *testing.T) {
 		{"not found", &fakeResourceStore{certErr: store.ErrCertificateNotFound}, &fakeRenewer{}, uuid.New().String(), `{"consent":true,"role":"web"}`, http.StatusNotFound, false},
 		{"missing role", withCN(), &fakeRenewer{}, uuid.New().String(), `{"consent":true}`, http.StatusBadRequest, false},
 		{"invalid role", withCN(), &fakeRenewer{}, uuid.New().String(), `{"consent":true,"role":"../evil"}`, http.StatusBadRequest, false},
+		{"ssti ttl rejected", withCN(), &fakeRenewer{}, uuid.New().String(), `{"consent":true,"role":"web","ttl":"{{ lookup('pipe','id') }}"}`, http.StatusBadRequest, false},
+		{"ssti alt_names rejected", withCN(), &fakeRenewer{}, uuid.New().String(), `{"consent":true,"role":"web","alt_names":"{{evil}}"}`, http.StatusBadRequest, false},
 		{"launch failure", withCN(), &fakeRenewer{err: context.DeadlineExceeded}, uuid.New().String(), `{"consent":true,"role":"web"}`, http.StatusBadGateway, true},
 		{"success", withCN(), &fakeRenewer{ref: RenewRef{JobID: 42}}, uuid.New().String(), `{"consent":true,"role":"web-server","service":"nginx"}`, http.StatusAccepted, true},
 	}
@@ -89,5 +91,40 @@ func TestHandleRenewCertificate_Statuses(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestHandleRenewCertificate_ForwardsOptionalVars(t *testing.T) {
+	t.Parallel()
+
+	cn := "app.example.com"
+	fr := &fakeRenewer{ref: RenewRef{JobID: 7, Workflow: true}}
+	srv := newResourceServer(&fakeResourceStore{cert: store.Certificate{SubjectCN: &cn}})
+	srv.cfg.AAPDefaultMount = "pki"
+	srv.renewer = fr
+
+	body := `{"consent":true,"role":"web-server","service":"nginx","mount":"pki-int","target_hosts":"web_group","ttl":"72h","alt_names":"a.example.com b.example.com"}`
+	rec := httptest.NewRecorder()
+	srv.handleRenewCertificate(rec, idRequestBody(http.MethodPost, uuid.New().String(), body))
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 (body: %s)", rec.Code, rec.Body.String())
+	}
+	want := map[string]any{
+		"cert_common_name_override": cn,
+		"vault_pki_mount":           "pki-int",
+		"vault_pki_role":            "web-server",
+		"cert_service_type":         "nginx",
+		"target_hosts":              "web_group",
+		"vault_cert_ttl":            "72h",
+		"cert_alt_names_override":   "a.example.com b.example.com",
+	}
+	for k, v := range want {
+		if fr.gotVars[k] != v {
+			t.Fatalf("extra_vars[%q] = %v, want %v", k, fr.gotVars[k], v)
+		}
+	}
+	if !strings.Contains(rec.Body.String(), `"workflow":true`) {
+		t.Fatalf("response should reflect workflow job: %s", rec.Body.String())
 	}
 }

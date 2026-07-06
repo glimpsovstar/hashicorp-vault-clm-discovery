@@ -58,22 +58,34 @@ North star and roadmap: `docs/program-context.md`.
 - **#40 CRL revocation for shadow certs** — `internal/revocation.CheckCRL`
   (fetch DP, parse, membership, verify sig vs issuer) + `POST /certificates/{id}/
   revocation-check` (persists revoked only when signature-verified; advisory
-  otherwise) + "Check revocation" button. SSRF-hardened (scheme allowlist, no
-  redirects). Merged via PR #41.
-- **Issue cleanup:** #25 (import A/B/D + mode C docs) and #23 (v1.1 reconcile +
-  v1.1b revocation) closed.
+  otherwise) + "Check revocation" button. SSRF-hardened. Merged via PR #41.
+- **#42 OCSP revocation** — `CheckOCSP` + combined `Check` (OCSP-first, CRL
+  fallback); revocation persisted source-accurately (`revoked_via_ocsp|crl`).
+  Merged via PR #43.
+- **HCP integration lane VALIDATED** — minted a fresh token via the TPM cert-auth
+  flow (`vault-auth` → `~/.vault-tpm/token` → `source ~/.vault-tpm/vault-env.sh`),
+  `terraform apply` configured `pki-clm-int` on the live cluster, imported a test
+  CA (mode B) successfully, then `terraform destroy` (clean). TPM token step saved
+  to memory (`/memories/hcp-vault-access.md`).
 
 ## In progress
 
-- Nothing actively coding. On `main`, working tree clean. No open issues.
+- **Mode C automation** (next) — reissue & deploy reference (v1.3+). Needs a scope
+  decision (see below) since CLM does not itself deploy to hosts.
 
 ## Next
 
-1. (Optional) run the HCP integration lane against the real cluster with `hcpvenv`
-   creds — writes a `pki-clm-int` mount to shared HCP Vault, so confirm first.
-2. **OCSP** revocation check (follow-up to #40); private-IP deny on CRL fetch.
-3. #25 mode C automation (vault-agent/AAP), "Choose" auto-execute — v1.3+.
-4. **v2** — cloud CA sources (ACM, etc.).
+1. **Mode C automation** — likely a per-cert "renewal kit" generator (vault-agent
+   HCL template + AAP playbook) for a chosen Vault PKI role; CLM verifies via
+   rescan+reconcile. Scope to confirm at the design gate.
+2. Private-IP deny on the CRL/OCSP fetch address; OCSP stapling capture at scan.
+3. **v2** — cloud CA sources (ACM, etc.).
+
+## HCP note
+- `hcpvenv` alias token is stale/expired — do NOT use it. Mint fresh via TPM:
+  `~/Documents/work-related/vault-related/mba-tpm-hcp-vault/auth-with-tpm.sh`
+  then `source ~/.vault-tpm/vault-env.sh` (VAULT_NAMESPACE=admin). Pass to TF via
+  `TF_VAR_vault_addr/vault_namespace/vault_token` env.
 
 ## Key context
 

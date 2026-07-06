@@ -6,6 +6,7 @@ package renewal
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -60,6 +61,49 @@ func validate(in KitInput) error {
 		return fmt.Errorf("invalid common name")
 	}
 	return nil
+}
+
+// Validate reports whether the kit input is safe to use (CN is a DNS hostname,
+// mount and role are safe Vault path segments). Exported so the AAP renew
+// orchestrator reuses the exact same checks before launching a job.
+func Validate(in KitInput) error { return validate(in) }
+
+// ValidService reports whether an optional service name is safe. An empty
+// service is allowed (it just means "no service override").
+func ValidService(s string) bool { return s == "" || validName(s) }
+
+var ttlPattern = regexp.MustCompile(`^[0-9]+(s|m|h|d)$`)
+
+// ValidTTL reports whether s is empty or a Vault-style duration (e.g. "72h",
+// "30m", "10d"). Values flow into AAP extra_vars, which Ansible Jinja2-evaluates,
+// so an unvalidated value like "{{ lookup('pipe','id') }}" would be template
+// injection — this restricts it to a digits+unit duration.
+func ValidTTL(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return true
+	}
+	return ttlPattern.MatchString(s)
+}
+
+// ValidAltNames reports whether a comma- or space-separated SAN list is safe:
+// empty is allowed, otherwise every entry must be a DNS hostname. Same SSTI
+// rationale as ValidTTL — these become cert_alt_names_override in AAP.
+func ValidAltNames(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return true
+	}
+	fields := strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' })
+	if len(fields) == 0 {
+		return false
+	}
+	for _, f := range fields {
+		if !validCommonName(strings.TrimSpace(f)) {
+			return false
+		}
+	}
+	return true
 }
 
 // validCommonName restricts the CN to a DNS hostname (optionally a single leading

@@ -22,6 +22,12 @@ func renewableCert(cn, role string) store.Certificate {
 	}
 }
 
+func renewableCertWithTTL(cn, role, ttl string) store.Certificate {
+	c := renewableCert(cn, role)
+	c.RenewalConfig.TTL = ttl
+	return c
+}
+
 func TestHandleRenewExpiring(t *testing.T) {
 	t.Parallel()
 
@@ -44,6 +50,7 @@ func TestHandleRenewExpiring(t *testing.T) {
 		{"empty eligible", &fakeRenewer{}, &fakeResourceStore{}, `{"consent":true}`, http.StatusAccepted, 0, 0},
 		{"launches eligible", &fakeRenewer{ref: RenewRef{JobID: 1}}, &fakeResourceStore{renewable: []store.Certificate{valid}}, `{"consent":true,"within_days":30}`, http.StatusAccepted, 1, 0},
 		{"invalid config captured", &fakeRenewer{ref: RenewRef{JobID: 1}}, &fakeResourceStore{renewable: []store.Certificate{badCfg}}, `{"consent":true}`, http.StatusAccepted, 0, 1},
+		{"ssti ttl captured", &fakeRenewer{ref: RenewRef{JobID: 1}}, &fakeResourceStore{renewable: []store.Certificate{renewableCertWithTTL("x.example.com", "web", "{{ lookup('pipe','id') }}")}}, `{"consent":true}`, http.StatusAccepted, 0, 1},
 		{"launch failure captured", &fakeRenewer{err: context.DeadlineExceeded}, &fakeResourceStore{renewable: []store.Certificate{valid}}, `{"consent":true}`, http.StatusAccepted, 0, 1},
 	}
 

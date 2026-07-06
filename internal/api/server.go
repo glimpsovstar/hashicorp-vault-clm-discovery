@@ -48,9 +48,9 @@ type issuerImporter interface {
 	ImportIssuerBundle(ctx context.Context, mount, pemBundle string) (vault.IssuerImportResult, error)
 }
 
-// crlChecker performs a CRL revocation check; injectable so the handler is
-// testable without outbound HTTP.
-type crlChecker func(ctx context.Context, serialHex string, crlURLs []string, issuerPEM string) (revocation.Result, error)
+// revChecker performs a revocation check (OCSP first, then CRL); injectable so
+// the handler is testable without outbound HTTP.
+type revChecker func(ctx context.Context, in revocation.CheckInput) (revocation.Result, error)
 
 type Server struct {
 	cfg        config.Config
@@ -64,21 +64,21 @@ type Server struct {
 	report     reportStore
 	resources  resourceStore
 	importer   issuerImporter
-	crlCheck   crlChecker
+	revCheck   revChecker
 }
 
 func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slog.Logger) *Server {
 	s := &Server{cfg: cfg, store: st, scanner: sc, log: log, blindSpot: st, compliance: st, report: st, resources: st}
-	s.crlCheck = func(ctx context.Context, serialHex string, crlURLs []string, issuerPEM string) (revocation.Result, error) {
-		// Do not follow redirects: the CRL URL is attacker-influenced (from the
-		// scanned cert), and a redirect could pivot into internal networks (SSRF).
+	s.revCheck = func(ctx context.Context, in revocation.CheckInput) (revocation.Result, error) {
+		// Do not follow redirects: the OCSP/CRL URLs are attacker-influenced (from
+		// the scanned cert), and a redirect could pivot into internal networks (SSRF).
 		client := &http.Client{
 			Timeout: 10 * time.Second,
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
 		}
-		return revocation.CheckCRL(ctx, client, serialHex, crlURLs, issuerPEM)
+		return revocation.Check(ctx, client, in)
 	}
 	if cfg.VaultAddr != "" {
 		if vc, err := vault.NewClient(vault.Config{
@@ -420,7 +420,13 @@ func (s *Server) handleRevocationCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.crlCheck(r.Context(), cert.SerialNumber, cert.CRLDistributionPoints, issuerPEM)
+	result, err := s.revCheck(r.Context(), revocation.CheckInput{
+		SerialHex:   cert.SerialNumber,
+		LeafPEM:     cert.PEM,
+		IssuerPEM:   issuerPEM,
+		OCSPServers: cert.OCSPServers,
+		CRLURLs:     cert.CRLDistributionPoints,
+	})
 	if err != nil {
 		s.log.Warn("crl revocation check failed", "action", "revocation_check", "certificate_id", id.String(), "err", err)
 		writeError(w, r, http.StatusBadGateway, "revocation check failed")

@@ -37,7 +37,7 @@ export default function RevocationCheckButton({ cert }: { cert: Certificate }) {
         onClick={() => void onClick()}
         disabled={busy}
       >
-        {busy ? "Checking…" : "Check revocation (CRL)"}
+        {busy ? "Checking…" : "Check revocation"}
       </button>
       {result && (
         <p className="help-text">

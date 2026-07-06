@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/config"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/lifecycle"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/revocation"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanrunner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
@@ -33,6 +35,8 @@ type resourceStore interface {
 	SetManagedStatus(ctx context.Context, id uuid.UUID, status string) (store.Certificate, error)
 	GetIssuer(ctx context.Context, id uuid.UUID) (store.Issuer, error)
 	SetIssuerVaultRef(ctx context.Context, id uuid.UUID, issuerRef, mount string) (store.Issuer, error)
+	GetIssuerPEMForCert(ctx context.Context, issuerDN string) (string, error)
+	MarkRevokedViaCRL(ctx context.Context, id uuid.UUID) error
 	DeleteScan(ctx context.Context, id uuid.UUID) error
 	DeleteCertificate(ctx context.Context, id uuid.UUID) error
 	DeleteIssuer(ctx context.Context, id uuid.UUID) error
@@ -43,6 +47,10 @@ type resourceStore interface {
 type issuerImporter interface {
 	ImportIssuerBundle(ctx context.Context, mount, pemBundle string) (vault.IssuerImportResult, error)
 }
+
+// crlChecker performs a CRL revocation check; injectable so the handler is
+// testable without outbound HTTP.
+type crlChecker func(ctx context.Context, serialHex string, crlURLs []string, issuerPEM string) (revocation.Result, error)
 
 type Server struct {
 	cfg        config.Config
@@ -56,10 +64,22 @@ type Server struct {
 	report     reportStore
 	resources  resourceStore
 	importer   issuerImporter
+	crlCheck   crlChecker
 }
 
 func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slog.Logger) *Server {
 	s := &Server{cfg: cfg, store: st, scanner: sc, log: log, blindSpot: st, compliance: st, report: st, resources: st}
+	s.crlCheck = func(ctx context.Context, serialHex string, crlURLs []string, issuerPEM string) (revocation.Result, error) {
+		// Do not follow redirects: the CRL URL is attacker-influenced (from the
+		// scanned cert), and a redirect could pivot into internal networks (SSRF).
+		client := &http.Client{
+			Timeout: 10 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+		return revocation.CheckCRL(ctx, client, serialHex, crlURLs, issuerPEM)
+	}
 	if cfg.VaultAddr != "" {
 		if vc, err := vault.NewClient(vault.Config{
 			Address:    cfg.VaultAddr,
@@ -108,6 +128,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/certificates/{id}", s.handleGetCertificate)
 		r.Get("/certificates/{id}/pem", s.handleGetCertificatePEM)
 		r.Get("/certificates/{id}/choose", s.handleGetCertificateChoose)
+		r.Post("/certificates/{id}/revocation-check", s.handleRevocationCheck)
 		r.Patch("/certificates/{id}", s.handlePatchCertificate)
 		r.Post("/certificates/{id}/catalog-import", s.handleCatalogImport)
 		r.Delete("/certificates/{id}", s.handleDeleteCertificate)
@@ -371,6 +392,49 @@ func (s *Server) handleGetCertificateChoose(w http.ResponseWriter, r *http.Reque
 		IsCA:          cert.IsCA,
 	})
 	writeJSON(w, http.StatusOK, rec)
+}
+
+// handleRevocationCheck runs a CRL revocation check for a discovered cert. It
+// persists status=revoked ONLY when the CRL signature is verified against a
+// known issuer; an unverified result is advisory and does not mutate state.
+func (s *Server) handleRevocationCheck(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid certificate id")
+		return
+	}
+	cert, err := s.resources.GetCertificate(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrCertificateNotFound) {
+			writeError(w, r, http.StatusNotFound, "certificate not found")
+			return
+		}
+		s.writeServerError(w, r, err, "failed to load certificate")
+		return
+	}
+
+	// Best-effort issuer lookup to enable CRL signature verification.
+	issuerPEM, err := s.resources.GetIssuerPEMForCert(r.Context(), cert.IssuerDN)
+	if err != nil {
+		s.writeServerError(w, r, err, "failed to look up issuer")
+		return
+	}
+
+	result, err := s.crlCheck(r.Context(), cert.SerialNumber, cert.CRLDistributionPoints, issuerPEM)
+	if err != nil {
+		s.log.Warn("crl revocation check failed", "action", "revocation_check", "certificate_id", id.String(), "err", err)
+		writeError(w, r, http.StatusBadGateway, "revocation check failed")
+		return
+	}
+
+	if result.Status == revocation.StatusRevoked && result.Verified {
+		if err := s.resources.MarkRevokedViaCRL(r.Context(), id); err != nil {
+			s.writeServerError(w, r, err, "failed to record revocation")
+			return
+		}
+		s.log.Info("certificate revoked via CRL", "action", "revocation_check", "certificate_id", id.String())
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 type catalogImportRequest struct {

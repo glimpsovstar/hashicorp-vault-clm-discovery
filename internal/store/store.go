@@ -525,6 +525,47 @@ func (s *Store) ListIssuers(ctx context.Context, limit, offset int) ([]Issuer, e
 	return issuers, rows.Err()
 }
 
+// GetIssuerPEMForCert best-effort finds the stored CA issuer PEM for a leaf whose
+// issuer DN is issuerDN, by matching a CA issuer whose subject CN appears in that
+// DN. Returns "" (no error) when none is found; used to verify a leaf's CRL.
+func (s *Store) GetIssuerPEMForCert(ctx context.Context, issuerDN string) (string, error) {
+	var pemStr string
+	err := s.pool.QueryRow(ctx, `
+		SELECT pem FROM issuers
+		WHERE is_ca AND subject_cn IS NOT NULL AND subject_cn <> ''
+		  AND position(subject_cn IN $1) > 0
+		ORDER BY not_after DESC
+		LIMIT 1
+	`, issuerDN).Scan(&pemStr)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return pemStr, nil
+}
+
+// MarkRevokedViaCRL flips a certificate to revoked based on a signature-verified
+// CRL check. Returns ErrCertificateNotFound if the id is unknown.
+func (s *Store) MarkRevokedViaCRL(ctx context.Context, id uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE certificates SET
+			status = 'revoked',
+			revocation_status = 'revoked_via_crl',
+			revocation_checked_at = NOW(),
+			updated_at = NOW()
+		WHERE id = $1
+	`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrCertificateNotFound
+	}
+	return nil
+}
+
 // GetIssuer loads a single issuer by id, returning ErrIssuerNotFound if absent.
 func (s *Store) GetIssuer(ctx context.Context, id uuid.UUID) (Issuer, error) {
 	var i Issuer

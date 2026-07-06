@@ -350,6 +350,7 @@ func TestHandleCatalogImport_Statuses(t *testing.T) {
 		{name: "success with renewal", res: &fakeResourceStore{}, id: uuid.New().String(), body: `{"consent":true,"renewal":{"role":"web-server","mount":"pki-int","service":"nginx"}}`, want: http.StatusOK, wantRenewalRole: "web-server"},
 		{name: "renewal missing role", res: &fakeResourceStore{}, id: uuid.New().String(), body: `{"consent":true,"renewal":{"mount":"pki-int"}}`, want: http.StatusBadRequest},
 		{name: "renewal ssti ttl", res: &fakeResourceStore{}, id: uuid.New().String(), body: `{"consent":true,"renewal":{"role":"web","mount":"pki","ttl":"{{ x }}"}}`, want: http.StatusBadRequest},
+		{name: "renewal store error", res: &fakeResourceStore{setRenewalErr: context.Canceled}, id: uuid.New().String(), body: `{"consent":true,"renewal":{"role":"web","mount":"pki-int"}}`, want: http.StatusInternalServerError},
 	}
 
 	for _, tt := range tests {

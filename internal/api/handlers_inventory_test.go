@@ -18,12 +18,15 @@ func TestHandleInventory(t *testing.T) {
 	}}
 	srv := newResourceServer(res)
 
-	req := httptest.NewRequest(http.MethodGet, "/inventory", nil)
+	req := httptest.NewRequest(http.MethodGet, "/inventory?within_days=30", nil)
 	rec := httptest.NewRecorder()
 	srv.handleInventory(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
+	}
+	if res.gotWithinDays != 30 {
+		t.Fatalf("within_days passed to store = %d, want 30", res.gotWithinDays)
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
@@ -49,5 +52,22 @@ func TestHandleInventory_ListError(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+func TestHandleInventory_DefaultsToAll(t *testing.T) {
+	t.Parallel()
+
+	res := &fakeResourceStore{}
+	srv := newResourceServer(res)
+	req := httptest.NewRequest(http.MethodGet, "/inventory", nil) // no within_days
+	rec := httptest.NewRecorder()
+	srv.handleInventory(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if res.gotWithinDays <= 365 {
+		t.Fatalf("default within_days = %d, want a large 'all' window", res.gotWithinDays)
 	}
 }

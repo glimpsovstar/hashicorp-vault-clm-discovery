@@ -49,6 +49,7 @@ type fakeResourceStore struct {
 	gotRenewalConfig *store.RenewalConfig
 	renewable        []store.Certificate
 	renewableErr     error
+	gotWithinDays    int
 	deleteScanErr    error
 	deleteCertErr    error
 	deleteIssuerErr  error
@@ -78,7 +79,8 @@ func (f *fakeResourceStore) ListCertificates(_ context.Context, filter store.Cer
 	return f.certs, len(f.certs), nil
 }
 
-func (f *fakeResourceStore) ListRenewable(_ context.Context, _ int) ([]store.Certificate, error) {
+func (f *fakeResourceStore) ListRenewable(_ context.Context, withinDays int) ([]store.Certificate, error) {
+	f.gotWithinDays = withinDays
 	if f.renewableErr != nil {
 		return nil, f.renewableErr
 	}

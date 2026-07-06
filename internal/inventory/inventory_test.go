@@ -129,4 +129,47 @@ func TestBuild_EmptyIsValid(t *testing.T) {
 	}
 }
 
+func TestBuild_OptionalVarsAndConnection(t *testing.T) {
+	t.Parallel()
+
+	c := cert("app.example.com", "web-server", "nginx", 12)
+	c.RenewalConfig.TargetHosts = "web_group"
+	c.RenewalConfig.TTL = "72h"
+	c.RenewalConfig.AltNames = "a.example.com,b.example.com"
+
+	doc := Build([]store.Certificate{c})
+	vars := doc["_meta"].(map[string]any)["hostvars"].(map[string]any)["app.example.com"].(map[string]any)
+
+	if vars["ansible_connection"] != "local" {
+		t.Fatalf("ansible_connection = %v, want local (metadata feed, not SSH targets)", vars["ansible_connection"])
+	}
+	if vars["clm_target_hosts"] != "web_group" {
+		t.Fatalf("clm_target_hosts = %v", vars["clm_target_hosts"])
+	}
+	if vars["vault_cert_ttl"] != "72h" {
+		t.Fatalf("vault_cert_ttl = %v", vars["vault_cert_ttl"])
+	}
+	if vars["cert_alt_names_override"] != "a.example.com,b.example.com" {
+		t.Fatalf("cert_alt_names_override = %v", vars["cert_alt_names_override"])
+	}
+}
+
+func TestBuild_SlugifiesServiceGroupNames(t *testing.T) {
+	t.Parallel()
+
+	// A service with '-'/'.' would produce an Ansible-warning group name.
+	doc := Build([]store.Certificate{cert("x.example.com", "web", "web-server.v2", 5)})
+	if _, ok := doc["svc_web_server_v2"].(map[string]any); !ok {
+		t.Fatalf("expected slugified group svc_web_server_v2, got keys %v", keysOf(doc))
+	}
+}
+
+func keysOf(m map[string]any) []string {
+	ks := make([]string, 0, len(m))
+	for k := range m {
+		ks = append(ks, k)
+	}
+	return ks
+}
+
 func strptr(s string) *string { return &s }

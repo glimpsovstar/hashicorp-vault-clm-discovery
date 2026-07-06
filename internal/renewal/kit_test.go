@@ -54,6 +54,25 @@ func TestGenerate_NoServiceOmitsReload(t *testing.T) {
 	}
 }
 
+func TestGenerate_WildcardCN(t *testing.T) {
+	t.Parallel()
+
+	arts, err := Generate(TargetAgent, KitInput{CommonName: "*.example.com", Mount: "pki", Role: "web"})
+	if err != nil {
+		t.Fatalf("wildcard CN should be valid: %v", err)
+	}
+	c := arts[0].Content
+	if !strings.Contains(c, "common_name=*.example.com") {
+		t.Fatalf("issue arg should keep wildcard CN: %s", c)
+	}
+	if strings.Contains(c, "/etc/tls/*.example.com") {
+		t.Fatal("file destination must not contain a literal '*'")
+	}
+	if !strings.Contains(c, "/etc/tls/wildcard.example.com.crt") {
+		t.Fatalf("wildcard should be sanitized in the file path: %s", c)
+	}
+}
+
 func TestGenerate_Validation(t *testing.T) {
 	t.Parallel()
 
@@ -66,6 +85,11 @@ func TestGenerate_Validation(t *testing.T) {
 		{"empty role", TargetAgent, KitInput{CommonName: "x", Mount: "pki", Role: ""}},
 		{"traversal mount", TargetAgent, KitInput{CommonName: "x", Mount: "../sys", Role: "r"}},
 		{"empty cn", TargetAgent, KitInput{CommonName: "", Mount: "pki", Role: "r"}},
+		{"cn newline injection", TargetAgent, KitInput{CommonName: "a\ntemplate { command = \"sh\" }", Mount: "pki", Role: "r"}},
+		{"cn quote breakout", TargetAgent, KitInput{CommonName: "a\" x=\"y", Mount: "pki", Role: "r"}},
+		{"cn path traversal", TargetAgent, KitInput{CommonName: "../../root/.bashrc", Mount: "pki", Role: "r"}},
+		{"cn template metachars", TargetAAP, KitInput{CommonName: "a}}b{{c", Mount: "pki", Role: "r"}},
+		{"cn space", TargetAAP, KitInput{CommonName: "a b", Mount: "pki", Role: "r"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

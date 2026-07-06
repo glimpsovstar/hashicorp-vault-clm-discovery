@@ -56,10 +56,38 @@ func validate(in KitInput) error {
 	if !validName(in.Role) {
 		return fmt.Errorf("invalid role")
 	}
-	if strings.TrimSpace(in.CommonName) == "" {
-		return fmt.Errorf("common name is required")
+	if !validCommonName(in.CommonName) {
+		return fmt.Errorf("invalid common name")
 	}
 	return nil
+}
+
+// validCommonName restricts the CN to a DNS hostname (optionally a single leading
+// wildcard label). The CN originates from the scanned certificate's subject_cn
+// (attacker-controlled), so this prevents newline/quote/`}}` injection into the
+// generated vault-agent HCL / AAP YAML and path traversal in file destinations.
+func validCommonName(cn string) bool {
+	cn = strings.TrimSpace(cn)
+	if cn == "" || len(cn) > 253 || strings.Contains(cn, "..") {
+		return false
+	}
+	body := strings.TrimPrefix(cn, "*.")
+	if body == "" || strings.HasPrefix(body, ".") || strings.HasSuffix(body, ".") {
+		return false
+	}
+	for _, c := range body {
+		ok := c == '.' || c == '-' ||
+			(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// fileSafe renders a CN safe for a filesystem path (wildcard -> "wildcard").
+func fileSafe(cn string) string {
+	return strings.ReplaceAll(cn, "*", "wildcard")
 }
 
 // validName allows a simple Vault path/role segment; rejects anything that could
@@ -100,12 +128,12 @@ func agentHCL(in KitInput) Artifact {
 	fmt.Fprintf(&b, "# Issue the leaf from %s/issue/%s and render cert + key.\n", in.Mount, in.Role)
 	b.WriteString("template {\n")
 	fmt.Fprintf(&b, "  contents    = <<-EOT\n    {{- with secret \"%s/issue/%s\" \"common_name=%s\" -}}\n    {{ .Data.certificate }}\n    {{ range .Data.ca_chain }}{{ . }}\n    {{ end }}\n    {{- end -}}\n  EOT\n", in.Mount, in.Role, in.CommonName)
-	fmt.Fprintf(&b, "  destination = \"/etc/tls/%s.crt\"\n", in.CommonName)
+	fmt.Fprintf(&b, "  destination = \"/etc/tls/%s.crt\"\n", fileSafe(in.CommonName))
 	b.WriteString(reloadLine(in.Service, "  "))
 	b.WriteString("}\n\n")
 	b.WriteString("template {\n")
 	fmt.Fprintf(&b, "  contents    = <<-EOT\n    {{- with secret \"%s/issue/%s\" \"common_name=%s\" -}}\n    {{ .Data.private_key }}\n    {{- end -}}\n  EOT\n", in.Mount, in.Role, in.CommonName)
-	fmt.Fprintf(&b, "  destination = \"/etc/tls/%s.key\"\n", in.CommonName)
+	fmt.Fprintf(&b, "  destination = \"/etc/tls/%s.key\"\n", fileSafe(in.CommonName))
 	b.WriteString("}\n")
 	return Artifact{Filename: "vault-agent.hcl", Language: "hcl", Content: b.String()}
 }
@@ -127,12 +155,12 @@ func aapPlaybook(in KitInput) Artifact {
 	b.WriteString("    - name: Write certificate\n")
 	b.WriteString("      ansible.builtin.copy:\n")
 	b.WriteString("        content: \"{{ issued.data.data.certificate }}\\n{{ issued.data.data.ca_chain | join('\\n') }}\"\n")
-	fmt.Fprintf(&b, "        dest: /etc/tls/%s.crt\n", in.CommonName)
+	fmt.Fprintf(&b, "        dest: /etc/tls/%s.crt\n", fileSafe(in.CommonName))
 	b.WriteString("        mode: '0644'\n")
 	b.WriteString("    - name: Write private key\n")
 	b.WriteString("      ansible.builtin.copy:\n")
 	b.WriteString("        content: \"{{ issued.data.data.private_key }}\"\n")
-	fmt.Fprintf(&b, "        dest: /etc/tls/%s.key\n", in.CommonName)
+	fmt.Fprintf(&b, "        dest: /etc/tls/%s.key\n", fileSafe(in.CommonName))
 	b.WriteString("        mode: '0600'\n")
 	if strings.TrimSpace(in.Service) != "" {
 		b.WriteString("    - name: Reload service\n")

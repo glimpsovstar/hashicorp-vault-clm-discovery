@@ -352,6 +352,96 @@ input[type="checkbox"] {
   font-size: var(--token-typography-body-100-font-size);
 }
 
+/* Button paired with an inline "?" help affordance */
+.action-with-help {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Inline "?" help affordance */
+.help-popover {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+}
+
+.help-popover-trigger {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--token-color-border-strong);
+  background: var(--token-color-surface-primary);
+  color: var(--token-color-foreground-faint);
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.help-popover-trigger:hover {
+  background: var(--token-color-surface-interactive-hover);
+  color: var(--token-color-foreground-strong);
+}
+
+.help-popover-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  width: 280px;
+  padding: 10px 12px;
+  background: var(--token-color-surface-primary);
+  border: 1px solid var(--token-color-border-primary);
+  border-radius: 6px;
+  box-shadow: var(--shadow-low);
+  font-size: var(--token-typography-body-100-font-size);
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--token-color-foreground-primary);
+  white-space: normal;
+}
+
+/* Report download dropdown */
+.download-menu {
+  position: relative;
+  display: inline-block;
+}
+
+.download-menu-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--token-color-surface-primary);
+  border: 1px solid var(--token-color-border-primary);
+  border-radius: 6px;
+  box-shadow: var(--shadow-low);
+  display: flex;
+  flex-direction: column;
+}
+
+.download-menu-item {
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--token-color-foreground-primary);
+  font-size: var(--token-typography-body-100-font-size);
+  cursor: pointer;
+}
+
+.download-menu-item:hover {
+  background: var(--token-color-surface-interactive-hover);
+}
+
 /* Buttons (Vault is-primary pattern) */
 .button {
   display: inline-flex;

@@ -95,6 +95,58 @@ export type ReconcileSummary = {
   errors: string[];
 };
 
+export type ReportInsight = {
+  category: string;
+  type: string;
+  severity: "info" | "low" | "medium" | "high" | "critical";
+  recommendation: string;
+  subject_cn?: string;
+  fingerprint_sha256?: string;
+  issuer_dn?: string;
+  description: string;
+  tags?: string[];
+};
+
+export type ReportRecommendation = {
+  code: string;
+  count: number;
+  phase: string;
+  title: string;
+};
+
+// ReportDocument mirrors the Go report.Document JSON (report_version 0.2.0). Only
+// the fields the dashboard renders are typed; the rest of the payload is ignored.
+export type ReportDocument = {
+  report_version: string;
+  generated_at: string;
+  scan_id: string;
+  scan_status: string;
+  blind_spot: BlindSpotSummary;
+  cert_health: {
+    total: number;
+    by_status: Record<string, number>;
+    expiry_buckets: {
+      expired: number;
+      within_7d: number;
+      within_30d: number;
+      within_90d: number;
+      beyond_90d: number;
+    };
+  };
+  expiry_risk: {
+    within_7d: number;
+    within_30d: number;
+    within_90d: number;
+  };
+  scope_governance: {
+    by_scope: Record<string, number>;
+    by_managed_status: Record<string, number>;
+    owner_coverage: { with_owner: number; total: number };
+  };
+  insights: ReportInsight[];
+  recommendations: ReportRecommendation[];
+};
+
 export type Issuer = {
   id: string;
   fingerprint_sha256: string;
@@ -263,6 +315,11 @@ export function fetchBlindSpot(scanId: string) {
   return fetchJSON<BlindSpotSummary>(`/api/v1/scans/${scanId}/blindspot`);
 }
 
+// fetchReport returns the structured environment report the report page renders.
+export function fetchReport(scanId: string) {
+  return fetchJSON<ReportDocument>(`/api/v1/scans/${scanId}/report?format=json`);
+}
+
 export function triggerReconcile() {
   return fetchJSON<ReconcileSummary>("/api/v1/reconcile", { method: "POST" });
 }
@@ -286,6 +343,20 @@ export async function downloadReport(scanId: string, format: "markdown" | "json"
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
+}
+
+export function severityBadgeClass(severity: string): string {
+  switch (severity) {
+    case "critical":
+    case "high":
+      return "badge badge-critical";
+    case "medium":
+      return "badge badge-warning";
+    case "low":
+      return "badge badge-neutral";
+    default:
+      return "badge badge-neutral";
+  }
 }
 
 export function scanStatusBadgeClass(status: string): string {

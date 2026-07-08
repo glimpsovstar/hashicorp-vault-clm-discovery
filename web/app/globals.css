@@ -593,6 +593,9 @@ a.button:hover {
 }
 
 .stat-tile-label {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   font-size: var(--token-typography-body-100-font-size);
   color: var(--token-color-foreground-faint);
   margin-bottom: 4px;

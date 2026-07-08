@@ -1,23 +1,71 @@
 # HashiCorp Vault CLM Discovery
 
-Network TLS certificate discovery service that runs alongside HashiCorp Vault or HCP Vault. Scans IP/CIDR ranges, builds a certificate inventory with lifecycle metadata, and exposes an independent dashboard for CLM workflows.
+Network TLS certificate discovery and lifecycle service that runs alongside HashiCorp Vault or HCP Vault. It scans IP/CIDR and hostname ranges, builds a governed certificate inventory, **reconciles the discovered certs against Vault PKI to reveal the "blind spot"** (certificates deployed on the wire that Vault never issued), evaluates SC-081/PCI/crypto compliance, and drives closed-loop renewal through Ansible Automation Platform (AAP).
 
-Vault PKI reconciliation is planned for v1.1.
+It complements Vault PKI and HCP Certificates Inventory. It is **not** a Vault plugin and does not itself issue or sign certificates — CLM is the inventory system of record; Vault remains the issuance/trust system of record (see [ADR 0001](docs/adr/0001-source-of-truth-and-event-driven-automation.md)).
 
 **New here?** See [docs/program-context.md](docs/program-context.md) — how this repo fits Vault PKI, HCP Certificates Inventory, and the Discover → Choose → Import → Manage lifecycle.
 
-## Features (v1)
+## Features
 
-- Concurrent TLS probing across CIDR ranges and ports
+### Discovery & inventory
+
+- Concurrent TLS probing across CIDR ranges, hostnames (DNS-resolved with correct SNI), and ports
 - Certificate identity extraction aligned with Vault PKI cert objects
-- Lifecycle status (`valid`, `expiring_soon`, `expired`)
+- Lifecycle status (`valid`, `expiring_soon`, `expired`, `revoked`)
 - Discovery metadata (observations per IP/port/SNI)
 - Issuer/CA inventory from presented chains
 - REST API + Next.js dashboard (Vault-style Helios UI — see [UI design spec](docs/superpowers/specs/2026-06-14-vault-ui-design.md))
 - Inventory governance columns: Vault connection, import state, internal/external scope, expiry badges
+- Manual governance enrichment (owner, team, environment, tags)
 - Scan detail page (`/scans/{id}`) with **View results** and inventory filter by scan
 - DELETE API + dashboard actions to reset scans, certificates, and issuers between demos
-- Manual governance enrichment (owner, team, environment, tags)
+
+### Vault reconcile & blind-spot reveal
+
+- Read-only Vault PKI client (`LIST`/`READ`); reconcile matches wire certs to Vault-issued certs
+- **Blind-spot reveal** — surfaces "shadow" certificates deployed but never issued by Vault, per scan and globally (`GET /scans/{id}/blindspot`, `GET /blindspot`) with a dashboard card
+- Vault-revoked certs are marked `status=revoked` during reconcile (durable across rescans)
+
+### Compliance
+
+- SC-081 / PCI / crypto-strength evaluators (`internal/compliance`)
+- Per-scan and global compliance summaries (`GET /scans/{id}/compliance`, `GET /compliance/summary`)
+
+### Revocation checks
+
+- CRL and OCSP checks for shadow certs (OCSP-first, CRL fallback) — `POST /certificates/{id}/revocation-check`
+- Stapled OCSP captured at scan time and auto-persisted when verified-revoked
+- Revocation is recorded source-accurately (`revoked_via_ocsp` / `revoked_via_crl` / `ocsp_stapled`) and is durable across rescans
+- SSRF-hardened fetch path: private/loopback/link-local (incl. `169.254.169.254`) and CGNAT destinations are denied post-DNS; redirects disabled
+
+### Reporting
+
+- Environment scan report (`GET /scans/{id}/report`) with severity-classified insights and recommendation codes
+- Aggregates cert health, expiry risk, issuer trust, and scope/governance
+- Output formats: `markdown` (default), `json`, `csv` (`?format=`) — CSV is formula-injection guarded; dashboard offers CSV/JSON download. `report_version` 0.2.0.
+
+### Import & lifecycle actions
+
+- **Choose wizard** — recommends the next lifecycle action per cert (`GET /certificates/{id}/choose`) with a cert-detail panel
+- **Catalog import** (Modes A + D) — track a wire cert in CLM (`POST /certificates/{id}/catalog-import`, consent-gated, read-only); optionally attaches per-cert `renewal` config
+- **CA import to Vault** (Mode B, a Vault write) — `POST /issuers/{id}/import` with a consent modal
+- Wire-vs-Vault mirror panel and "Track in CLM" button on the cert detail page
+
+### Renewal automation (Mode C — CLM orchestrates, Vault issues, AAP deploys)
+
+- **Renewal kit generator** — renders vault-agent HCL / an AAP playbook to reissue+deploy a cert (`GET /certificates/{id}/renewal-kit`)
+- **On-demand renew** — `POST /certificates/{id}/renew` resolves the AAP job template by name and launches it with validated extra_vars
+- **Batch auto-renewal** — `POST /renew-expiring` renews everything within the expiry window (defaults to `EXPIRING_SOON_DAYS`)
+- **Per-cert renewal config** persisted (`renewal_config` JSONB), survives rescans, feeds the dynamic inventory
+- **AAP dynamic inventory** — `GET /inventory` renders Ansible `--list` JSON (host = CN, issue-role hostvars + `clm_*` metadata, `clm_renewable`/`svc_*` groups)
+- Closed-loop verification = rescan + reconcile
+
+### Events (transactional outbox → Ansible EDA)
+
+- Transactional outbox (`events` table): state changes such as revocation emit an event in the **same DB transaction** — `GET /events`
+- Event dispatcher delivers outbox events to an Ansible EDA webhook (at-least-once, dead-letters after `EVENT_MAX_ATTEMPTS`), gated by `EDA_WEBHOOK_URL`, drained on shutdown
+- Message-bus transport (NATS/Kafka) is deferred until a second consumer exists (see [ADR 0001](docs/adr/0001-source-of-truth-and-event-driven-automation.md))
 
 ## Quick start
 
@@ -89,21 +137,38 @@ Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVA
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DATABASE_URL` | (required) | PostgreSQL connection string |
+| `ADDR` | `:8080` | API listen address |
 | `LOG_LEVEL` | `info` | Structured log verbosity: `info`, `debug`, `trace`, `warn`, `error` |
+| `CORS_ORIGINS` | `http://localhost:3000` | Allowed CORS origins (comma-separated) |
 | `ALLOW_PRIVATE_RANGES` | `false` | Allow scanning RFC1918/loopback ranges |
 | `SCAN_TIMEOUT` | `5s` | Per-target TLS probe timeout |
 | `DEFAULT_CONCURRENCY` | `50` | Default scan worker concurrency |
-| `EXPIRING_SOON_DAYS` | `30` | Days before expiry for `expiring_soon` status |
+| `EXPIRING_SOON_DAYS` | `30` | Days before expiry for `expiring_soon` status (also the default `renew-expiring` window) |
+| **Vault (reconcile / import)** | | |
 | `VAULT_ADDR` | (empty) | HashiCorp Vault API address; empty disables Vault integration |
 | `VAULT_NAMESPACE` | (empty) | Vault enterprise namespace header (`X-Vault-Namespace`) |
 | `VAULT_TOKEN` | (empty) | Vault token for `token` auth (`X-Vault-Token`) |
-| `VAULT_AUTH_METHOD` | `token` | Auth method: `token`, `approle`, or `aws` (Phase 1 implements `token` only) |
+| `VAULT_AUTH_METHOD` | `token` | Auth method: `token`, `approle`, or `aws` (only `token` is implemented) |
+| `RECONCILE_ON_SCAN_COMPLETE` | `false` | Automatically reconcile against Vault after each scan finishes |
+| **AAP (Mode C renewals)** | | |
+| `AAP_URL` | (empty) | Ansible Automation Platform Controller URL; empty ⇒ renew endpoints return 503 |
+| `AAP_TOKEN` | (empty) | AAP API token (never logged) |
+| `AAP_RENEW_TEMPLATE` | `CLM - Issue Certificate` | Job template (or workflow) name resolved by the renew endpoints |
+| `AAP_RENEW_WORKFLOW` | `false` | Resolve `AAP_RENEW_TEMPLATE` as a workflow job template instead of a job template |
+| `AAP_SKIP_TLS_VERIFY` | `false` | Skip TLS verification to the AAP Controller (lab use only) |
+| `AAP_DEFAULT_MOUNT` | `pki` | Default Vault PKI mount passed to the renewal template |
+| **Events (EDA dispatcher)** | | |
+| `EDA_WEBHOOK_URL` | (empty) | Ansible EDA webhook URL; empty ⇒ dispatcher does not start |
+| `EDA_WEBHOOK_TOKEN` | (empty) | Bearer token for the EDA webhook (never logged) |
+| `EVENT_DISPATCH_INTERVAL` | `15s` | Outbox drain interval |
+| `EVENT_DISPATCH_BATCH` | `50` | Max events delivered per drain |
+| `EVENT_MAX_ATTEMPTS` | `10` | Delivery attempts before an event is dead-lettered |
 
-Both `clm-discovery` and `clm-scan` emit JSON logs to stdout. Set `LOG_LEVEL=debug` to see target expansion summaries; `trace` adds per-target probe outcomes.
+Both `clm-discovery` and `clm-scan` emit JSON logs to stdout. Set `LOG_LEVEL=debug` to see target expansion summaries; `trace` adds per-target probe outcomes. Vault/AAP/EDA tokens and URLs are read from the environment and never logged.
 
 ## Architecture
 
-See [docs/architecture.md](docs/architecture.md) (includes dashboard / Vault UI alignment).
+See [docs/architecture.md](docs/architecture.md) (includes dashboard / Vault UI alignment), the source-of-truth + event-driven design in [ADR 0001](docs/adr/0001-source-of-truth-and-event-driven-automation.md), and the reporting design in [docs/reporting-architecture.md](docs/reporting-architecture.md).
 
 ## Dashboard UI
 
@@ -127,13 +192,29 @@ See [docs/data-model.md](docs/data-model.md).
 | GET | `/api/v1/scans` | List scans |
 | GET | `/api/v1/scans/{id}` | Scan detail (status, diagnostics, counts) |
 | GET | `/api/v1/scans/{id}/certificates` | Certificates discovered in a scan |
+| GET | `/api/v1/scans/{id}/blindspot` | Blind-spot (shadow certs) for a scan |
+| GET | `/api/v1/scans/{id}/compliance` | Compliance summary for a scan |
+| GET | `/api/v1/scans/{id}/report` | Environment report (`?format=markdown\|json\|csv`) |
 | DELETE | `/api/v1/scans/{id}` | Delete scan record |
 | GET | `/api/v1/certificates` | List certificates (`?scan_id=` filters by scan) |
 | GET | `/api/v1/certificates/{id}` | Certificate detail + observations |
+| GET | `/api/v1/certificates/{id}/pem` | Certificate PEM |
+| GET | `/api/v1/certificates/{id}/choose` | Recommended next lifecycle action |
+| GET | `/api/v1/certificates/{id}/renewal-kit` | Generate vault-agent / AAP renewal kit (`?target=`, `?mount=`, `?role=`, ...) |
+| POST | `/api/v1/certificates/{id}/revocation-check` | CRL/OCSP revocation check |
+| POST | `/api/v1/certificates/{id}/catalog-import` | Track cert in CLM (Modes A/D, consent-gated) |
+| POST | `/api/v1/certificates/{id}/renew` | On-demand renew via Vault + AAP (consent-gated) |
 | PATCH | `/api/v1/certificates/{id}` | Update governance fields |
 | DELETE | `/api/v1/certificates/{id}` | Delete certificate |
 | GET | `/api/v1/issuers` | List issuers/CAs |
+| POST | `/api/v1/issuers/{id}/import` | Import CA bundle into Vault (Mode B, consent-gated) |
 | DELETE | `/api/v1/issuers/{id}` | Delete issuer |
+| POST | `/api/v1/reconcile` | Reconcile inventory against Vault PKI |
+| POST | `/api/v1/renew-expiring` | Batch auto-renew expiring certs (consent-gated) |
+| GET | `/api/v1/inventory` | Ansible dynamic inventory (`--list` JSON, `?within_days=N`) |
+| GET | `/api/v1/events` | List outbox events |
+| GET | `/api/v1/blindspot` | Global blind-spot (shadow certs) |
+| GET | `/api/v1/compliance/summary` | Global compliance summary |
 
 ## License
 
@@ -147,9 +228,10 @@ Mozilla Public License 2.0 — see [LICENSE](LICENSE).
 
 ## Roadmap
 
-- **Phase 1 (v1.1 + report v0):** Vault PKI reconcile, blind-spot dashboard, SC-081/PCI compliance, scan report download — [plan](docs/superpowers/plans/2026-06-30-phase-1-blind-spot-reveal-demo.md) · [demo flow](docs/demo-flow.md)
-- **v1.1b:** OCSP/CRL revocation checks
-- **v1.2:** CA import/bundle, vault-agent/AAP integration hooks, optional HCP reporting ingest, baseline/delta reports
-- **v2:** Cloud provider certificate sources (AWS ACM, etc.)
+Shipped since v1: Vault PKI reconcile + blind-spot reveal, SC-081/PCI/crypto compliance, environment reports, CRL/OCSP/stapled revocation, catalog + CA import, Choose wizard, and Mode C renewal automation (AAP renew, batch `renew-expiring`, dynamic inventory, transactional outbox → Ansible EDA). See [progress.md](progress.md) for the detailed log.
+
+- **Event Phase 2:** message-bus transport (NATS/Kafka) — deferred until a second consumer exists ([ADR 0001](docs/adr/0001-source-of-truth-and-event-driven-automation.md))
+- **Live validation:** end-to-end against a real AAP Controller + EDA webhook
+- **v2:** read-only cloud CA source collectors (AWS ACM, Azure Key Vault, GCP Certificate Manager) into the same inventory — closing the shadow-CA blind spot in a single pane
 
 Lifecycle and HCP positioning: [docs/program-context.md](docs/program-context.md) · [lifecycle spec](docs/superpowers/specs/2026-06-14-clm-lifecycle-workflow-design.md)

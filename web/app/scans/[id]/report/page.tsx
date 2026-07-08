@@ -1,17 +1,9 @@
 import Link from "next/link";
 import PageHeader from "@/components/page-header";
 import ReportDownloadMenu from "@/components/report-download-menu";
-import CatalogImportButton from "@/components/catalog-import-button";
-import ImportCAButton from "@/components/import-ca-button";
-import {
-  fetchReport,
-  getScan,
-  listScanCertificates,
-  listIssuers,
-  severityBadgeClass,
-  statusBadgeClass,
-} from "@/lib/api";
-import { selectShadowCerts, selectScanIssuers } from "@/lib/report";
+import ReportExplorer from "@/components/report-explorer";
+import { fetchReport, getScan, listScanCertificates, listIssuers } from "@/lib/api";
+import { buildFindings, coverageFromBlindSpot } from "@/lib/findings";
 
 export const dynamic = "force-dynamic";
 
@@ -52,16 +44,13 @@ export default async function ScanReportPage({
   const certs = certsResp.items ?? [];
   const issuers = issuersResp.items ?? [];
 
-  // Shadow certs = on the wire but not matched to Vault PKI (already-tracked
-  // `imported` certs stay listed as "Tracked"). CA-import candidates = issuers
-  // observed in THIS scan. See lib/report.ts for the exact selection rules.
-  const shadowCerts = selectShadowCerts(certs);
-  const scanIssuers = selectScanIssuers(certs, issuers);
+  // One unified findings model: insights + shadow certs + scan CA issuers, each
+  // tagged by kind. See lib/findings.ts (and lib/report.ts for the selection rules).
+  const findings = buildFindings(report, certs, issuers);
+  const coverage = coverageFromBlindSpot(report.blind_spot);
 
-  const bs = report.blind_spot;
-  // Defensive defaults: a version skew where the report omits these arrays should
-  // render an empty section, not crash the page.
-  const insights = report.insights ?? [];
+  // Defensive default: a version skew where the report omits recommendations
+  // should render an empty section, not crash the page.
   const recommendations = report.recommendations ?? [];
   const generated = new Date(report.generated_at).toLocaleString();
 
@@ -75,59 +64,10 @@ export default async function ScanReportPage({
         actions={<ReportDownloadMenu scanId={scan.id} />}
       />
 
-      <section className="panel">
-        <div className="panel-header">
-          <h2>Summary</h2>
-        </div>
-        <div className="panel-body">
-          <div className="stat-grid">
-            <StatTile label="Vault managed" value={bs.vault_managed} />
-            <StatTile label="On wire" value={bs.discovered} />
-            <StatTile label="Shadow certs" value={bs.shadow} />
-            <StatTile label="SC-081 violations" value={bs.sc081_violations} />
-          </div>
-        </div>
-      </section>
-
-      <section className="panel">
-        <div className="panel-header">
-          <h2>Insights ({insights.length})</h2>
-        </div>
-        <div className="panel-body panel-body-flush data-table-wrap">
-          {insights.length === 0 ? (
-            <p className="muted" style={{ padding: "16px 20px" }}>
-              No findings — every discovered certificate is healthy and accounted
-              for.
-            </p>
-          ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Severity</th>
-                  <th>Subject</th>
-                  <th>Finding</th>
-                </tr>
-              </thead>
-              <tbody>
-                {insights.map((insight, i) => (
-                  <tr key={`${insight.type}-${insight.fingerprint_sha256 ?? i}`}>
-                    <td>
-                      <span className={severityBadgeClass(insight.severity)}>
-                        {insight.severity}
-                      </span>
-                    </td>
-                    <td>{insight.subject_cn || insight.issuer_dn || "—"}</td>
-                    <td>{insight.description}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </section>
+      <ReportExplorer findings={findings} coverage={coverage} />
 
       {recommendations.length > 0 && (
-        <section className="panel">
+        <section className="panel" style={{ marginTop: 24 }}>
           <div className="panel-header">
             <h2>Recommended actions</h2>
           </div>
@@ -142,93 +82,6 @@ export default async function ScanReportPage({
           </div>
         </section>
       )}
-
-      <section className="panel">
-        <div className="panel-header">
-          <h2>Take action — shadow certificates ({shadowCerts.length})</h2>
-        </div>
-        <div className="panel-body panel-body-flush data-table-wrap">
-          {shadowCerts.length === 0 ? (
-            <p className="muted" style={{ padding: "16px 20px" }}>
-              No shadow certificates — everything on the wire is managed in Vault.
-            </p>
-          ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Certificate</th>
-                  <th>Status</th>
-                  <th>Expires (days)</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {shadowCerts.map((cert) => (
-                  <tr key={cert.id}>
-                    <td>
-                      <Link href={`/certificates/${cert.id}`}>
-                        {cert.subject_cn || cert.serial_number}
-                      </Link>
-                    </td>
-                    <td>
-                      <span className={statusBadgeClass(cert.status)}>
-                        {cert.status}
-                      </span>
-                    </td>
-                    <td>{cert.days_until_expiry}</td>
-                    <td>
-                      <CatalogImportButton cert={cert} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </section>
-
-      <section className="panel">
-        <div className="panel-header">
-          <h2>Take action — issuers / CAs ({scanIssuers.length})</h2>
-        </div>
-        <div className="panel-body panel-body-flush data-table-wrap">
-          {scanIssuers.length === 0 ? (
-            <p className="muted" style={{ padding: "16px 20px" }}>
-              No CA issuers observed in this scan to import into Vault.
-            </p>
-          ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Issuer</th>
-                  <th>Expires (days)</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {scanIssuers.map((issuer) => (
-                  <tr key={issuer.id}>
-                    <td>{issuer.subject_cn || issuer.issuer_dn}</td>
-                    <td>{issuer.days_until_expiry}</td>
-                    <td>
-                      <ImportCAButton issuer={issuer} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </section>
     </>
-  );
-}
-
-function StatTile({ label, value }: { label: string; value: number | string }) {
-  return (
-    <div className="stat-tile">
-      <div className="stat-tile-label">{label}</div>
-      <div className="stat-tile-value">{value}</div>
-    </div>
   );
 }

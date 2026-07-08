@@ -105,10 +105,17 @@ North star and roadmap: `docs/program-context.md`.
     **On wire**, **Shadow certs**, **SC-081 violations** metric tiles (the affordances
     that actually need explaining). Test-first (`blind-spot-card.test.tsx`); UI-only.
     Spec + plan under `docs/superpowers/`. Pending subagent review → PR.
-  - **Report redesign (Vault Radar style)** — NEXT: issue + spec + plan, then rebuild
-    `/scans/{id}/report` as a severity overview + one filterable findings table +
-    per-row drill-in (normalizer `lib/findings.ts` + `report-explorer.tsx`). Mockup
-    approved. Light-theme only (app has no dark theme). Not started in code.
+  - **#73 — report redesign (Vault Radar style)** (branch `feature/73-report-redesign`):
+    rebuilt `/scans/{id}/report` as a severity overview + Vault-coverage meter + one
+    filterable findings table (severity + kind filters, search) + per-row drill-in,
+    replacing the four flat panels. Normalizer extracted to tested
+    `web/lib/findings.ts` (folds insights + shadow certs + CA issuers into one
+    `Finding[]`); client `report-explorer.tsx`; thin server page. Reuses the existing
+    Track-in-CLM / Import-CA actions. Light-theme only. Test-first (findings 12,
+    explorer 5; suite 36/36); tsc + web build green. Severity thresholds hard-coded
+    for v1 — follow-up filed to make them configurable. Phase 1 of the shared
+    inventory visual language (phases 2–3 = blind-spot card + inventory table).
+    Pending subagent review → PR.
 
 - **Item 2 — Mode C full automation (Vault + AAP closed loop).**
   - ~~PR 1 — `internal/aap` client~~ — DONE (#50 / PR #51): dynamic template

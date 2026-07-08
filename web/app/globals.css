@@ -737,6 +737,7 @@ a.button:hover {
 .vault-pip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .vault-shadow { color: var(--token-color-palette-red-200); }
 .vault-managed { color: var(--token-color-palette-green-200); }
+.vault-tracked { color: var(--token-color-foreground-action); }
 .days-neg { color: var(--token-color-palette-red-200); font-weight: 600; }
 .days-warn { color: #b5470f; font-weight: 600; }
 .row-caret { color: var(--token-color-foreground-faint); }

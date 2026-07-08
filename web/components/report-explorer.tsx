@@ -133,7 +133,9 @@ export default function ReportExplorer({
         <div className="data-table-wrap">
           {visible.length === 0 ? (
             <p className="muted" style={{ padding: "24px 20px", textAlign: "center" }}>
-              No findings match the current filters.
+              {findings.length === 0
+                ? "No findings — every discovered certificate is healthy and accounted for."
+                : "No findings match the current filters."}
             </p>
           ) : (
             <table className="data-table findings-table">
@@ -200,6 +202,8 @@ function FindingRow({ f }: { f: Finding }) {
             <span className="vault-pip vault-shadow">Shadow</span>
           ) : f.vault === "managed" ? (
             <span className="vault-pip vault-managed">Managed</span>
+          ) : f.vault === "tracked" ? (
+            <span className="vault-pip vault-tracked">Tracked</span>
           ) : (
             <span className="muted">—</span>
           )}

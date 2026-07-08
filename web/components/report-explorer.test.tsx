@@ -48,9 +48,30 @@ describe("ReportExplorer", () => {
     expect(screen.getByRole("button", { name: /Track in CLM/ })).toBeInTheDocument();
   });
 
-  it("shows an empty state when filters match nothing", async () => {
+  it("opens the drill-in via keyboard (Enter on a focused row)", async () => {
+    render(<ReportExplorer findings={F} coverage={COVERAGE} />);
+    const row = screen.getByText("legacy.vpn").closest("tr")!;
+    row.focus();
+    await userEvent.keyboard("{Enter}");
+    expect(screen.getByText("CN=Legacy")).toBeInTheDocument();
+  });
+
+  it("filters by kind via the segmented control", async () => {
+    render(<ReportExplorer findings={F} coverage={COVERAGE} />);
+    await userEvent.click(screen.getByRole("button", { name: "CA issuers" }));
+    expect(screen.getByText("Acme CA")).toBeInTheDocument();
+    expect(screen.queryByText("legacy.vpn")).not.toBeInTheDocument();
+    expect(screen.queryByText("api.pay")).not.toBeInTheDocument();
+  });
+
+  it("shows the filtered-empty message when filters match nothing", async () => {
     render(<ReportExplorer findings={F} coverage={COVERAGE} />);
     await userEvent.type(screen.getByRole("searchbox"), "zzzznope");
     expect(screen.getByText(/No findings match/i)).toBeInTheDocument();
+  });
+
+  it("shows the all-clear message when there are no findings at all", () => {
+    render(<ReportExplorer findings={[]} coverage={COVERAGE} />);
+    expect(screen.getByText(/every discovered certificate is healthy/i)).toBeInTheDocument();
   });
 });

@@ -93,6 +93,28 @@ describe("buildFindings", () => {
     const keys = findings.map((f) => f.key);
     expect(new Set(keys).size).toBe(keys.length);
   });
+
+  it("humanizes insight types into readable labels, dropping a trailing severity", () => {
+    const rep = report({
+      insights: [
+        { category: "compliance", type: "sc081.expiry.critical", severity: "critical", recommendation: "", description: "" },
+        { category: "compliance", type: "sc081.validity.47d", severity: "high", recommendation: "", description: "" },
+        { category: "crypto", type: "crypto.key.ecdsa.weak", severity: "medium", recommendation: "", description: "" },
+      ],
+    });
+    const labels = buildFindings(rep, [], []).filter((f) => f.kind === "insight").map((f) => f.typeLabel);
+    expect(labels).toEqual(["SC-081 expiry", "SC-081 validity 47d", "Crypto key ecdsa weak"]);
+  });
+
+  it("marks imported (tracked-in-CLM) certs as vault=tracked, not shadow", () => {
+    const certs = [
+      cert({ id: "imp", managed_status: "imported" }),
+      cert({ id: "sha", managed_status: "unmanaged" }),
+    ];
+    const findings = buildFindings(report(), certs, []);
+    expect(findings.find((f) => f.cert?.id === "imp")?.vault).toBe("tracked");
+    expect(findings.find((f) => f.cert?.id === "sha")?.vault).toBe("shadow");
+  });
 });
 
 describe("severityCounts", () => {

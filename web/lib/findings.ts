@@ -11,7 +11,7 @@ export type Finding = {
   typeLabel: string;
   subject: string;
   secondary: string;
-  vault: "shadow" | "managed" | "na";
+  vault: "shadow" | "managed" | "tracked" | "na";
   days: number | null;
   description?: string;
   issuerDn?: string;
@@ -35,10 +35,20 @@ export function deriveIssuerSeverity(issuer: Issuer): FindingSeverity {
   return issuer.days_until_expiry <= 30 ? "high" : "low";
 }
 
-// Turn a raw sc081.* / crypto.* insight type into a short human label.
+const SEVERITY_WORDS = new Set(["critical", "high", "medium", "low", "warning", "info"]);
+
+// Turn a raw sc081.* / crypto.* insight type into a readable label for the Finding
+// column. Keeps the meaningful path segments (not just the leaf) and drops a
+// trailing severity qualifier, since the Severity column already shows that —
+// e.g. "sc081.expiry.critical" -> "SC-081 expiry", "crypto.key.ecdsa.weak" ->
+// "Crypto key ecdsa weak".
 function humanizeInsightType(type: string): string {
-  const last = type.split(".").pop() ?? type;
-  const words = last.replace(/[_-]/g, " ");
+  const parts = type.split(".");
+  if (parts.length > 1 && SEVERITY_WORDS.has(parts[parts.length - 1])) parts.pop();
+  const words = parts
+    .map((p) => (p === "sc081" ? "SC-081" : p.replace(/[_-]/g, " ")))
+    .join(" ")
+    .trim();
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
@@ -66,7 +76,12 @@ function shadowToFinding(cert: Certificate): Finding {
     typeLabel: "Shadow certificate",
     subject: cert.subject_cn || cert.serial_number,
     secondary: cert.serial_number,
-    vault: cert.managed_status === "managed_in_vault" ? "managed" : "shadow",
+    vault:
+      cert.managed_status === "managed_in_vault"
+        ? "managed"
+        : cert.managed_status === "imported"
+        ? "tracked"
+        : "shadow",
     days: cert.days_until_expiry,
     issuerDn: cert.issuer_dn,
     fingerprint: cert.fingerprint_sha256,

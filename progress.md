@@ -14,6 +14,15 @@ North star and roadmap: `docs/program-context.md`.
 
 ## Done
 
+- **#68 report viewer + in-report actions** — view-first `/scans/{id}/report` page
+  (summary, insights, recommendations) in the Vault UI, with a Download menu
+  (md/csv/json) and inline import actions (Track in CLM per shadow cert, Import CA
+  to Vault per issuer). Blind-spot card: "Reconcile with Vault" → "Show shadow certs"
+  and three download buttons → one "View report" link; reusable `?` HelpPopover.
+  Frontend-only (`web/`); selection logic extracted to `web/lib/report.ts` (tested).
+  Subagent code review (no correctness bugs). Docker-compose smoke validated
+  end-to-end. Merged via PR #70. Also **#67**: README refreshed to current feature
+  set (PR #69).
 - **v1** — concurrent TLS scan (CIDR + hostname/SNI), cert inventory, observations,
   issuer inventory, governance columns, Helios-style dashboard, demo reset APIs.
   On `main`.

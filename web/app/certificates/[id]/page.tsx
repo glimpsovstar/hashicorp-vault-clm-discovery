@@ -14,7 +14,7 @@ import {
   vaultImportedLabel,
 } from "@/lib/api";
 import EnrichmentForm from "./enrichment-form";
-import CatalogImportButton from "./catalog-import-button";
+import CatalogImportButton from "@/components/catalog-import-button";
 import RevocationCheckButton from "./revocation-check-button";
 import RenewalKit from "./renewal-kit";
 

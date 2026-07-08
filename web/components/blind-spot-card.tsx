@@ -1,14 +1,15 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
-  downloadReport,
   fetchBlindSpot,
   triggerReconcile,
   type BlindSpotSummary,
   type ReconcileSummary,
 } from "@/lib/api";
 import { reconcileStatusMessage } from "@/lib/reconcile";
+import HelpPopover from "@/components/help-popover";
 
 function reconcileMessage(result: ReconcileSummary): string {
   return reconcileStatusMessage(
@@ -29,7 +30,6 @@ export default function BlindSpotCard({ scanId, scanStatus }: Props) {
   const [summary, setSummary] = useState<BlindSpotSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [reconciling, setReconciling] = useState(false);
-  const [downloading, setDownloading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [vaultConfigured, setVaultConfigured] = useState(true);
 
@@ -83,18 +83,6 @@ export default function BlindSpotCard({ scanId, scanStatus }: Props) {
     }
   }
 
-  async function handleDownload(format: "markdown" | "json" | "csv") {
-    setDownloading(true);
-    setMessage(null);
-    try {
-      await downloadReport(scanId, format);
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Download failed");
-    } finally {
-      setDownloading(false);
-    }
-  }
-
   if (scanStatus !== "completed") {
     return (
       <section className="panel">
@@ -140,39 +128,33 @@ export default function BlindSpotCard({ scanId, scanStatus }: Props) {
 
         <div className="table-actions" style={{ marginTop: 16 }}>
           {vaultConfigured && (
-            <button
-              type="button"
-              className="button button-primary"
-              onClick={() => void handleReconcile()}
-              disabled={reconciling}
-            >
-              {reconciling ? "Reconciling…" : "Reconcile with Vault"}
-            </button>
+            <span className="action-with-help">
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={() => void handleReconcile()}
+                disabled={reconciling}
+              >
+                {reconciling ? "Checking…" : "Show shadow certs"}
+              </button>
+              <HelpPopover label="What does Show shadow certs do?">
+                Compares certificates found on the wire against Vault-issued certs
+                and refreshes the counts above — revealing <strong>shadow certs</strong>{" "}
+                (deployed but never issued by Vault). Read-only: it changes nothing
+                in Vault and imports nothing.
+              </HelpPopover>
+            </span>
           )}
-          <button
-            type="button"
-            className="button button-secondary"
-            onClick={() => void handleDownload("markdown")}
-            disabled={downloading}
-          >
-            {downloading ? "Downloading…" : "Download report"}
-          </button>
-          <button
-            type="button"
-            className="button button-secondary"
-            onClick={() => void handleDownload("csv")}
-            disabled={downloading}
-          >
-            Download CSV
-          </button>
-          <button
-            type="button"
-            className="button button-secondary"
-            onClick={() => void handleDownload("json")}
-            disabled={downloading}
-          >
-            Download JSON
-          </button>
+          <span className="action-with-help">
+            <Link className="button button-secondary" href={`/scans/${scanId}/report`}>
+              View report
+            </Link>
+            <HelpPopover label="What is the report?">
+              Opens the full environment report — insights, compliance, and expiry
+              risk — where you can <strong>download</strong> it (Markdown/CSV/JSON)
+              and take import actions on shadow certs and CAs.
+            </HelpPopover>
+          </span>
         </div>
 
         {message && <p className="help-text">{message}</p>}

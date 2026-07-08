@@ -179,6 +179,21 @@ The web app mirrors HashiCorp Vault’s **AppFrame** layout (sidebar nav, page h
 
 Official Vault logo: `@hashicorp/flight-icons` **vault-color-24** (gold chevron), matching [Vault’s app header](https://github.com/hashicorp/vault/blob/main/ui/lib/core/addon/components/sidebar/frame.hbs).
 
+### Report viewer
+
+A completed scan's detail page links to **View report** (`/scans/{id}/report`), a
+view-first environment report rendered in the dashboard: summary tiles, insights,
+and recommended actions. From there you can:
+
+- **Download** the report as Markdown, CSV, or JSON.
+- **Take action inline** — *Track in CLM* for each shadow certificate (on the wire
+  but not managed in Vault) and *Import CA to Vault* for each CA issuer observed in
+  the scan.
+
+On the scan's blind-spot card, **Show shadow certs** re-runs the read-only Vault
+reconcile to refresh the counts (it changes nothing in Vault); each button carries a
+`?` help popover explaining what it does.
+
 ## Data model
 
 See [docs/data-model.md](docs/data-model.md).

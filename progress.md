@@ -99,6 +99,17 @@ North star and roadmap: `docs/program-context.md`.
 
 ## In progress
 
+- **Report / blind-spot UI polish (post-#68).**
+  - **#71 — blind-spot tile help** (branch `fix/71-blind-spot-tile-help`): moved the
+    `?` HelpPopovers off the "Show shadow certs" / "View report" controls onto the
+    **On wire**, **Shadow certs**, **SC-081 violations** metric tiles (the affordances
+    that actually need explaining). Test-first (`blind-spot-card.test.tsx`); UI-only.
+    Spec + plan under `docs/superpowers/`. Pending subagent review → PR.
+  - **Report redesign (Vault Radar style)** — NEXT: issue + spec + plan, then rebuild
+    `/scans/{id}/report` as a severity overview + one filterable findings table +
+    per-row drill-in (normalizer `lib/findings.ts` + `report-explorer.tsx`). Mockup
+    approved. Light-theme only (app has no dark theme). Not started in code.
+
 - **Item 2 — Mode C full automation (Vault + AAP closed loop).**
   - ~~PR 1 — `internal/aap` client~~ — DONE (#50 / PR #51): dynamic template
     discovery by name, launch with extra_vars, status normalization, WaitForJob

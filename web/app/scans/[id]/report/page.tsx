@@ -11,6 +11,7 @@ import {
   severityBadgeClass,
   statusBadgeClass,
 } from "@/lib/api";
+import { selectShadowCerts, selectScanIssuers } from "@/lib/report";
 
 export const dynamic = "force-dynamic";
 
@@ -51,17 +52,11 @@ export default async function ScanReportPage({
   const certs = certsResp.items ?? [];
   const issuers = issuersResp.items ?? [];
 
-  // Shadow certs = on the wire but not matched to Vault PKI. Already-tracked
-  // (`imported`) certs stay in the list so tracking one doesn't make it vanish;
-  // CatalogImportButton renders a disabled "Tracked in CLM" for those.
-  const shadowCerts = certs.filter((c) => c.managed_status !== "managed_in_vault");
-
-  // CA-import candidates: issuers observed in THIS scan (matched by DN) that are
-  // CA certs. ImportCAButton itself renders "In Vault" when already imported.
-  const scanIssuerDNs = new Set(certs.map((c) => c.issuer_dn));
-  const scanIssuers = issuers.filter(
-    (i) => i.is_ca && scanIssuerDNs.has(i.issuer_dn)
-  );
+  // Shadow certs = on the wire but not matched to Vault PKI (already-tracked
+  // `imported` certs stay listed as "Tracked"). CA-import candidates = issuers
+  // observed in THIS scan. See lib/report.ts for the exact selection rules.
+  const shadowCerts = selectShadowCerts(certs);
+  const scanIssuers = selectScanIssuers(certs, issuers);
 
   const bs = report.blind_spot;
   const generated = new Date(report.generated_at).toLocaleString();

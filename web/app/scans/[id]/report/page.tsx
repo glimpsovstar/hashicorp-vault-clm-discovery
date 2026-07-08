@@ -59,6 +59,10 @@ export default async function ScanReportPage({
   const scanIssuers = selectScanIssuers(certs, issuers);
 
   const bs = report.blind_spot;
+  // Defensive defaults: a version skew where the report omits these arrays should
+  // render an empty section, not crash the page.
+  const insights = report.insights ?? [];
+  const recommendations = report.recommendations ?? [];
   const generated = new Date(report.generated_at).toLocaleString();
 
   return (
@@ -87,10 +91,10 @@ export default async function ScanReportPage({
 
       <section className="panel">
         <div className="panel-header">
-          <h2>Insights ({report.insights.length})</h2>
+          <h2>Insights ({insights.length})</h2>
         </div>
         <div className="panel-body panel-body-flush data-table-wrap">
-          {report.insights.length === 0 ? (
+          {insights.length === 0 ? (
             <p className="muted" style={{ padding: "16px 20px" }}>
               No findings — every discovered certificate is healthy and accounted
               for.
@@ -105,7 +109,7 @@ export default async function ScanReportPage({
                 </tr>
               </thead>
               <tbody>
-                {report.insights.map((insight, i) => (
+                {insights.map((insight, i) => (
                   <tr key={`${insight.type}-${insight.fingerprint_sha256 ?? i}`}>
                     <td>
                       <span className={severityBadgeClass(insight.severity)}>
@@ -122,14 +126,14 @@ export default async function ScanReportPage({
         </div>
       </section>
 
-      {report.recommendations.length > 0 && (
+      {recommendations.length > 0 && (
         <section className="panel">
           <div className="panel-header">
             <h2>Recommended actions</h2>
           </div>
           <div className="panel-body">
             <ul className="detail-list">
-              {report.recommendations.map((rec) => (
+              {recommendations.map((rec) => (
                 <li key={rec.code}>
                   <strong>{rec.phase}:</strong> {rec.title} ({rec.count})
                 </li>

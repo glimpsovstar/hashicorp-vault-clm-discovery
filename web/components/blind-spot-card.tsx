@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   fetchBlindSpot,
   triggerReconcile,
@@ -120,41 +120,55 @@ export default function BlindSpotCard({ scanId, scanStatus }: Props) {
         ) : (
           <div className="stat-grid">
             <StatTile label="Vault managed" value={summary?.vault_managed ?? "—"} />
-            <StatTile label="On wire" value={summary?.discovered ?? "—"} />
-            <StatTile label="Shadow certs" value={summary?.shadow ?? "—"} />
-            <StatTile label="SC-081 violations" value={summary?.sc081_violations ?? "—"} />
+            <StatTile
+              label="On wire"
+              value={summary?.discovered ?? "—"}
+              help={
+                <>
+                  Certificates observed live during this scan — every TLS endpoint
+                  that presented a certificate on the wire.
+                </>
+              }
+            />
+            <StatTile
+              label="Shadow certs"
+              value={summary?.shadow ?? "—"}
+              help={
+                <>
+                  On the wire but <strong>not issued by Vault</strong> — deployed yet
+                  unmanaged. These are your blind spots. Run <em>Show shadow certs</em>{" "}
+                  to refresh this count.
+                </>
+              }
+            />
+            <StatTile
+              label="SC-081 violations"
+              value={summary?.sc081_violations ?? "—"}
+              help={
+                <>
+                  Certificates that breach the <strong>SC-081</strong> compliance rules
+                  — expiry thresholds and excessive issued validity. Each is a finding
+                  that needs remediation.
+                </>
+              }
+            />
           </div>
         )}
 
         <div className="table-actions" style={{ marginTop: 16 }}>
           {vaultConfigured && (
-            <span className="action-with-help">
-              <button
-                type="button"
-                className="button button-primary"
-                onClick={() => void handleReconcile()}
-                disabled={reconciling}
-              >
-                {reconciling ? "Checking…" : "Show shadow certs"}
-              </button>
-              <HelpPopover label="What does Show shadow certs do?">
-                Compares certificates found on the wire against Vault-issued certs
-                and refreshes the counts above — revealing <strong>shadow certs</strong>{" "}
-                (deployed but never issued by Vault). Read-only: it changes nothing
-                in Vault and imports nothing.
-              </HelpPopover>
-            </span>
+            <button
+              type="button"
+              className="button button-primary"
+              onClick={() => void handleReconcile()}
+              disabled={reconciling}
+            >
+              {reconciling ? "Checking…" : "Show shadow certs"}
+            </button>
           )}
-          <span className="action-with-help">
-            <Link className="button button-secondary" href={`/scans/${scanId}/report`}>
-              View report
-            </Link>
-            <HelpPopover label="What is the report?">
-              Opens the full environment report — insights, compliance, and expiry
-              risk — where you can <strong>download</strong> it (Markdown/CSV/JSON)
-              and take import actions on shadow certs and CAs.
-            </HelpPopover>
-          </span>
+          <Link className="button button-secondary" href={`/scans/${scanId}/report`}>
+            View report
+          </Link>
         </div>
 
         {message && <p className="help-text">{message}</p>}
@@ -163,10 +177,21 @@ export default function BlindSpotCard({ scanId, scanStatus }: Props) {
   );
 }
 
-function StatTile({ label, value }: { label: string; value: number | string }) {
+function StatTile({
+  label,
+  value,
+  help,
+}: {
+  label: string;
+  value: number | string;
+  help?: ReactNode;
+}) {
   return (
     <div className="stat-tile">
-      <div className="stat-tile-label">{label}</div>
+      <div className="stat-tile-label">
+        {label}
+        {help && <HelpPopover label={`What is “${label}”?`}>{help}</HelpPopover>}
+      </div>
       <div className="stat-tile-value">{value}</div>
     </div>
   );

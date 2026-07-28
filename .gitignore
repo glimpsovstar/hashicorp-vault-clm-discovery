@@ -43,3 +43,8 @@ test/integration/terraform/**/terraform.tfvars
 
 # Superpowers SDD scratch (progress ledger, task briefs/reports)
 .superpowers/
+
+# Claude Code. Tool-owned: it rewrites settings.json on every session (approvals
+# are appended automatically), so tracking it churns rather than shares. Ignore
+# the whole directory; the allowlist policy lives in CONTRIBUTING.md instead.
+.claude/

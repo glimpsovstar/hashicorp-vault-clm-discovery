@@ -97,6 +97,17 @@ North star and roadmap: `docs/program-context.md`.
   (sub-agent review: both MAJOR findings — leaf↔issuer binding + durable-revoked
   CASE — fixed pre-merge).
 
+- **#76 repo hygiene — `.claude/` gitignored** — the directory was untracked, so
+  every agent session left a dirty tree and tripped the Rule 2 Stop hook. Claude
+  Code owns those files and rewrites them each session (approvals appended
+  automatically, plus an `additionalDirectories` key holding absolute machine
+  paths), so it is ignored outright; the allowlist *policy* lives in
+  `CONTRIBUTING.md` instead (never-allowlist table + generalize-vs-one-off).
+  An earlier draft that tracked a pruned `settings.json` was refuted in review —
+  it retained `Bash(podman machine *)`, which is passwordless host root with the
+  home dir bind-mounted read-write (verified: `uid 0`, `/Users/djoo` writable).
+  Merged via PR #77.
+
 ## In progress
 
 - **Report / blind-spot UI polish (post-#68).**

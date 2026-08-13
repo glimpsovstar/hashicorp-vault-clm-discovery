@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -11,6 +12,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/config"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanner"
@@ -373,4 +377,464 @@ func validPutBody() string {
 		"eda":{"webhook_url":"https://eda.example/hook","token":"put-eda-token"}
 	}`)
 	return buf.String()
+}
+
+func doConnectionTest(srv *Server, body, actor string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/connections/test", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if actor != "" {
+		req = req.WithContext(ContextWithActor(req.Context(), actor))
+	}
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	return rec
+}
+
+type connectionTestResp struct {
+	OK     bool   `json:"ok"`
+	Target string `json:"target"`
+	Detail string `json:"detail"`
+	Error  string `json:"error"`
+}
+
+func parseConnectionTest(t *testing.T, rec *httptest.ResponseRecorder) connectionTestResp {
+	t.Helper()
+	var out connectionTestResp
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v (body %s)", err, rec.Body.String())
+	}
+	return out
+}
+
+func assertNoSecrets(t *testing.T, body string, secrets ...string) {
+	t.Helper()
+	for _, secret := range secrets {
+		if secret != "" && strings.Contains(body, secret) {
+			t.Fatalf("response leaked secret %q: %s", secret, body)
+		}
+	}
+}
+
+func TestConnectionTest_VaultTokenProbeOK(t *testing.T) {
+	t.Parallel()
+
+	const token = "s.db-vault-token"
+	var gotPath, gotToken, gotNS string
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotToken = r.Header.Get("X-Vault-Token")
+		gotNS = r.Header.Get("X-Vault-Namespace")
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s, want GET", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/sys/health", "/v1/sys/mounts":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"initialized":true,"pki/":{"type":"pki"}}`))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(peer.Close)
+
+	cs := newFakeConnections()
+	cs.rows["vault"] = store.Connection{
+		Target:     "vault",
+		Source:     "db",
+		Metadata:   json.RawMessage(`{"addr":"` + peer.URL + `","namespace":"admin","auth_method":"token"}`),
+		SecretsSet: true,
+	}
+	cs.secrets["vault"] = map[string]string{"token": token}
+
+	cfg := config.Config{VaultAddr: "http://env-vault.invalid:8200", VaultToken: "s.env-token"}
+	rec := doConnectionTest(newConnectionsServer(cfg, cs), `{"target":"vault"}`, "platform_admin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	got := parseConnectionTest(t, rec)
+	if !got.OK || got.Target != "vault" {
+		t.Fatalf("got %+v, want ok vault", got)
+	}
+	if got.Detail == "" || strings.Contains(strings.ToLower(got.Detail), "token") {
+		t.Fatalf("detail must be non-empty and non-secret: %q", got.Detail)
+	}
+	assertNoSecrets(t, rec.Body.String(), token, "s.env-token")
+	if gotToken != token {
+		t.Fatalf("probe used token %q, want overlay %q (path %s)", gotToken, token, gotPath)
+	}
+	if gotNS != "admin" {
+		t.Fatalf("X-Vault-Namespace = %q, want admin", gotNS)
+	}
+	if gotPath != "/v1/sys/health" && gotPath != "/v1/sys/mounts" {
+		t.Fatalf("path = %s, want sys/health or sys/mounts", gotPath)
+	}
+}
+
+func TestConnectionTest_VaultAppRoleLoginThenProbe(t *testing.T) {
+	t.Parallel()
+
+	const (
+		roleID      = "role-uuid"
+		secretID    = "secret-uuid"
+		clientToken = "hvs.approle-client-token"
+	)
+	var loginHits, probeHits int
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/auth/approle/login":
+			loginHits++
+			if r.Header.Get("X-Vault-Token") != "" {
+				t.Errorf("login must not send X-Vault-Token")
+			}
+			var body struct {
+				RoleID   string `json:"role_id"`
+				SecretID string `json:"secret_id"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body.RoleID != roleID || body.SecretID != secretID {
+				t.Errorf("login body %+v", body)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"auth": map[string]any{"client_token": clientToken, "lease_duration": 3600, "renewable": true},
+			})
+		case r.Method == http.MethodGet && (r.URL.Path == "/v1/sys/health" || r.URL.Path == "/v1/sys/mounts"):
+			probeHits++
+			if got := r.Header.Get("X-Vault-Token"); got != clientToken {
+				t.Errorf("probe token = %q, want client token", got)
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"initialized":true,"pki/":{"type":"pki"}}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(peer.Close)
+
+	cs := newFakeConnections()
+	cs.rows["vault"] = store.Connection{
+		Target:     "vault",
+		Source:     "db",
+		Metadata:   json.RawMessage(`{"addr":"` + peer.URL + `","namespace":"admin","auth_method":"approle"}`),
+		SecretsSet: true,
+	}
+	cs.secrets["vault"] = map[string]string{"role_id": roleID, "secret_id": secretID}
+
+	rec := doConnectionTest(newConnectionsServer(config.Config{}, cs), `{"target":"vault"}`, "platform_admin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	got := parseConnectionTest(t, rec)
+	if !got.OK {
+		t.Fatalf("got %+v, want ok", got)
+	}
+	if loginHits != 1 || probeHits != 1 {
+		t.Fatalf("loginHits=%d probeHits=%d, want 1/1", loginHits, probeHits)
+	}
+	if _, ok := cs.secrets["vault"]["token"]; ok {
+		t.Fatalf("AppRole client token must not be persisted: %+v", cs.secrets["vault"])
+	}
+	if cs.secrets["vault"]["role_id"] != roleID || cs.secrets["vault"]["secret_id"] != secretID {
+		t.Fatalf("stored secrets mutated: %+v", cs.secrets["vault"])
+	}
+	assertNoSecrets(t, rec.Body.String(), clientToken, roleID, secretID)
+}
+
+func TestConnectionTest_AfterPUTUsesSavedOverlay(t *testing.T) {
+	t.Parallel()
+
+	const putToken = "s.put-overlay-token"
+	var gotToken string
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotToken = r.Header.Get("X-Vault-Token")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"initialized":true,"pki/":{"type":"pki"}}`))
+	}))
+	t.Cleanup(peer.Close)
+
+	cs := newFakeConnections()
+	srv := newConnectionsServer(config.Config{VaultAddr: "http://env-vault.invalid:8200", VaultToken: "s.env-token"}, cs)
+	put := fmt.Sprintf(`{
+		"vault":{"deployment":"self_managed","addr":%q,"namespace":"","auth_method":"token","token":%q},
+		"aap":{"url":"https://aap.example","renew_template":"T","renew_workflow":false,"skip_tls_verify":false,"default_mount":"pki"},
+		"eda":{"webhook_url":"https://eda.example/hook"}
+	}`, peer.URL, putToken)
+	if rec := doConnections(srv, http.MethodPut, put, "platform_admin"); rec.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	rec := doConnectionTest(srv, `{"target":"vault"}`, "platform_admin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Test status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	got := parseConnectionTest(t, rec)
+	if !got.OK {
+		t.Fatalf("got %+v, want ok after PUT overlay", got)
+	}
+	if gotToken != putToken {
+		t.Fatalf("probe token = %q, want saved overlay %q", gotToken, putToken)
+	}
+	assertNoSecrets(t, rec.Body.String(), putToken, "s.env-token")
+}
+
+func TestConnectionTest_AAPMeAndTemplateOK(t *testing.T) {
+	t.Parallel()
+
+	const aapToken = "aap-db-token"
+	var launchHits, meHits, tmplHits int
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer "+aapToken {
+			t.Errorf("Authorization = %q", got)
+		}
+		if strings.Contains(r.URL.Path, "/launch") {
+			launchHits++
+			t.Errorf("must not launch: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "/api/v2/me"):
+			meHits++
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":1,"username":"admin"}`))
+		case strings.Contains(r.URL.Path, "/job_templates"):
+			tmplHits++
+			if r.URL.Query().Get("name") != "CLM - Issue Certificate" {
+				t.Errorf("template name = %q", r.URL.Query().Get("name"))
+			}
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":7,"name":"CLM - Issue Certificate"}]}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(peer.Close)
+
+	cs := newFakeConnections()
+	cs.rows["aap"] = store.Connection{
+		Target:     "aap",
+		Source:     "db",
+		Metadata:   json.RawMessage(`{"url":"` + peer.URL + `","renew_template":"CLM - Issue Certificate","renew_workflow":false}`),
+		SecretsSet: true,
+	}
+	cs.secrets["aap"] = map[string]string{"token": aapToken}
+
+	rec := doConnectionTest(newConnectionsServer(config.Config{AAPURL: "https://env-aap.invalid", AAPToken: "env-aap-token"}, cs), `{"target":"aap"}`, "platform_admin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	got := parseConnectionTest(t, rec)
+	if !got.OK || got.Target != "aap" {
+		t.Fatalf("got %+v, want ok aap", got)
+	}
+	if meHits != 1 || tmplHits != 1 || launchHits != 0 {
+		t.Fatalf("me=%d tmpl=%d launch=%d, want 1/1/0", meHits, tmplHits, launchHits)
+	}
+	assertNoSecrets(t, rec.Body.String(), aapToken, "env-aap-token")
+}
+
+func TestConnectionTest_AAPMissingTemplateOKFalseNoLaunch(t *testing.T) {
+	t.Parallel()
+
+	var launchHits int
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/launch") {
+			launchHits++
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/api/v2/me") {
+			_, _ = w.Write([]byte(`{"id":1}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
+	}))
+	t.Cleanup(peer.Close)
+
+	cs := newFakeConnections()
+	cs.rows["aap"] = store.Connection{
+		Target:     "aap",
+		Source:     "db",
+		Metadata:   json.RawMessage(`{"url":"` + peer.URL + `","renew_template":"Missing Template","renew_workflow":false}`),
+		SecretsSet: true,
+	}
+	cs.secrets["aap"] = map[string]string{"token": "tok"}
+
+	rec := doConnectionTest(newConnectionsServer(config.Config{}, cs), `{"target":"aap"}`, "platform_admin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	got := parseConnectionTest(t, rec)
+	if got.OK {
+		t.Fatalf("missing template must be ok:false, got %+v", got)
+	}
+	if launchHits != 0 {
+		t.Fatalf("launch hits = %d, want 0", launchHits)
+	}
+	if !strings.Contains(strings.ToLower(got.Detail), "template") {
+		t.Fatalf("detail should mention template: %q", got.Detail)
+	}
+}
+
+func TestConnectionTest_EDAPing2xxNoOutboxInsert(t *testing.T) {
+	t.Parallel()
+
+	const edaToken = "eda-db-token"
+	var gotMethod, gotAuth, gotCT string
+	var gotBody map[string]any
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotAuth = r.Header.Get("Authorization")
+		gotCT = r.Header.Get("Content-Type")
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(peer.Close)
+
+	cs := newFakeConnections()
+	cs.rows["eda"] = store.Connection{
+		Target:     "eda",
+		Source:     "db",
+		Metadata:   json.RawMessage(`{"webhook_url":"` + peer.URL + `/hook"}`),
+		SecretsSet: true,
+	}
+	cs.secrets["eda"] = map[string]string{"token": edaToken}
+
+	res := &fakeResourceStore{events: []store.Event{{EventType: "cert.revoked"}}}
+	srv := newConnectionsServer(config.Config{EDAWebhookURL: "http://env-eda.invalid/hook", EDAWebhookToken: "env-eda-token"}, cs)
+	srv.resources = res
+	before := len(res.events)
+
+	rec := doConnectionTest(srv, `{"target":"eda"}`, "platform_admin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	got := parseConnectionTest(t, rec)
+	if !got.OK || got.Target != "eda" {
+		t.Fatalf("got %+v, want ok eda", got)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %s, want POST", gotMethod)
+	}
+	if gotAuth != "Bearer "+edaToken {
+		t.Fatalf("Authorization = %q, want Bearer overlay token", gotAuth)
+	}
+	if !strings.Contains(gotCT, "application/json") {
+		t.Fatalf("Content-Type = %q", gotCT)
+	}
+	if gotBody["event_type"] != "clm.connection.test" {
+		t.Fatalf("event_type = %v", gotBody["event_type"])
+	}
+	if _, err := uuid.Parse(fmt.Sprint(gotBody["id"])); err != nil {
+		t.Fatalf("id = %v, want uuid: %v", gotBody["id"], err)
+	}
+	if _, err := time.Parse(time.RFC3339, fmt.Sprint(gotBody["created_at"])); err != nil {
+		t.Fatalf("created_at = %v, want rfc3339: %v", gotBody["created_at"], err)
+	}
+	if len(res.events) != before {
+		t.Fatalf("events row count = %d, want unchanged %d", len(res.events), before)
+	}
+	assertNoSecrets(t, rec.Body.String(), edaToken, "env-eda-token")
+}
+
+func TestConnectionTest_UnconfiguredIs503(t *testing.T) {
+	t.Parallel()
+
+	srv := newConnectionsServer(config.Config{}, newFakeConnections())
+	for _, target := range []string{"vault", "aap", "eda"} {
+		rec := doConnectionTest(srv, `{"target":"`+target+`"}`, "platform_admin")
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s status = %d, want 503 (body: %s)", target, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestConnectionTest_BadTargetIs400(t *testing.T) {
+	t.Parallel()
+
+	srv := newConnectionsServer(config.Config{}, newFakeConnections())
+	for _, body := range []string{`{"target":"ldap"}`, `{"target":""}`, `{`, `{}`} {
+		rec := doConnectionTest(srv, body, "platform_admin")
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("body %s status = %d, want 400 (body: %s)", body, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestConnectionTest_UnauthenticatedIs401(t *testing.T) {
+	t.Parallel()
+
+	rec := doConnectionTest(newConnectionsServer(config.Config{}, newFakeConnections()), `{"target":"vault"}`, "")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestConnectionTest_InsecureNoAuthActsAsPlatformAdmin(t *testing.T) {
+	t.Parallel()
+
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(peer.Close)
+
+	cs := newFakeConnections()
+	cs.rows["vault"] = store.Connection{
+		Target:   "vault",
+		Source:   "db",
+		Metadata: json.RawMessage(`{"addr":"` + peer.URL + `","auth_method":"token"}`),
+	}
+	cs.secrets["vault"] = map[string]string{"token": "s.tok"}
+
+	rec := doConnectionTest(newConnectionsServer(config.Config{InsecureNoAuth: true}, cs), `{"target":"vault"}`, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 under CLM_INSECURE_NO_AUTH (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestConnectionTest_RemediatorIs403(t *testing.T) {
+	t.Parallel()
+
+	rec := doConnectionTest(newConnectionsServer(config.Config{VaultAddr: "https://vault.example:8200"}, newFakeConnections()), `{"target":"vault"}`, "remediator")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestConnectionTest_IgnoresSecretsInBody(t *testing.T) {
+	t.Parallel()
+
+	const overlayToken = "s.overlay-token"
+	var gotToken string
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotToken = r.Header.Get("X-Vault-Token")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(peer.Close)
+
+	cs := newFakeConnections()
+	cs.rows["vault"] = store.Connection{
+		Target:     "vault",
+		Source:     "db",
+		Metadata:   json.RawMessage(`{"addr":"` + peer.URL + `","auth_method":"token"}`),
+		SecretsSet: true,
+	}
+	cs.secrets["vault"] = map[string]string{"token": overlayToken}
+
+	body := `{"target":"vault","token":"s.body-secret","secret_id":"body-secret-id"}`
+	rec := doConnectionTest(newConnectionsServer(config.Config{}, cs), body, "platform_admin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if gotToken != overlayToken {
+		t.Fatalf("used token %q, must use resolved overlay not body secret", gotToken)
+	}
+	assertNoSecrets(t, rec.Body.String(), overlayToken, "s.body-secret", "body-secret-id")
 }

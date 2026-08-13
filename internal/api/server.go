@@ -209,6 +209,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/settings/connections", s.handleGetConnections)
 		r.Put("/settings/connections", s.handlePutConnections)
 		r.Patch("/settings/connections", s.handlePatchConnections)
+		r.Post("/settings/connections/test", s.handleTestConnections)
 	})
 
 	return r

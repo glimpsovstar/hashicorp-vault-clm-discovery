@@ -138,15 +138,43 @@ func (d *Dispatcher) deliver(ctx context.Context, e store.Event) error {
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.cfg.WebhookURL, bytes.NewReader(body))
+	return postWebhook(ctx, d.http, d.cfg.WebhookURL, d.cfg.Token, body)
+}
+
+// Ping POSTs a connection-test event to the webhook using the same auth as
+// Dispatcher.deliver (Bearer when token is set). It does not read or write the
+// events outbox.
+func Ping(ctx context.Context, webhookURL, token string) error {
+	if webhookURL == "" {
+		return fmt.Errorf("eda webhook is not configured")
+	}
+	body, err := json.Marshal(map[string]string{
+		"event_type": "clm.connection.test",
+		"id":         uuid.New().String(),
+		"created_at": time.Now().UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		return fmt.Errorf("marshal ping: %w", err)
+	}
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	return postWebhook(ctx, client, webhookURL, token, body)
+}
+
+func postWebhook(ctx context.Context, client *http.Client, webhookURL, token string, body []byte) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if d.cfg.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+d.cfg.Token)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := d.http.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("post event: %w", err)
 	}

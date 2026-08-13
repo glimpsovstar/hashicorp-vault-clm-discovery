@@ -5,10 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/aap"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/eventbus"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/settings"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/vault"
 )
 
 const (
@@ -218,6 +223,134 @@ func (s *Server) handlePatchConnections(w http.ResponseWriter, r *http.Request) 
 	s.writeConnectionsView(w, r)
 }
 
+type connectionTestRequest struct {
+	Target string `json:"target"`
+}
+
+type connectionTestResponse struct {
+	OK     bool   `json:"ok"`
+	Target string `json:"target"`
+	Detail string `json:"detail"`
+}
+
+// handleTestConnections probes a resolved Vault, AAP, or EDA target.
+// The body is only {"target":"vault"|"aap"|"eda"} — secrets are never accepted
+// from the request. Credentials come from settings.Resolve (DB overlay else env).
+func (s *Server) handleTestConnections(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireSettingsWrite(w, r); !ok {
+		return
+	}
+	var req connectionTestRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	target := strings.ToLower(strings.TrimSpace(req.Target))
+	switch target {
+	case "vault", "aap", "eda":
+	default:
+		writeError(w, r, http.StatusBadRequest, "invalid target")
+		return
+	}
+	resolved, err := s.resolveConnections(r.Context())
+	if err != nil {
+		s.writeServerError(w, r, err, "failed to resolve connections")
+		return
+	}
+	ok, detail := false, ""
+	switch target {
+	case "vault":
+		if !resolved.View.Vault.Configured {
+			writeError(w, r, http.StatusServiceUnavailable, "vault is not configured")
+			return
+		}
+		ok, detail = testVault(r.Context(), resolved)
+	case "aap":
+		if !resolved.View.AAP.Configured {
+			writeError(w, r, http.StatusServiceUnavailable, "aap is not configured")
+			return
+		}
+		ok, detail = testAAP(r.Context(), resolved)
+	case "eda":
+		if !resolved.View.EDA.Configured {
+			writeError(w, r, http.StatusServiceUnavailable, "eda is not configured")
+			return
+		}
+		ok, detail = testEDA(r.Context(), resolved)
+	}
+	writeJSON(w, http.StatusOK, connectionTestResponse{OK: ok, Target: target, Detail: redactSecrets(detail, resolved)})
+}
+
+func testVault(ctx context.Context, resolved settings.Resolved) (bool, string) {
+	client, err := vault.NewClient(resolved.Vault)
+	if err != nil {
+		return false, "invalid vault address"
+	}
+	if _, err := client.ListMounts(ctx); err != nil {
+		return false, vaultProbeDetail(err)
+	}
+	detail := "sys/mounts 200"
+	if ns := resolved.View.Vault.Namespace; ns != "" {
+		detail += "; namespace=" + ns
+	}
+	return true, detail
+}
+
+func vaultProbeDetail(err error) string {
+	msg := err.Error()
+	if strings.Contains(msg, "approle login") {
+		return "approle login failed"
+	}
+	if i := strings.Index(msg, "status "); i >= 0 {
+		return "sys/mounts " + strings.TrimSpace(msg[i:])
+	}
+	return "vault probe failed"
+}
+
+func testAAP(ctx context.Context, resolved settings.Resolved) (bool, string) {
+	client, err := aap.NewClient(resolved.AAP)
+	if err != nil {
+		return false, "invalid aap url"
+	}
+	if err := client.Me(ctx); err != nil {
+		return false, "me failed"
+	}
+	name := resolved.View.AAP.RenewTemplate
+	if name == "" {
+		return true, "me 200"
+	}
+	var id int
+	if resolved.View.AAP.RenewWorkflow {
+		id, err = client.FindWorkflowJobTemplate(ctx, name)
+	} else {
+		id, err = client.FindJobTemplate(ctx, name)
+	}
+	if err != nil {
+		return false, "template not found"
+	}
+	return true, fmt.Sprintf("me 200; template %q id=%d", name, id)
+}
+
+func testEDA(ctx context.Context, resolved settings.Resolved) (bool, string) {
+	if err := eventbus.Ping(ctx, resolved.EDA.WebhookURL, resolved.EDA.Token); err != nil {
+		return false, "webhook probe failed"
+	}
+	return true, "webhook 2xx"
+}
+
+func redactSecrets(detail string, resolved settings.Resolved) string {
+	secrets := []string{
+		resolved.Vault.Token, resolved.Vault.RoleID, resolved.Vault.SecretID,
+		resolved.AAP.Token, resolved.EDA.Token,
+	}
+	for _, secret := range secrets {
+		if secret != "" {
+			detail = strings.ReplaceAll(detail, secret, "[redacted]")
+		}
+	}
+	return detail
+}
+
 func decodeConnectionsWrite(w http.ResponseWriter, r *http.Request) (connectionsWrite, bool) {
 	var req connectionsWrite
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
@@ -387,28 +520,29 @@ func (s *Server) connectionByTarget(ctx context.Context) (map[string]*store.Conn
 	return out, nil
 }
 
-func (s *Server) writeConnectionsView(w http.ResponseWriter, r *http.Request) {
+func (s *Server) resolveConnections(ctx context.Context) (settings.Resolved, error) {
 	if s.connections == nil {
-		s.writeServerError(w, r, errors.New("connections store not configured"), "failed to load connections")
-		return
+		return settings.Resolved{}, errors.New("connections store not configured")
 	}
-	rows, err := s.connections.GetConnections(r.Context())
+	rows, err := s.connections.GetConnections(ctx)
 	if err != nil {
-		s.writeServerError(w, r, err, "failed to load connections")
-		return
+		return settings.Resolved{}, err
 	}
 	secrets := map[string]map[string]string{}
 	for _, row := range rows {
 		sec, err := s.connections.DecryptSecrets(row)
 		if err != nil {
-			s.writeServerError(w, r, err, "failed to resolve connections")
-			return
+			return settings.Resolved{}, err
 		}
 		secrets[row.Target] = sec
 	}
-	resolved, err := settings.Resolve(s.cfg, rows, secrets)
+	return settings.Resolve(s.cfg, rows, secrets)
+}
+
+func (s *Server) writeConnectionsView(w http.ResponseWriter, r *http.Request) {
+	resolved, err := s.resolveConnections(r.Context())
 	if err != nil {
-		s.writeServerError(w, r, err, "failed to resolve connections")
+		s.writeServerError(w, r, err, "failed to load connections")
 		return
 	}
 	writeJSON(w, http.StatusOK, resolved.View)

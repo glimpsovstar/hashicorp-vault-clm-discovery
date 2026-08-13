@@ -127,6 +127,14 @@ func NewClient(cfg Config) (*Client, error) {
 // Configured reports whether a Controller URL is set.
 func (c *Client) Configured() bool { return c.cfg.BaseURL != "" }
 
+// Me verifies the Controller token via GET /api/v2/me. It does not launch a job.
+func (c *Client) Me(ctx context.Context) error {
+	if !c.Configured() {
+		return fmt.Errorf("aap client is not configured")
+	}
+	return c.get(ctx, "/api/v2/me/", nil)
+}
+
 // FindJobTemplate resolves an exact template name to its id. It returns an
 // error when no template matches or when the name is ambiguous.
 func (c *Client) FindJobTemplate(ctx context.Context, name string) (int, error) {

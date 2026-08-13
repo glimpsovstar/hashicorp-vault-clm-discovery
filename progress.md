@@ -175,11 +175,11 @@ GCM closed-loop (2026-08-13): specs/plans under `docs/superpowers/`; tracker
 [`docs/superpowers/plans/2026-08-13-gcm-closed-loop-tracker.md`](docs/superpowers/plans/2026-08-13-gcm-closed-loop-tracker.md).
 Tackle **one GitHub issue at a time**.
 
-1. **M1 — Secure the control plane (P0)** — API auth/RBAC/actor audit, Vault AppRole + split identities. Spec `2026-08-13-m1-control-plane-security-design.md`.
-2. **M2 — Durable jobs + wire verify** — persist AAP job, `WaitForJob` in a worker, expected-vs-observed. Spec `2026-08-13-m2-durable-lifecycle-jobs-design.md`.
-3. **M4 core — Durable scan queue** — replace `chan(32)` with Postgres `SKIP LOCKED`. Spec `2026-08-13-m4-durable-scan-queue-design.md`.
-4. **M3 — Explainable posture** — persist findings, compute `risk_score`, waivers, PQC tags. Spec `2026-08-13-m3-explainable-posture-design.md`.
-5. **M5 — Broader integrations** (after M1–M2) — event catalogue, revoke-via-AAP, ITSM webhook, cloud collectors. Spec `2026-08-13-m5-broader-integrations-design.md`.
+1. **M1 — Secure the control plane (P0)** — [#79](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/79). Spec `2026-08-13-m1-control-plane-security-design.md`.
+2. **M2 — Durable jobs + wire verify** — [#80](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/80). Spec `2026-08-13-m2-durable-lifecycle-jobs-design.md`.
+3. **M4 core — Durable scan queue** — [#81](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/81). Spec `2026-08-13-m4-durable-scan-queue-design.md`.
+4. **M3 — Explainable posture** — [#82](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/82). Spec `2026-08-13-m3-explainable-posture-design.md`.
+5. **M5 — Broader integrations** (after M1–M2) — [#83](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/83). Spec `2026-08-13-m5-broader-integrations-design.md`.
 6. **Live AAP/EDA validation** — still pending operator URL + token (orthogonal demo).
 7. **Message bus** (ADR Phase 2) — deferred until a 2nd consumer exists.
 8. **v2 cloud CA sources** — folded into M5 task 4; do not start before M1–M2.

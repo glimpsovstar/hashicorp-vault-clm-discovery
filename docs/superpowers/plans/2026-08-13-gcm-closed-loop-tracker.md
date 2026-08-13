@@ -8,24 +8,22 @@
 
 ## GitHub issues
 
-Bodies live in [`docs/superpowers/issues/`](../issues/). After `gh auth login -h github.com`, run [`scripts/open-gcm-roadmap-issues.sh`](../../../scripts/open-gcm-roadmap-issues.sh) and paste the issue numbers here.
-
 | Milestone | Issue | Body |
 |-----------|-------|------|
-| Umbrella | _pending_ | [umbrella](../issues/umbrella-gcm-closed-loop.md) |
-| M1 | _pending_ | [m1](../issues/m1-control-plane-security.md) |
-| M2 | _pending_ | [m2](../issues/m2-durable-lifecycle-jobs.md) |
-| M4 | _pending_ | [m4](../issues/m4-durable-scan-queue.md) |
-| M3 | _pending_ | [m3](../issues/m3-explainable-posture.md) |
-| M5 | _pending_ | [m5](../issues/m5-broader-integrations.md) |
+| Umbrella | [#78](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/78) | [umbrella](../issues/umbrella-gcm-closed-loop.md) |
+| M1 | [#79](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/79) | [m1](../issues/m1-control-plane-security.md) |
+| M2 | [#80](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/80) | [m2](../issues/m2-durable-lifecycle-jobs.md) |
+| M4 | [#81](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/81) | [m4](../issues/m4-durable-scan-queue.md) |
+| M3 | [#82](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/82) | [m3](../issues/m3-explainable-posture.md) |
+| M5 | [#83](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/83) | [m5](../issues/m5-broader-integrations.md) |
 
 ## Priority order
 
-1. [ ] **M1** Secure the control plane — [spec](../specs/2026-08-13-m1-control-plane-security-design.md) · [plan](2026-08-13-m1-control-plane-security.md)
-2. [ ] **M2** Durable jobs + wire verify — [spec](../specs/2026-08-13-m2-durable-lifecycle-jobs-design.md) · [plan](2026-08-13-m2-durable-lifecycle-jobs.md)
-3. [ ] **M4 core** Durable scan queue — [spec](../specs/2026-08-13-m4-durable-scan-queue-design.md) · [plan](2026-08-13-m4-durable-scan-queue.md)
-4. [ ] **M3** Explainable posture — [spec](../specs/2026-08-13-m3-explainable-posture-design.md) · [plan](2026-08-13-m3-explainable-posture.md)
-5. [ ] **M5** Broader integrations — [spec](../specs/2026-08-13-m5-broader-integrations-design.md) · [plan](2026-08-13-m5-broader-integrations.md)
+1. [ ] **M1** Secure the control plane — [#79](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/79) · [spec](../specs/2026-08-13-m1-control-plane-security-design.md) · [plan](2026-08-13-m1-control-plane-security.md)
+2. [ ] **M2** Durable jobs + wire verify — [#80](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/80) · [spec](../specs/2026-08-13-m2-durable-lifecycle-jobs-design.md) · [plan](2026-08-13-m2-durable-lifecycle-jobs.md)
+3. [ ] **M4 core** Durable scan queue — [#81](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/81) · [spec](../specs/2026-08-13-m4-durable-scan-queue-design.md) · [plan](2026-08-13-m4-durable-scan-queue.md)
+4. [ ] **M3** Explainable posture — [#82](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/82) · [spec](../specs/2026-08-13-m3-explainable-posture-design.md) · [plan](2026-08-13-m3-explainable-posture.md)
+5. [ ] **M5** Broader integrations — [#83](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/83) · [spec](../specs/2026-08-13-m5-broader-integrations-design.md) · [plan](2026-08-13-m5-broader-integrations.md)
 
 M3 can run after M1 (needs actor for waivers). M4 core can overlap M2 (M2 verify has a `scanrunner.Run` stopgap).
 

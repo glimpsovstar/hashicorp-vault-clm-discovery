@@ -36,13 +36,15 @@ Ship the smallest GCM-like loop **inside CLM-discovery + AAP**, one milestone at
 
 ## Milestone map
 
-| # | Issue theme | Priority | Goal | Spec | Plan |
-|---|-------------|----------|------|------|------|
-| M1 | Secure the control plane | **P0** | AuthN/Z, RBAC, actor audit, Vault AppRole + split identities | [m1](2026-08-13-m1-control-plane-security-design.md) | [plan](../plans/2026-08-13-m1-control-plane-security.md) |
-| M2 | Durable jobs + closed-loop renew | **P0/P1** | Persist AAP job, WaitForJob in a worker, expected-vs-observed verify | [m2](2026-08-13-m2-durable-lifecycle-jobs-design.md) | [plan](../plans/2026-08-13-m2-durable-lifecycle-jobs.md) |
-| M3 | Explainable posture | P1 | Persist findings, compute `risk_score`, waivers, PQC tags | [m3](2026-08-13-m3-explainable-posture-design.md) | [plan](../plans/2026-08-13-m3-explainable-posture.md) |
-| M4 | Durable scan queue | P1 | Replace `chan(32)` with Postgres `SKIP LOCKED` | [m4](2026-08-13-m4-durable-scan-queue-design.md) | [plan](../plans/2026-08-13-m4-durable-scan-queue.md) |
-| M5 | Broader integrations | P2 | Event catalogue, revoke-via-AAP, ITSM webhook, cloud collectors | [m5](2026-08-13-m5-broader-integrations-design.md) | [plan](../plans/2026-08-13-m5-broader-integrations.md) |
+| # | Issue | Priority | Goal | Spec | Plan |
+|---|-------|----------|------|------|------|
+| M1 | [#79](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/79) | **P0** | AuthN/Z, RBAC, actor audit, Vault AppRole + split identities | [m1](2026-08-13-m1-control-plane-security-design.md) | [plan](../plans/2026-08-13-m1-control-plane-security.md) |
+| M2 | [#80](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/80) | **P0/P1** | Persist AAP job, WaitForJob in a worker, expected-vs-observed verify | [m2](2026-08-13-m2-durable-lifecycle-jobs-design.md) | [plan](../plans/2026-08-13-m2-durable-lifecycle-jobs.md) |
+| M3 | [#82](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/82) | P1 | Persist findings, compute `risk_score`, waivers, PQC tags | [m3](2026-08-13-m3-explainable-posture-design.md) | [plan](../plans/2026-08-13-m3-explainable-posture.md) |
+| M4 | [#81](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/81) | P1 | Replace `chan(32)` with Postgres `SKIP LOCKED` | [m4](2026-08-13-m4-durable-scan-queue-design.md) | [plan](../plans/2026-08-13-m4-durable-scan-queue.md) |
+| M5 | [#83](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/83) | P2 | Event catalogue, revoke-via-AAP, ITSM webhook, cloud collectors | [m5](2026-08-13-m5-broader-integrations-design.md) | [plan](../plans/2026-08-13-m5-broader-integrations.md) |
+
+Umbrella: [#78](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/78).
 
 ## Recommended next three (do these first)
 

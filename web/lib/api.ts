@@ -324,6 +324,115 @@ export function triggerReconcile() {
   return fetchJSON<ReconcileSummary>("/api/v1/reconcile", { method: "POST" });
 }
 
+export type ConnectionTarget = "vault" | "aap" | "eda";
+
+export type VaultConnectionView = {
+  configured: boolean;
+  source: string;
+  deployment: string;
+  addr: string;
+  namespace: string;
+  auth_method: string;
+  token_set: boolean;
+  role_id_set: boolean;
+  secret_id_set: boolean;
+};
+
+export type AAPConnectionView = {
+  configured: boolean;
+  source: string;
+  url: string;
+  renew_template: string;
+  renew_workflow: boolean;
+  skip_tls_verify: boolean;
+  default_mount: string;
+  token_set: boolean;
+};
+
+export type EDAConnectionView = {
+  configured: boolean;
+  source: string;
+  webhook_url: string;
+  token_set: boolean;
+};
+
+export type ConnectionsView = {
+  vault: VaultConnectionView;
+  aap: AAPConnectionView;
+  eda: EDAConnectionView;
+};
+
+export type ConnectionTestResult = {
+  ok: boolean;
+  target: string;
+  detail: string;
+};
+
+export type VaultConnectionPatch = {
+  deployment?: string;
+  addr?: string;
+  namespace?: string;
+  auth_method?: string;
+  token?: string;
+  role_id?: string;
+  secret_id?: string;
+};
+
+export type AAPConnectionPatch = {
+  url?: string;
+  renew_template?: string;
+  renew_workflow?: boolean;
+  skip_tls_verify?: boolean;
+  default_mount?: string;
+  token?: string;
+};
+
+export type EDAConnectionPatch = {
+  webhook_url?: string;
+  token?: string;
+};
+
+export type ConnectionsPatch = {
+  vault?: VaultConnectionPatch;
+  aap?: AAPConnectionPatch;
+  eda?: EDAConnectionPatch;
+};
+
+// Same-origin BFF only — never NEXT_PUBLIC_API_URL / NEXT_PUBLIC_* secrets.
+async function fetchSameOrigin<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers || {}),
+    },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || res.statusText);
+  }
+  return res.json();
+}
+
+export function getConnections() {
+  return fetchSameOrigin<ConnectionsView>("/api/settings/connections");
+}
+
+export function patchConnections(body: ConnectionsPatch) {
+  return fetchSameOrigin<ConnectionsView>("/api/settings/connections", {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function testConnection(target: ConnectionTarget) {
+  return fetchSameOrigin<ConnectionTestResult>("/api/settings/connections/test", {
+    method: "POST",
+    body: JSON.stringify({ target }),
+  });
+}
+
 export async function downloadReport(scanId: string, format: "markdown" | "json" | "csv" = "markdown") {
   const res = await fetch(
     `${getApiBaseUrl()}/api/v1/scans/${scanId}/report?format=${format}`,

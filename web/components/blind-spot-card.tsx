@@ -18,9 +18,6 @@ function reconcileMessage(result: ReconcileSummary): string {
   );
 }
 
-const README_VAULT_URL =
-  "https://github.com/glimpsovstar/hashicorp-vault-clm-discovery#environment-variables";
-
 type Props = {
   scanId: string;
   scanStatus: string;
@@ -110,11 +107,9 @@ export default function BlindSpotCard({ scanId, scanStatus }: Props) {
               <StatTile label="On wire (scan)" value={summary?.discovered ?? "—"} />
             </div>
             <p className="help-text">
-              Vault is not configured. Set <code>VAULT_ADDR</code> and <code>VAULT_TOKEN</code> to
-              enable reconcile and full blind-spot metrics.{" "}
-              <a href={README_VAULT_URL} target="_blank" rel="noopener noreferrer">
-                README setup
-              </a>
+              Vault is not configured.{" "}
+              <Link href="/settings/connections">Open Settings</Link> to add a Vault connection, or
+              set <code>VAULT_ADDR</code> and <code>VAULT_TOKEN</code> in the environment.
             </p>
           </>
         ) : (

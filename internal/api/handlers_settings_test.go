@@ -126,7 +126,13 @@ func wouldPersistSecrets(incoming map[string]string, keep []string) bool {
 }
 
 func newConnectionsServer(cfg config.Config, cs *fakeConnections) *Server {
-	srv := NewServer(cfg, &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv := NewServer(openTestConfig(cfg), &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv.connections = cs
+	return srv
+}
+
+func newLockedConnectionsServer(cs *fakeConnections) *Server {
+	srv := NewServer(config.Config{}, &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv.connections = cs
 	return srv
 }
@@ -187,7 +193,7 @@ func TestConnectionsGET_MasksSecrets(t *testing.T) {
 func TestConnections_UnauthenticatedIs401(t *testing.T) {
 	t.Parallel()
 
-	srv := newConnectionsServer(config.Config{}, newFakeConnections())
+	srv := newLockedConnectionsServer(newFakeConnections())
 	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodPatch} {
 		rec := doConnections(srv, method, `{}`, "")
 		if rec.Code != http.StatusUnauthorized {
@@ -769,7 +775,7 @@ func TestConnectionTest_BadTargetIs400(t *testing.T) {
 func TestConnectionTest_UnauthenticatedIs401(t *testing.T) {
 	t.Parallel()
 
-	rec := doConnectionTest(newConnectionsServer(config.Config{}, newFakeConnections()), `{"target":"vault"}`, "")
+	rec := doConnectionTest(newLockedConnectionsServer(newFakeConnections()), `{"target":"vault"}`, "")
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401 (body: %s)", rec.Code, rec.Body.String())
 	}

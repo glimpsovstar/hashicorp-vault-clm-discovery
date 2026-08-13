@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"strings"
 	"testing"
@@ -18,6 +20,8 @@ var configEnvKeys = []string{
 	"LOG_LEVEL",
 	"CLM_CONNECTIONS_KEY",
 	"CLM_INSECURE_NO_AUTH",
+	"CLM_AUTH_MODE",
+	"CLM_STATIC_TOKENS",
 	"VAULT_ROLE_ID",
 	"VAULT_SECRET_ID",
 	"VAULT_AUTH_METHOD",
@@ -97,6 +101,12 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if cfg.InsecureNoAuth {
 		t.Fatal("InsecureNoAuth should default to false")
 	}
+	if cfg.AuthMode != "static_token" {
+		t.Fatalf("AuthMode = %q, want static_token", cfg.AuthMode)
+	}
+	if len(cfg.StaticTokens) != 0 {
+		t.Fatalf("StaticTokens = %#v, want empty", cfg.StaticTokens)
+	}
 }
 
 func TestLoadReadsCustomValues(t *testing.T) {
@@ -164,5 +174,100 @@ func TestLoadReadsVaultAppRole(t *testing.T) {
 	}
 	if cfg.VaultSecretID != "secret-uuid" {
 		t.Fatalf("VaultSecretID = %q, want secret-uuid", cfg.VaultSecretID)
+	}
+}
+
+func TestLoadReadsAuthModeAndStaticTokens(t *testing.T) {
+	resetConfigEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/clm")
+	t.Setenv("CLM_AUTH_MODE", "static_token")
+	t.Setenv("CLM_STATIC_TOKENS", "viewer:tok_v,platform_admin:tok_p,inventory:tok_inv")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AuthMode != "static_token" {
+		t.Fatalf("AuthMode = %q, want static_token", cfg.AuthMode)
+	}
+	if cfg.StaticTokens["viewer"] != "tok_v" || cfg.StaticTokens["platform_admin"] != "tok_p" || cfg.StaticTokens["inventory"] != "tok_inv" {
+		t.Fatalf("StaticTokens = %#v", cfg.StaticTokens)
+	}
+}
+
+func TestLoadEmptyAuthModeIsStaticToken(t *testing.T) {
+	resetConfigEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/clm")
+	t.Setenv("CLM_AUTH_MODE", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AuthMode != "static_token" {
+		t.Fatalf("AuthMode = %q, want static_token", cfg.AuthMode)
+	}
+}
+
+func TestLoadRejectsUnknownAuthMode(t *testing.T) {
+	resetConfigEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/clm")
+	t.Setenv("CLM_AUTH_MODE", "oidc")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for unknown CLM_AUTH_MODE")
+	}
+	if !strings.Contains(err.Error(), "CLM_AUTH_MODE") {
+		t.Fatalf("expected CLM_AUTH_MODE in error, got %v", err)
+	}
+}
+
+func TestLoadParsesHashedStaticToken(t *testing.T) {
+	resetConfigEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/clm")
+	t.Setenv("CLM_STATIC_TOKENS", "viewer:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.StaticTokens["viewer"]
+	if got != "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("StaticTokens[viewer] = %q", got)
+	}
+}
+
+func TestLoadRejectsUnknownStaticTokenRole(t *testing.T) {
+	resetConfigEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/clm")
+	t.Setenv("CLM_STATIC_TOKENS", "superuser:tok_x")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for unknown static token role")
+	}
+	if !strings.Contains(err.Error(), "superuser") {
+		t.Fatalf("expected role in error, got %v", err)
+	}
+}
+
+func TestLookupStaticRoleMatchesPlainAndHashed(t *testing.T) {
+	sum := sha256.Sum256([]byte("s3cret"))
+	cfg := Config{StaticTokens: map[string]string{
+		"viewer":         "tok_v",
+		"platform_admin": "sha256:" + hex.EncodeToString(sum[:]),
+	}}
+	if role, ok := cfg.LookupStaticRole("tok_v"); !ok || role != "viewer" {
+		t.Fatalf("plain lookup = %q %v, want viewer true", role, ok)
+	}
+	if role, ok := cfg.LookupStaticRole("s3cret"); !ok || role != "platform_admin" {
+		t.Fatalf("hashed lookup = %q %v, want platform_admin true", role, ok)
+	}
+	if _, ok := cfg.LookupStaticRole("nope"); ok {
+		t.Fatal("unknown token must not match")
+	}
+	if _, ok := cfg.LookupStaticRole(""); ok {
+		t.Fatal("empty token must not match")
 	}
 }

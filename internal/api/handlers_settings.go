@@ -23,8 +23,7 @@ const (
 
 type settingsActorKey struct{}
 
-// ContextWithActor injects a Settings RBAC role for tests (and future M1
-// middleware). Production without M1 has no actor unless CLM_INSECURE_NO_AUTH.
+// ContextWithActor injects a control-plane role for auth middleware and tests.
 func ContextWithActor(ctx context.Context, role string) context.Context {
 	return context.WithValue(ctx, settingsActorKey{}, role)
 }

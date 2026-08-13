@@ -174,6 +174,7 @@ func (s *Server) Router() http.Handler {
 	r.Get("/api/v1/health", s.handleHealth)
 
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Use(s.requireAuth)
 		r.Post("/scans", s.handleCreateScan)
 		r.Get("/scans", s.handleListScans)
 		r.Get("/scans/{id}", s.handleGetScan)

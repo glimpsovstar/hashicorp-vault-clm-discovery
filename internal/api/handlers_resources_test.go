@@ -149,7 +149,7 @@ func (f *fakeResourceStore) DeleteCertificate(context.Context, uuid.UUID) error 
 func (f *fakeResourceStore) DeleteIssuer(context.Context, uuid.UUID) error { return f.deleteIssuerErr }
 
 func newResourceServer(res resourceStore) *Server {
-	srv := NewServer(config.Config{}, &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv := NewServer(openTestConfig(config.Config{}), &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv.resources = res
 	return srv
 }

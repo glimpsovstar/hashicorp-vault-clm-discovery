@@ -1,10 +1,26 @@
 package config
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
 )
+
+// Roles allowed in CLM_STATIC_TOKENS (M1 static_token AuthN).
+var knownStaticRoles = map[string]struct{}{
+	"viewer":             {},
+	"scanner_operator":   {},
+	"remediator":         {},
+	"vault_import_admin": {},
+	"approver":           {},
+	"platform_admin":     {},
+	"inventory":          {},
+}
 
 type Config struct {
 	Addr                    string        `envconfig:"ADDR" default:":8080"`
@@ -43,13 +59,122 @@ type Config struct {
 	// still work; persisting new secrets from the UI fails until the key is set.
 	ConnectionsKey string `envconfig:"CLM_CONNECTIONS_KEY" default:""`
 	// InsecureNoAuth is a UAT-only escape hatch (CLM_INSECURE_NO_AUTH). When
-	// true, Settings handlers treat the caller as platform_admin. Default false:
-	// unauthenticated Settings GET/PUT/PATCH return 401. Not a substitute for M1 RBAC.
+	// true, auth middleware skips Bearer checks and handlers treat the caller as
+	// platform_admin. Default false: unauthenticated /api/v1 requests return 401
+	// except GET /api/v1/health. Not a production auth substitute.
 	InsecureNoAuth bool `envconfig:"CLM_INSECURE_NO_AUTH" default:"false"`
+	// AuthMode selects control-plane AuthN (CLM_AUTH_MODE). Default static_token;
+	// empty is treated as static_token. Unknown values are rejected at Load.
+	AuthMode string `envconfig:"CLM_AUTH_MODE" default:"static_token"`
+	// StaticTokensRaw is the raw CLM_STATIC_TOKENS spec (comma-separated
+	// role:token). Hashed tokens use sha256:<hex> and contain a colon, so this
+	// is parsed into StaticTokens instead of envconfig's map syntax.
+	StaticTokensRaw string `envconfig:"CLM_STATIC_TOKENS" default:""`
+	// StaticTokens maps role → plaintext token or sha256:<hex>. Filled by Load
+	// from StaticTokensRaw; tests may set it directly.
+	StaticTokens map[string]string `envconfig:"-"`
 }
 
 func Load() (Config, error) {
 	var cfg Config
-	err := envconfig.Process("", &cfg)
-	return cfg, err
+	if err := envconfig.Process("", &cfg); err != nil {
+		return Config{}, err
+	}
+	if err := cfg.normalizeAuth(); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+func (c *Config) normalizeAuth() error {
+	mode := strings.TrimSpace(c.AuthMode)
+	if mode == "" {
+		mode = "static_token"
+	}
+	if mode != "static_token" {
+		return fmt.Errorf("CLM_AUTH_MODE: unknown mode %q (want static_token)", mode)
+	}
+	c.AuthMode = mode
+
+	tokens, err := parseStaticTokens(c.StaticTokensRaw)
+	if err != nil {
+		return err
+	}
+	c.StaticTokens = tokens
+	return nil
+}
+
+func parseStaticTokens(raw string) (map[string]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return map[string]string{}, nil
+	}
+	out := make(map[string]string)
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		role, token, ok := strings.Cut(part, ":")
+		role = strings.TrimSpace(role)
+		token = strings.TrimSpace(token)
+		if !ok || role == "" || token == "" {
+			return nil, fmt.Errorf("CLM_STATIC_TOKENS: invalid entry %q (want role:token)", part)
+		}
+		if _, known := knownStaticRoles[role]; !known {
+			return nil, fmt.Errorf("CLM_STATIC_TOKENS: unknown role %q", role)
+		}
+		if _, dup := out[role]; dup {
+			return nil, fmt.Errorf("CLM_STATIC_TOKENS: duplicate role %q", role)
+		}
+		if err := validateStaticTokenSecret(role, token); err != nil {
+			return nil, err
+		}
+		out[role] = token
+	}
+	return out, nil
+}
+
+func validateStaticTokenSecret(role, token string) error {
+	const prefix = "sha256:"
+	if !strings.HasPrefix(token, prefix) {
+		return nil
+	}
+	digest := strings.TrimPrefix(token, prefix)
+	if len(digest) != hex.EncodedLen(sha256.Size) {
+		return fmt.Errorf("CLM_STATIC_TOKENS: role %q sha256 digest must be 64 hex chars", role)
+	}
+	if _, err := hex.DecodeString(digest); err != nil {
+		return fmt.Errorf("CLM_STATIC_TOKENS: role %q sha256 digest is not hex: %w", role, err)
+	}
+	return nil
+}
+
+// LookupStaticRole returns the role bound to a presented Bearer token.
+func (c Config) LookupStaticRole(presented string) (string, bool) {
+	if presented == "" || len(c.StaticTokens) == 0 {
+		return "", false
+	}
+	for role, configured := range c.StaticTokens {
+		if staticTokenMatches(configured, presented) {
+			return role, true
+		}
+	}
+	return "", false
+}
+
+func staticTokenMatches(configured, presented string) bool {
+	const prefix = "sha256:"
+	if strings.HasPrefix(configured, prefix) {
+		want, err := hex.DecodeString(strings.TrimPrefix(configured, prefix))
+		if err != nil || len(want) != sha256.Size {
+			return false
+		}
+		got := sha256.Sum256([]byte(presented))
+		return subtle.ConstantTimeCompare(want, got[:]) == 1
+	}
+	if len(configured) != len(presented) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(configured), []byte(presented)) == 1
 }

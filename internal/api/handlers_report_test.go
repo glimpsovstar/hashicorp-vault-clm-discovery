@@ -238,7 +238,7 @@ func TestHandleGetScanReport_RouteRegistered(t *testing.T) {
 	t.Parallel()
 
 	scanID := uuid.New()
-	srv := NewServer(config.Config{}, &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv := NewServer(openTestConfig(config.Config{}), &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv.report = &fakeReportStore{
 		scan: store.Scan{ID: scanID, Status: "completed"},
 	}

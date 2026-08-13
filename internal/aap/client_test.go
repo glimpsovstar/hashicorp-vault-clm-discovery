@@ -3,6 +3,7 @@ package aap
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -342,6 +343,164 @@ func TestNoAuthHeaderWhenTokenEmpty(t *testing.T) {
 	}
 	if _, err := c.JobStatus(context.Background(), LaunchResult{JobID: 1}); err != nil {
 		t.Fatalf("JobStatus: %v", err)
+	}
+}
+
+func TestListJobTemplates_SinglePage(t *testing.T) {
+	t.Parallel()
+
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s, want GET", r.Method)
+		}
+		if strings.Contains(r.URL.Path, "/launch") {
+			t.Errorf("must not call launch: %s", r.URL.Path)
+		}
+		if r.URL.Path != "/api/v2/job_templates/" && r.URL.Path != "/api/v2/job_templates" {
+			t.Errorf("path = %s, want /api/v2/job_templates/", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"count":2,"next":null,"results":[
+			{"id":7,"name":"CLM - Issue Certificate"},
+			{"id":9,"name":"CLM - Renew Certificate"}
+		]}`))
+	}))
+	defer srv.Close()
+	c := newClient(t, srv)
+
+	got, err := c.ListJobTemplates(context.Background())
+	if err != nil {
+		t.Fatalf("ListJobTemplates: %v", err)
+	}
+	want := []Template{{ID: 7, Name: "CLM - Issue Certificate"}, {ID: 9, Name: "CLM - Renew Certificate"}}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d (%#v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got[%d] = %#v, want %#v", i, got[i], want[i])
+		}
+	}
+	for _, p := range paths {
+		if strings.Contains(p, "launch") {
+			t.Fatalf("launch path recorded: %s", p)
+		}
+	}
+}
+
+func TestListJobTemplates_PaginatesAndCaps(t *testing.T) {
+	t.Parallel()
+
+	var pages int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/launch") {
+			t.Fatalf("must not call launch: %s", r.URL.Path)
+		}
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s, want GET", r.Method)
+		}
+		pages++
+		page := r.URL.Query().Get("page")
+		if page == "" {
+			page = "1"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch page {
+		case "1":
+			// next uses absolute URL like AWX; client must follow it.
+			nextURL := "http://" + r.Host + "/api/v2/job_templates/?page=2"
+			_, _ = fmt.Fprintf(w, `{"count":250,"next":%q,"results":[`, nextURL)
+			for i := 1; i <= 100; i++ {
+				if i > 1 {
+					_, _ = w.Write([]byte(`,`))
+				}
+				_, _ = fmt.Fprintf(w, `{"id":%d,"name":"jt-%d"}`, i, i)
+			}
+			_, _ = w.Write([]byte(`]}`))
+		case "2":
+			nextURL := "http://" + r.Host + "/api/v2/job_templates/?page=3"
+			_, _ = fmt.Fprintf(w, `{"count":250,"next":%q,"results":[`, nextURL)
+			for i := 101; i <= 200; i++ {
+				if i > 101 {
+					_, _ = w.Write([]byte(`,`))
+				}
+				_, _ = fmt.Fprintf(w, `{"id":%d,"name":"jt-%d"}`, i, i)
+			}
+			_, _ = w.Write([]byte(`]}`))
+		case "3":
+			// Would exceed cap; client must stop at ~200 and not fetch this page.
+			t.Errorf("page 3 should not be fetched once cap is reached")
+			_, _ = w.Write([]byte(`{"count":250,"next":null,"results":[
+				{"id":201,"name":"jt-201"},{"id":202,"name":"jt-202"}
+			]}`))
+		default:
+			t.Errorf("unexpected page %q", page)
+			_, _ = w.Write([]byte(`{"count":0,"next":null,"results":[]}`))
+		}
+	}))
+	defer srv.Close()
+	c := newClient(t, srv)
+
+	got, err := c.ListJobTemplates(context.Background())
+	if err != nil {
+		t.Fatalf("ListJobTemplates: %v", err)
+	}
+	if len(got) != 200 {
+		t.Fatalf("len = %d, want 200 (cap)", len(got))
+	}
+	if got[0].ID != 1 || got[0].Name != "jt-1" {
+		t.Fatalf("first = %#v, want id=1 name=jt-1", got[0])
+	}
+	if got[199].ID != 200 || got[199].Name != "jt-200" {
+		t.Fatalf("last = %#v, want id=200 name=jt-200", got[199])
+	}
+	if pages != 2 {
+		t.Fatalf("pages fetched = %d, want 2 (stop at cap, skip page 3)", pages)
+	}
+}
+
+func TestListWorkflowJobTemplates(t *testing.T) {
+	t.Parallel()
+
+	var sawLaunch bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/launch") {
+			sawLaunch = true
+			t.Errorf("must not call launch: %s", r.URL.Path)
+		}
+		if r.URL.Path != "/api/v2/workflow_job_templates/" && r.URL.Path != "/api/v2/workflow_job_templates" {
+			t.Errorf("path = %s, want /api/v2/workflow_job_templates/", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"count":1,"next":null,"results":[
+			{"id":3,"name":"CLM - Renew Workflow"}
+		]}`))
+	}))
+	defer srv.Close()
+	c := newClient(t, srv)
+
+	got, err := c.ListWorkflowJobTemplates(context.Background())
+	if err != nil {
+		t.Fatalf("ListWorkflowJobTemplates: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != 3 || got[0].Name != "CLM - Renew Workflow" {
+		t.Fatalf("got = %#v, want [{3 CLM - Renew Workflow}]", got)
+	}
+	if sawLaunch {
+		t.Fatal("launch endpoint was hit")
+	}
+}
+
+func TestListJobTemplates_NotConfigured(t *testing.T) {
+	t.Parallel()
+	c, err := NewClient(Config{})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if _, err := c.ListJobTemplates(context.Background()); err == nil {
+		t.Fatal("expected error when unconfigured")
 	}
 }
 

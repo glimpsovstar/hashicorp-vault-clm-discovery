@@ -1,0 +1,44 @@
+# GCM closed-loop tracker
+
+> Master checkbox list. Implement **one milestone issue at a time** using that milestone’s plan. Do not start M5 before M1–M2.
+
+**Roadmap spec:** [2026-08-13-gcm-closed-loop-roadmap-design.md](../specs/2026-08-13-gcm-closed-loop-roadmap-design.md)
+
+**Source:** `gcm-vault-pki-gap-analysis2.md` + parallel code research (2026-08-13).
+
+## GitHub issues
+
+Bodies live in [`docs/superpowers/issues/`](../issues/). After `gh auth login -h github.com`, run [`scripts/open-gcm-roadmap-issues.sh`](../../../scripts/open-gcm-roadmap-issues.sh) and paste the issue numbers here.
+
+| Milestone | Issue | Body |
+|-----------|-------|------|
+| Umbrella | _pending_ | [umbrella](../issues/umbrella-gcm-closed-loop.md) |
+| M1 | _pending_ | [m1](../issues/m1-control-plane-security.md) |
+| M2 | _pending_ | [m2](../issues/m2-durable-lifecycle-jobs.md) |
+| M4 | _pending_ | [m4](../issues/m4-durable-scan-queue.md) |
+| M3 | _pending_ | [m3](../issues/m3-explainable-posture.md) |
+| M5 | _pending_ | [m5](../issues/m5-broader-integrations.md) |
+
+## Priority order
+
+1. [ ] **M1** Secure the control plane — [spec](../specs/2026-08-13-m1-control-plane-security-design.md) · [plan](2026-08-13-m1-control-plane-security.md)
+2. [ ] **M2** Durable jobs + wire verify — [spec](../specs/2026-08-13-m2-durable-lifecycle-jobs-design.md) · [plan](2026-08-13-m2-durable-lifecycle-jobs.md)
+3. [ ] **M4 core** Durable scan queue — [spec](../specs/2026-08-13-m4-durable-scan-queue-design.md) · [plan](2026-08-13-m4-durable-scan-queue.md)
+4. [ ] **M3** Explainable posture — [spec](../specs/2026-08-13-m3-explainable-posture-design.md) · [plan](2026-08-13-m3-explainable-posture.md)
+5. [ ] **M5** Broader integrations — [spec](../specs/2026-08-13-m5-broader-integrations-design.md) · [plan](2026-08-13-m5-broader-integrations.md)
+
+M3 can run after M1 (needs actor for waivers). M4 core can overlap M2 (M2 verify has a `scanrunner.Run` stopgap).
+
+## Won’t do
+
+- [x] ~~Vault CLM/discovery plugin~~ — cancelled (ADR 0001)
+- [x] ~~SSH/WinRM/ZIP-key push in CLM~~ — cancelled
+- [x] ~~NATS/Kafka before a second consumer~~ — deferred (ADR Phase 2)
+
+## Already shipped (do not re-plan)
+
+- [x] Network TLS scan + observations
+- [x] Vault fingerprint reconcile / shadow certs
+- [x] SC-081 / PCI / crypto + scan report
+- [x] AAP renewal **launch** (kit, on-demand, batch)
+- [x] Outbox + EDA (`cert.revoked` only)

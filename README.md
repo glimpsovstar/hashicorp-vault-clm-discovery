@@ -75,6 +75,10 @@ It complements Vault PKI and HCP Certificates Inventory. It is **not** a Vault p
 - **Test connection** is server-side and uses the resolved overlay (DB else env): Vault `GET /v1/sys/mounts` (AppRole logs in first); AAP `GET /api/v2/me` then template-by-name (**does not launch a job**); EDA signed ping (`Authorization: Bearer` when a token is set, body `clm.connection.test`, **no outbox write**)
 - Control-plane AuthN is default-deny except `GET /api/v1/health`. The dashboard BFF attaches `CLM_API_TOKEN`; the browser never sees Bearer tokens. Roles come from `CLM_STATIC_TOKENS`. `CLM_INSECURE_NO_AUTH=true` is a UAT/integration hatch only.
 
+### Residual risk: dashboard BFF
+
+M1 default-deny applies to the **Go API** (`:8080`). The Next.js BFF (`/api/v1/...`) holds ambient `CLM_API_TOKEN` authority (demo compose: `platform_admin`) until OIDC/session lands. Anyone who can reach the Next origin can perform the API mutations M1 closed on `:8080`. The control plane is **not** closed to unauthenticated mutation at the deployment edge. Follow-up: [authenticate the dashboard BFF (OIDC/session)](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/89).
+
 ## Quick start
 
 ### Docker Compose

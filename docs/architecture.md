@@ -200,3 +200,7 @@ HCP vs self-managed does not change probes.
 - Connection secrets are AES-256-GCM in `connections.secrets_enc` under `CLM_CONNECTIONS_KEY`; GET never echoes them; Test details redact known secret substrings
 - `CLM_INSECURE_NO_AUTH` is UAT/integration-only and applies API-wide, not Settings-only
 - Privileged mutations and 401/403 are recorded in `audit_events` (no tokens, PEM, or AAP secrets in `payload`)
+
+### Residual risk: dashboard BFF
+
+M1 default-deny applies to the **Go API** (`:8080`). The Next.js BFF (`web/app/api/v1/[...path]/route.ts`) holds ambient `CLM_API_TOKEN` authority (demo compose: `platform_admin`) until OIDC/session lands. Anyone who can reach the Next origin can perform the API mutations M1 closed on `:8080`. Do **not** treat the control plane as closed to unauthenticated mutation at the deployment edge. Follow-up: [authenticate the dashboard BFF (OIDC/session)](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/89).

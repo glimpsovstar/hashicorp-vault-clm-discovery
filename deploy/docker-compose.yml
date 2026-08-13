@@ -33,6 +33,11 @@ services:
       ADDR: ":8080"
       ALLOW_PRIVATE_RANGES: "true"
       CORS_ORIGINS: http://localhost:3000
+      CLM_AUTH_MODE: static_token
+      # Laptop demo only — replace with sha256:<hex> tokens in any shared env.
+      CLM_STATIC_TOKENS: platform_admin:clm-demo-platform-admin
+      # CA import needs a write identity distinct from VAULT_TOKEN (503 otherwise).
+      # VAULT_IMPORT_TOKEN: "..."
     ports:
       - "8080:8080"
     depends_on:
@@ -47,6 +52,7 @@ services:
         NEXT_PUBLIC_API_URL: http://localhost:8080
     environment:
       API_INTERNAL_URL: http://api:8080
+      CLM_API_TOKEN: clm-demo-platform-admin
     ports:
       - "3000:3000"
     depends_on:

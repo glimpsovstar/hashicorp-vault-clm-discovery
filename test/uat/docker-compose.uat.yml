@@ -54,8 +54,13 @@ services:
       DATABASE_URL: postgres://clm:clm@postgres:5432/clm?sslmode=disable
       ADDR: ":8080"
       ALLOW_PRIVATE_RANGES: "true"
+      # UAT hatch: driver.sh has no Bearer. Prefer this over updating every curl.
+      # Production: CLM_AUTH_MODE=static_token + CLM_STATIC_TOKENS + Authorization.
+      CLM_INSECURE_NO_AUTH: "true"
       VAULT_ADDR: ${VAULT_ADDR:-}
       VAULT_TOKEN: ${VAULT_TOKEN:-}
+      # Import is split from read/reconcile. VAULT_TOKEN alone returns 503 on CA import.
+      VAULT_IMPORT_TOKEN: ${VAULT_IMPORT_TOKEN:-${VAULT_TOKEN:-}}
     depends_on:
       migrate:
         condition: service_completed_successfully

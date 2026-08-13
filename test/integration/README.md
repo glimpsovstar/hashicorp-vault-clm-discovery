@@ -55,7 +55,10 @@ terraform apply
 ```
 
 Then point the CLM app at the HCP cluster (`VAULT_ADDR`, `VAULT_NAMESPACE=admin`,
-`VAULT_TOKEN`) and run the same scan → import → verify against `mount=pki-clm-int`.
+`VAULT_TOKEN` for read, plus `VAULT_IMPORT_TOKEN` or import AppRole — `VAULT_TOKEN`
+alone returns 503 on import) and run the same scan → import → verify against
+`mount=pki-clm-int`. Auth the API with `CLM_INSECURE_NO_AUTH=true` or a Bearer
+from `CLM_STATIC_TOKENS`.
 
 ## Required Vault policy (mode B)
 
@@ -63,6 +66,14 @@ Both scenarios provision the least-privilege import policy (see
 `docs/superpowers/specs/2026-07-06-vault-import-workflow-design.md` §Required
 Vault policy): `create/update` on `<mount>/issuers/import/bundle`, plus the
 read-only reconcile paths.
+
+## Auth (M1)
+
+Scenario 1 sets `CLM_INSECURE_NO_AUTH=true` on the app container so the Go driver can keep POSTing scans/import without Bearer. Prefer that hatch for this harness; alternatively set `CLM_STATIC_TOKENS` and send `Authorization: Bearer` from `test/integration/integration_test.go`.
+
+**Import identity.** The app also sets `VAULT_IMPORT_TOKEN` to the Vault dev root (same value as `VAULT_TOKEN` here, but a distinct env). After M1, `VAULT_TOKEN` alone returns **503** on `POST /issuers/{id}/import`. Scenario 2 (HCP) must set `VAULT_IMPORT_TOKEN` or import AppRole on the CLM process the same way.
+
+Consent remains intent after RBAC: this driver sends `consent:true` and relies on the hatch (or a sufficiently privileged Bearer) rather than treating consent as AuthN.
 
 ## Security notes
 

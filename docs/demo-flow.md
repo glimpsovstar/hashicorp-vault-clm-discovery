@@ -6,7 +6,7 @@ Operator steps for live demos (Docker Compose on a laptop).
 
 - Docker Desktop running
 - Repo cloned; org Cursor rules installed ([`cursor-org-rules`](https://github.com/glimpsovstar/cursor-org-rules))
-- Optional for blind-spot POV: a reachable Vault with PKI — configure via **Settings → Connections** or Compose env (`VAULT_ADDR` + `VAULT_TOKEN`, or AppRole `VAULT_ROLE_ID` / `VAULT_SECRET_ID`)
+- Optional for blind-spot POV: a reachable Vault with PKI — configure via **Settings → Connections** or Compose env (`VAULT_ADDR` + `VAULT_TOKEN`, or AppRole `VAULT_ROLE_ID` / `VAULT_SECRET_ID`). CA import also needs `VAULT_IMPORT_TOKEN` (or import AppRole) — `VAULT_TOKEN` alone returns 503 on import
 
 ## Start or rebuild stack
 
@@ -21,27 +21,38 @@ docker compose -f deploy/docker-compose.yml up --build -d
 | Dashboard | http://localhost:3000 (Vault-style Helios UI — gold Vault logo, sidebar nav) |
 | API health | http://localhost:8080/api/v1/health |
 
+### Auth the dashboard
+
+Compose already sets a laptop demo pair: API `CLM_STATIC_TOKENS=platform_admin:clm-demo-platform-admin` and web `CLM_API_TOKEN` matching that value. The Next BFF attaches Bearer on every API call; the browser never sees the token. Delete buttons stay visible and succeed because the BFF identity is `platform_admin`. Do not add `NEXT_PUBLIC_*` tokens.
+
+To call the API from curl, send the same Bearer (or set `CLM_INSECURE_NO_AUTH=true` on UAT/integration only):
+
+```bash
+TOKEN=clm-demo-platform-admin
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/certificates | jq
+```
+
+**Consent ≠ authorization.** Checking “I confirm I am authorized to scan” is intent after RBAC. A `viewer` token with `consent:true` still gets 403; a `scanner_operator` without consent gets 400.
+
 ### Vault reconcile (Phase 1 POV)
 
 **Preferred:** open **Settings → Connections** (`/settings/connections`), fill the Vault card (token or AppRole), **Save**, then **Test connection**. Env remains valid for Compose.
 
-M1 RBAC is not merged. To use the Settings page in this stack, add to the API service environment:
-
-```yaml
-CLM_INSECURE_NO_AUTH: "true"   # UAT only; Settings otherwise 401
-# Required to persist secrets from the UI (32-byte raw or 64-char hex):
-# CLM_CONNECTIONS_KEY: "..."
-```
+To persist secrets from the UI, set `CLM_CONNECTIONS_KEY` (32-byte raw or 64-char hex) on the API service.
 
 Compose env still works without Settings (reconcile/import bind these at process start):
 
 ```yaml
 VAULT_ADDR: https://your-vault.example.com
-VAULT_TOKEN: s.xxx
-# Or AppRole:
+VAULT_TOKEN: s.xxx          # read / reconcile only
+VAULT_IMPORT_TOKEN: s.yyy   # required for CA import (503 without it)
+# Or AppRole (read):
 # VAULT_AUTH_METHOD: approle
 # VAULT_ROLE_ID: "..."
 # VAULT_SECRET_ID: "..."
+# Import AppRole:
+# VAULT_IMPORT_ROLE_ID: "..."
+# VAULT_IMPORT_SECRET_ID: "..."
 # Optional: auto-reconcile when scan completes
 RECONCILE_ON_SCAN_COMPLETE: "false"
 ```
@@ -99,14 +110,17 @@ If `aap.david-joo.sbx.hashidemos.io` is unreachable from your network, omit it; 
 ### API equivalents
 
 ```bash
+TOKEN=clm-demo-platform-admin
+AUTH=(-H "Authorization: Bearer $TOKEN")
+
 # Blind-spot summary for a scan
-curl -s http://localhost:8080/api/v1/scans/{id}/blindspot | jq
+curl -s "${AUTH[@]}" http://localhost:8080/api/v1/scans/{id}/blindspot | jq
 
 # Reconcile
-curl -s -X POST http://localhost:8080/api/v1/reconcile | jq
+curl -s "${AUTH[@]}" -X POST http://localhost:8080/api/v1/reconcile | jq
 
 # Download report
-curl -s "http://localhost:8080/api/v1/scans/{id}/report?format=markdown" -o report.md
+curl -s "${AUTH[@]}" "http://localhost:8080/api/v1/scans/{id}/report?format=markdown" -o report.md
 ```
 
 ## SDLC demo (Cursor value)

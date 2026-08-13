@@ -1,14 +1,11 @@
+import { apiRequestHeaders, resolveApiBaseUrl } from "@/lib/api-request";
+
+function isBrowser(): boolean {
+  return typeof window !== "undefined";
+}
+
 function getApiBaseUrl(): string {
-  // Server components (Docker): reach API via compose service name.
-  if (typeof window === "undefined") {
-    return (
-      process.env.API_INTERNAL_URL ||
-      process.env.NEXT_PUBLIC_API_URL ||
-      "http://localhost:8080"
-    );
-  }
-  // Browser: use host-mapped API port.
-  return process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  return resolveApiBaseUrl(isBrowser());
 }
 
 export type Certificate = {
@@ -164,7 +161,7 @@ async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${getApiBaseUrl()}${path}`, {
     ...init,
     headers: {
-      "Content-Type": "application/json",
+      ...apiRequestHeaders(isBrowser()),
       ...(init?.headers || {}),
     },
     cache: "no-store",
@@ -180,6 +177,7 @@ async function fetchVoid(path: string, init?: RequestInit): Promise<void> {
   const res = await fetch(`${getApiBaseUrl()}${path}`, {
     ...init,
     headers: {
+      ...apiRequestHeaders(isBrowser()),
       ...(init?.headers || {}),
     },
     cache: "no-store",
@@ -436,7 +434,7 @@ export function testConnection(target: ConnectionTarget) {
 export async function downloadReport(scanId: string, format: "markdown" | "json" | "csv" = "markdown") {
   const res = await fetch(
     `${getApiBaseUrl()}/api/v1/scans/${scanId}/report?format=${format}`,
-    { cache: "no-store" }
+    { headers: apiRequestHeaders(isBrowser()), cache: "no-store" }
   );
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

@@ -47,7 +47,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: npm install
+      - run: npm ci
+      # Next 15.5.23 is the patched 15.x line. Remaining highs are transitive
+      # (postcss/sharp/nanoid); npm audit fix --force wants Next 16 (out of M1).
+      - name: npm audit (production)
+        run: npm audit --omit=dev
+        continue-on-error: true
       - run: npm test
       - run: npm run build
 

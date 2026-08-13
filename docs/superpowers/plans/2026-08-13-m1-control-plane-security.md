@@ -55,7 +55,7 @@
 
 ### Task 5: Dashboard + CI + docs
 
-- [ ] BFF or server-only Authorization; lock DELETE/inventory.
-- [ ] `npm ci` + audit in CI; UAT/integration Bearer or insecure flag.
-- [ ] Docs: consent ≠ authorization.
-- [ ] `go test ./...` && `go build ./...` && web build.
+- [x] BFF or server-only Authorization; lock DELETE/inventory.
+- [x] `npm ci` + audit in CI; UAT/integration Bearer or insecure flag.
+- [x] Docs: consent ≠ authorization.
+- [x] `go test ./...` && `go build ./...` && web build.

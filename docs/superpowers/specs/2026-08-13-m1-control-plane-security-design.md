@@ -1,6 +1,6 @@
 # M1 — Secure the control plane — design
 
-**Status:** Draft  
+**Status:** Approved  
 **Date:** 2026-08-13  
 **Parent:** [GCM closed-loop roadmap](2026-08-13-gcm-closed-loop-roadmap-design.md)  
 **Plan:** [2026-08-13-m1-control-plane-security.md](../plans/2026-08-13-m1-control-plane-security.md)  

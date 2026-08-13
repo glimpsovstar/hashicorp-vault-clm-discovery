@@ -67,6 +67,7 @@ flowchart TB
 - `DELETE` on scans, certificates, and issuers (204 No Content) for demo reset
 - `POST /api/v1/reconcile` — trigger Vault PKI reconcile (503 when `VAULT_ADDR` unset); response includes a `status` of `ok`/`partial`/`failed` alongside `errors`
 - `GET /api/v1/scans/{id}/blindspot` and `GET /api/v1/blindspot` — blind-spot counts
+- Connections Settings: `GET|PUT|PATCH /api/v1/settings/connections` and `POST /api/v1/settings/connections/test` (see below)
 - Request ID propagated into structured logs and JSON error responses
 
 ### Governance classification (`internal/governance`)
@@ -116,10 +117,11 @@ behaviors to check before treating a failure as a bug. Design rationale:
 ### Dashboard (`web/`)
 
 - Next.js App Router UI aligned with **HashiCorp Vault’s Helios shell** (AppFrame: header, sidebar, main)
-- Routes: certificate inventory (`/`), scans (`/scans`), scan detail (`/scans/[id]`), issuers (`/issuers`), certificate detail (`/certificates/[id]`)
+- Routes: certificate inventory (`/`), scans (`/scans`), scan detail (`/scans/[id]`), issuers (`/issuers`), certificate detail (`/certificates/[id]`), Connections (`/settings/connections`)
 - Inventory table: Vault, Imported, Scope, Expiry governance columns; delete actions on inventory, scans, and issuers
 - Styling uses a subset of [Helios design tokens](https://helios.hashicorp.design/foundations/colors); header logo is Flight Icons `vault-color-24` (same glyph as Vault UI)
-- Server components call the Go API via `web/lib/api.ts` (`API_INTERNAL_URL` in Docker, `NEXT_PUBLIC_API_URL` in browser)
+- Connections page uses the same Helios CSS (`panel`, form fields, badges) — not shadcn/ui
+- Server components call the Go API via `web/lib/api.ts` (`API_INTERNAL_URL` in Docker, `NEXT_PUBLIC_API_URL` in browser). Settings traffic goes through a same-origin BFF (`web/app/api/settings/connections`) that forwards `Authorization`; no `NEXT_PUBLIC_*` tokens
 
 See [docs/superpowers/specs/2026-06-14-vault-ui-design.md](superpowers/specs/2026-06-14-vault-ui-design.md) for UI design rationale and file map.
 
@@ -133,15 +135,54 @@ The service needs outbound network access to scan targets and inbound access to 
 
 `internal/vault` provides a read-only PKI client and reconciler:
 
-- Authenticate via token or AppRole (login + client-token cache/renew); AWS/K8s deferred
+- Authenticate via token or AppRole (login + client-token cache/renew in this repo; M1 #79 did not land the client first). AWS/K8s deferred
 - List PKI mounts, serials (via Vault's `LIST` cert operation), and stored certificates
 - Match by `fingerprint_sha256` to set `managed_status`, `vault_pki_mount`, `vault_issuer_ref`, `serial_number`
 - All Vault HTTP calls use a bounded client timeout
 - `POST /api/v1/reconcile` or optional post-scan hook (`RECONCILE_ON_SCAN_COMPLETE`); reconcile summary carries a `status` (`ok`/`partial`/`failed`)
+- Process-start reconcile/import still bind `VAULT_*` env from `config.Load()` (see Connections resolve)
 
-HCP Vault Dedicated uses the same HTTP API with namespace headers.
+HCP Vault Dedicated uses the same HTTP API with namespace headers. Settings UX (`hcp_dedicated` vs `self_managed`) is labels + `namespace=admin` preset only.
 
 Future: Kubernetes/AWS auth. CA import uses `pki/issuers/import/bundle`.
+
+## Connections settings
+
+Operators configure Vault, AAP Controller, and the EDA webhook from **Settings → Connections** (`/settings/connections`). Compose env remains the 12-factor default; a UI save overlays that target.
+
+### Resolve order (`internal/settings`)
+
+1. **Env default** — no `connections` row, or `source=env`: live values come from `VAULT_*` / `AAP_*` / `EDA_*`.
+2. **UI overlay** — PUT/PATCH upserts the row, encrypts secrets under `CLM_CONNECTIONS_KEY`, sets `source=db`. Metadata and non-empty decrypted secrets overlay env for that target; missing secret keys fall back to env.
+3. **Write-only secrets** — omitted or empty secret fields keep the stored value. JSON `null` clears a secret so the target can fall back to env.
+4. **Missing `CLM_CONNECTIONS_KEY`** — env-only mode still works. PUT/PATCH that would persist new secrets → **503**. Plaintext secrets are never stored.
+
+`settings.Resolve` is used by GET (masked `PublicView`) and Test. Reconcile, Mode C renew, and the EDA dispatcher still bind process env at startup and do not re-read the overlay.
+
+### API
+
+All under `/api/v1/settings/connections`. The Next BFF proxies with `Authorization`.
+
+| Method | Behavior |
+|--------|----------|
+| `GET` | Masked view: `configured`, `source`, metadata, `*_set` flags. Never token / `role_id` / `secret_id` values. |
+| `PUT` | Replace all three targets (`vault`, `aap`, `eda` required). Invalid `deployment` / `auth_method` → 400. |
+| `PATCH` | Partial update (one or more targets). Same write-only secret rule. |
+| `POST /test` | Body `{"target":"vault"|"aap"|"eda"}` only. Uses **resolved** credentials on the server. Never accept a secret in the test body. |
+
+Auth (M1 #79 not merged): unauthenticated GET/PUT/PATCH/Test → **401**. `CLM_INSECURE_NO_AUTH=true` (UAT) treats the caller as `platform_admin`. When an actor is injected: `platform_admin` can read and mutate; `remediator` GET 200 (still no secrets), PUT/Test 403; other roles 403. `audit_events` is not written (M1 store absent).
+
+### Test probes
+
+Server-side only. Credentials come from `settings.Resolve` (DB overlay else env).
+
+| Target | Probe | Must not |
+|--------|--------|----------|
+| **Vault** | `GET /v1/sys/mounts` via `vault.Client.ListMounts` (token: `X-Vault-Token`; AppRole: login then the same call with the cached client token). Success detail `sys/mounts 200` (+ `namespace=` when set). | Persist the AppRole-derived token in the `connections` row (cache lives on the Vault client). |
+| **AAP** | `GET /api/v2/me` then resolve `AAP_RENEW_TEMPLATE` by name (`FindJobTemplate` or `FindWorkflowJobTemplate` when `renew_workflow`). | **Launch a job.** No `POST .../launch`. |
+| **EDA** | `eventbus.Ping`: `POST` the webhook URL with the same auth as the dispatcher (`Authorization: Bearer` when token set) and body `{"event_type":"clm.connection.test","id":"<uuid>","created_at":"<rfc3339>"}`. Success = **2xx**. | Write the `events` outbox or start the dispatcher. No NATS/Kafka. |
+
+HCP vs self-managed does not change probes.
 
 ## Security considerations
 
@@ -150,3 +191,5 @@ Future: Kubernetes/AWS auth. CA import uses `pki/issuers/import/bundle`.
 - Maximum IPv4 scan size: /16
 - Store PEM material in PostgreSQL — protect database access accordingly
 - Use read-only Vault policies for reconciliation; separate policy for CA import
+- Connection secrets are AES-256-GCM in `connections.secrets_enc` under `CLM_CONNECTIONS_KEY`; GET never echoes them; Test details redact known secret substrings
+- Settings mutations are default-deny without M1; `CLM_INSECURE_NO_AUTH` is UAT-only

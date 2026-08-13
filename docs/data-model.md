@@ -83,6 +83,37 @@ Discovered CA/intermediate certs for import via `pki/issuers/import/bundle`.
 - `certificate_observations` — normalized `found_at[]`
 - `scans` — scan run metadata and diagnostics
 - `issuers` — CA/intermediate inventory
+- `connections` — Vault / AAP / EDA Settings overlay (migration `000007`)
+
+### Connections (`connections`, migration `000007`)
+
+One row per integration target. Metadata is non-secret JSON; secret material is AES-256-GCM in `secrets_enc` under `CLM_CONNECTIONS_KEY`. `source=env` means Compose/12-factor still applies; a UI save sets `source=db` and overlays env for that target.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `target` | text PK | `vault`, `aap`, or `eda` |
+| `metadata` | jsonb | Non-secret fields (never tokens / role_id / secret_id) |
+| `secrets_enc` | bytea | AEAD ciphertext; nil when secrets come from env only |
+| `secrets_set` | bool | True when ciphertext holds at least one secret |
+| `source` | text | `env` (default) or `db` |
+| `updated_at` | timestamptz | Last upsert |
+| `updated_by` | text | Actor when known (M1); may be empty |
+
+`metadata` (never contains secrets):
+
+| Target | Fields |
+|--------|--------|
+| `vault` | `deployment` (`hcp_dedicated` \| `self_managed`), `addr`, `namespace`, `auth_method` (`token` \| `approle`) |
+| `aap` | `url`, `renew_template`, `renew_workflow` (bool), `skip_tls_verify` (bool), `default_mount` |
+| `eda` | `webhook_url` |
+
+Plaintext JSON sealed in `secrets_enc` (never logged, never returned on GET):
+
+| Target | Secret keys |
+|--------|-------------|
+| `vault` | `token` and/or `role_id`, `secret_id` |
+| `aap` | `token` |
+| `eda` | `token` |
 
 ### Scan run metadata (`scans`)
 

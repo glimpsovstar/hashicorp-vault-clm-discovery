@@ -227,7 +227,7 @@ func strPtr(s string) *string { return &s }
 func TestHandleGetBlindSpot_RouteRegistered(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(config.Config{}, &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv := NewServer(openTestConfig(config.Config{}), &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv.blindSpot = &fakeBlindSpotStore{managed: 1, discovered: 4}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/blindspot", nil)

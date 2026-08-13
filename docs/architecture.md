@@ -60,15 +60,19 @@ flowchart TB
 ### API (`internal/api`)
 
 - Chi HTTP router with CORS for dashboard
+- **Default-deny AuthN** except `GET /api/v1/health`. `CLM_AUTH_MODE=static_token` maps Bearer tokens (`CLM_STATIC_TOKENS`) to RBAC roles. `CLM_INSECURE_NO_AUTH=true` is a UAT/integration hatch (caller treated as `platform_admin`)
+- RBAC: `viewer` (GET), `scanner_operator` (+ scans), `remediator` (+ catalog/renew/PATCH/revoke), `vault_import_admin` (+ CA import/reconcile), `approver` (stub), `platform_admin` (DELETE + Settings mutate), `inventory` (`GET /inventory` only — AAP, not a dashboard page)
+- Consent is **intent after RBAC**: unauthorized + `consent:true` → 401/403; authorized + `consent:false` → 400
+- Append-only `audit_events` on privileged mutations and 401/403 (not the EDA `events` outbox)
 - Background scan worker with bounded concurrency
 - Consent gate on scan creation
 - `GET /api/v1/scans/{id}` — scan detail and diagnostics
 - `GET /api/v1/scans/{id}/certificates` — certificates discovered in that scan
-- `DELETE` on scans, certificates, and issuers (204 No Content) for demo reset
+- `DELETE` on scans, certificates, and issuers (204 No Content) for demo reset — `platform_admin` only
 - `POST /api/v1/reconcile` — trigger Vault PKI reconcile (503 when `VAULT_ADDR` unset); response includes a `status` of `ok`/`partial`/`failed` alongside `errors`
 - `GET /api/v1/scans/{id}/blindspot` and `GET /api/v1/blindspot` — blind-spot counts
 - Connections Settings: `GET|PUT|PATCH /api/v1/settings/connections` and `POST /api/v1/settings/connections/test` (see below)
-- Request ID propagated into structured logs and JSON error responses
+- Request ID propagated into structured logs, audit rows, and JSON error responses
 
 ### Governance classification (`internal/governance`)
 
@@ -121,7 +125,7 @@ behaviors to check before treating a failure as a bug. Design rationale:
 - Inventory table: Vault, Imported, Scope, Expiry governance columns; delete actions on inventory, scans, and issuers
 - Styling uses a subset of [Helios design tokens](https://helios.hashicorp.design/foundations/colors); header logo is Flight Icons `vault-color-24` (same glyph as Vault UI)
 - Connections page uses the same Helios CSS (`panel`, form fields, badges) — not shadcn/ui
-- Server components call the Go API via `web/lib/api.ts` (`API_INTERNAL_URL` in Docker, `NEXT_PUBLIC_API_URL` in browser). Settings traffic goes through a same-origin BFF (`web/app/api/settings/connections`) that forwards `Authorization`; no `NEXT_PUBLIC_*` tokens
+- Server components call the Go API via `web/lib/api.ts` (`API_INTERNAL_URL` + `CLM_API_TOKEN`). Browser traffic uses the same-origin BFF (`web/app/api/v1/[...path]` and Settings `web/app/api/settings/connections`) which attaches server-only Authorization. No `NEXT_PUBLIC_*` tokens. AAP `GET /inventory` is not proxied and is not a dashboard page. Delete buttons remain; they succeed only when the BFF token is `platform_admin`
 
 See [docs/superpowers/specs/2026-06-14-vault-ui-design.md](superpowers/specs/2026-06-14-vault-ui-design.md) for UI design rationale and file map.
 
@@ -135,12 +139,13 @@ The service needs outbound network access to scan targets and inbound access to 
 
 `internal/vault` provides a read-only PKI client and reconciler:
 
-- Authenticate via token or AppRole (login + client-token cache/renew in this repo; M1 #79 did not land the client first). AWS/K8s deferred
+- Authenticate via token or AppRole (login + client-token cache/renew in `internal/vault`). AWS/K8s deferred
+- **Split identities:** read/reconcile uses `VAULT_TOKEN` or `VAULT_ROLE_ID`/`VAULT_SECRET_ID`; CA import requires `VAULT_IMPORT_TOKEN` or import AppRole. Import with only the read identity configured returns **503**
 - List PKI mounts, serials (via Vault's `LIST` cert operation), and stored certificates
 - Match by `fingerprint_sha256` to set `managed_status`, `vault_pki_mount`, `vault_issuer_ref`, `serial_number`
 - All Vault HTTP calls use a bounded client timeout
 - `POST /api/v1/reconcile` or optional post-scan hook (`RECONCILE_ON_SCAN_COMPLETE`); reconcile summary carries a `status` (`ok`/`partial`/`failed`)
-- Process-start reconcile/import still bind `VAULT_*` env from `config.Load()` (see Connections resolve)
+- Process-start reconcile/import still bind `VAULT_*` / `VAULT_IMPORT_*` env from `config.Load()` (see Connections resolve)
 
 HCP Vault Dedicated uses the same HTTP API with namespace headers. Settings UX (`hcp_dedicated` vs `self_managed`) is labels + `namespace=admin` preset only.
 
@@ -170,7 +175,7 @@ All under `/api/v1/settings/connections`. The Next BFF proxies with `Authorizati
 | `PATCH` | Partial update (one or more targets). Same write-only secret rule. |
 | `POST /test` | Body `{"target":"vault"|"aap"|"eda"}` only. Uses **resolved** credentials on the server. Never accept a secret in the test body. |
 
-Auth (M1 #79 not merged): unauthenticated GET/PUT/PATCH/Test → **401**. `CLM_INSECURE_NO_AUTH=true` (UAT) treats the caller as `platform_admin`. When an actor is injected: `platform_admin` can read and mutate; `remediator` GET 200 (still no secrets), PUT/Test 403; other roles 403. `audit_events` is not written (M1 store absent).
+Auth: unauthenticated GET/PUT/PATCH/Test → **401**. `CLM_INSECURE_NO_AUTH=true` (UAT/integration) treats the caller as `platform_admin`. With a static token: `platform_admin` can read and mutate; `remediator` GET 200 (still no secrets), PUT/Test 403; other roles 403. 401/403 from the auth middleware write `audit_events`.
 
 ### Test probes
 
@@ -186,10 +191,16 @@ HCP vs self-managed does not change probes.
 
 ## Security considerations
 
-- Scan consent required at API and CLI
+- API is default-deny except health. Dashboard BFF attaches `CLM_API_TOKEN`; never `NEXT_PUBLIC_*` tokens
+- Scan consent required at API and CLI — **consent is not authorization** (RBAC first, then consent)
 - Private range scanning disabled by default
 - Maximum IPv4 scan size: /16
 - Store PEM material in PostgreSQL — protect database access accordingly
-- Use read-only Vault policies for reconciliation; separate policy for CA import
+- Use read-only Vault policies for reconciliation; separate import identity (`VAULT_IMPORT_*`) for CA import
 - Connection secrets are AES-256-GCM in `connections.secrets_enc` under `CLM_CONNECTIONS_KEY`; GET never echoes them; Test details redact known secret substrings
-- Settings mutations are default-deny without M1; `CLM_INSECURE_NO_AUTH` is UAT-only
+- `CLM_INSECURE_NO_AUTH` is UAT/integration-only and applies API-wide, not Settings-only
+- Privileged mutations and 401/403 are recorded in `audit_events` (no tokens, PEM, or AAP secrets in `payload`)
+
+### Residual risk: dashboard BFF
+
+M1 default-deny applies to the **Go API** (`:8080`). The Next.js BFF (`web/app/api/v1/[...path]/route.ts`) holds ambient `CLM_API_TOKEN` authority (demo compose: `platform_admin`) until OIDC/session lands. Anyone who can reach the Next origin can perform the API mutations M1 closed on `:8080`. Do **not** treat the control plane as closed to unauthenticated mutation at the deployment edge. Follow-up: [authenticate the dashboard BFF (OIDC/session)](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/89).

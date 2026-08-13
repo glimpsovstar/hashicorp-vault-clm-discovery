@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"strings"
 	"testing"
@@ -18,9 +20,15 @@ var configEnvKeys = []string{
 	"LOG_LEVEL",
 	"CLM_CONNECTIONS_KEY",
 	"CLM_INSECURE_NO_AUTH",
+	"CLM_AUTH_MODE",
+	"CLM_STATIC_TOKENS",
 	"VAULT_ROLE_ID",
 	"VAULT_SECRET_ID",
 	"VAULT_AUTH_METHOD",
+	"VAULT_IMPORT_TOKEN",
+	"VAULT_IMPORT_ROLE_ID",
+	"VAULT_IMPORT_SECRET_ID",
+	"VAULT_IMPORT_AUTH_METHOD",
 }
 
 func resetConfigEnv(t *testing.T) {
@@ -94,8 +102,26 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if cfg.VaultAuthMethod != "token" {
 		t.Fatalf("VaultAuthMethod = %q, want token", cfg.VaultAuthMethod)
 	}
+	if cfg.VaultImportToken != "" {
+		t.Fatalf("VaultImportToken = %q, want empty", cfg.VaultImportToken)
+	}
+	if cfg.VaultImportRoleID != "" {
+		t.Fatalf("VaultImportRoleID = %q, want empty", cfg.VaultImportRoleID)
+	}
+	if cfg.VaultImportSecretID != "" {
+		t.Fatalf("VaultImportSecretID = %q, want empty", cfg.VaultImportSecretID)
+	}
+	if cfg.VaultImportAuthMethod != "" {
+		t.Fatalf("VaultImportAuthMethod = %q, want empty", cfg.VaultImportAuthMethod)
+	}
 	if cfg.InsecureNoAuth {
 		t.Fatal("InsecureNoAuth should default to false")
+	}
+	if cfg.AuthMode != "static_token" {
+		t.Fatalf("AuthMode = %q, want static_token", cfg.AuthMode)
+	}
+	if len(cfg.StaticTokens) != 0 {
+		t.Fatalf("StaticTokens = %#v, want empty", cfg.StaticTokens)
 	}
 }
 
@@ -164,5 +190,240 @@ func TestLoadReadsVaultAppRole(t *testing.T) {
 	}
 	if cfg.VaultSecretID != "secret-uuid" {
 		t.Fatalf("VaultSecretID = %q, want secret-uuid", cfg.VaultSecretID)
+	}
+}
+
+func TestLoadReadsVaultImportIdentity(t *testing.T) {
+	resetConfigEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/clm")
+	t.Setenv("VAULT_IMPORT_TOKEN", "hvs.import")
+	t.Setenv("VAULT_IMPORT_AUTH_METHOD", "approle")
+	t.Setenv("VAULT_IMPORT_ROLE_ID", "import-role")
+	t.Setenv("VAULT_IMPORT_SECRET_ID", "import-secret")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.VaultImportToken != "hvs.import" {
+		t.Fatalf("VaultImportToken = %q, want hvs.import", cfg.VaultImportToken)
+	}
+	if cfg.VaultImportAuthMethod != "approle" {
+		t.Fatalf("VaultImportAuthMethod = %q, want approle", cfg.VaultImportAuthMethod)
+	}
+	if cfg.VaultImportRoleID != "import-role" {
+		t.Fatalf("VaultImportRoleID = %q, want import-role", cfg.VaultImportRoleID)
+	}
+	if cfg.VaultImportSecretID != "import-secret" {
+		t.Fatalf("VaultImportSecretID = %q, want import-secret", cfg.VaultImportSecretID)
+	}
+}
+
+func TestHasVaultImportIdentity(t *testing.T) {
+	t.Parallel()
+
+	if (Config{VaultToken: "read"}).HasVaultImportIdentity() {
+		t.Fatal("read-only token must not count as import identity")
+	}
+	if (Config{VaultRoleID: "r", VaultSecretID: "s"}).HasVaultImportIdentity() {
+		t.Fatal("read AppRole must not count as import identity")
+	}
+	if !(Config{VaultImportToken: "hvs.import"}).HasVaultImportIdentity() {
+		t.Fatal("VAULT_IMPORT_TOKEN must count as import identity")
+	}
+	if !(Config{VaultImportRoleID: "r", VaultImportSecretID: "s"}).HasVaultImportIdentity() {
+		t.Fatal("import AppRole must count as import identity")
+	}
+	if (Config{VaultImportRoleID: "r"}).HasVaultImportIdentity() {
+		t.Fatal("role_id alone is not an import identity")
+	}
+}
+
+func TestResolveVaultImportAuthMethod(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		cfg  Config
+		want string
+	}{
+		{name: "explicit import method", cfg: Config{VaultImportAuthMethod: "approle", VaultAuthMethod: "token"}, want: "approle"},
+		{name: "only import token defaults to token", cfg: Config{VaultImportToken: "hvs.import", VaultAuthMethod: "approle"}, want: "token"},
+		{name: "only import approle defaults to approle", cfg: Config{VaultImportRoleID: "r", VaultImportSecretID: "s", VaultAuthMethod: "token"}, want: "approle"},
+		{name: "inherit read method", cfg: Config{VaultAuthMethod: "approle", VaultImportToken: "t", VaultImportRoleID: "r", VaultImportSecretID: "s"}, want: "approle"},
+		{name: "empty defaults to token", cfg: Config{}, want: "token"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.cfg.ResolveVaultImportAuthMethod(); got != tt.want {
+				t.Fatalf("ResolveVaultImportAuthMethod = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadReadsAuthModeAndStaticTokens(t *testing.T) {
+	resetConfigEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/clm")
+	t.Setenv("CLM_AUTH_MODE", "static_token")
+	t.Setenv("CLM_STATIC_TOKENS", "viewer:tok_v,platform_admin:tok_p,inventory:tok_inv")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AuthMode != "static_token" {
+		t.Fatalf("AuthMode = %q, want static_token", cfg.AuthMode)
+	}
+	if cfg.StaticTokens["viewer"] != "tok_v" || cfg.StaticTokens["platform_admin"] != "tok_p" || cfg.StaticTokens["inventory"] != "tok_inv" {
+		t.Fatalf("StaticTokens = %#v", cfg.StaticTokens)
+	}
+}
+
+func TestLoadEmptyAuthModeIsStaticToken(t *testing.T) {
+	resetConfigEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/clm")
+	t.Setenv("CLM_AUTH_MODE", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AuthMode != "static_token" {
+		t.Fatalf("AuthMode = %q, want static_token", cfg.AuthMode)
+	}
+}
+
+func TestLoadRejectsUnknownAuthMode(t *testing.T) {
+	resetConfigEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/clm")
+	t.Setenv("CLM_AUTH_MODE", "oidc")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for unknown CLM_AUTH_MODE")
+	}
+	if !strings.Contains(err.Error(), "CLM_AUTH_MODE") {
+		t.Fatalf("expected CLM_AUTH_MODE in error, got %v", err)
+	}
+}
+
+func TestLoadParsesHashedStaticToken(t *testing.T) {
+	resetConfigEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/clm")
+	t.Setenv("CLM_STATIC_TOKENS", "viewer:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.StaticTokens["viewer"]
+	if got != "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("StaticTokens[viewer] = %q", got)
+	}
+}
+
+func TestLoadRejectsUnknownStaticTokenRole(t *testing.T) {
+	resetConfigEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/clm")
+	t.Setenv("CLM_STATIC_TOKENS", "superuser:tok_x")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for unknown static token role")
+	}
+	if !strings.Contains(err.Error(), "superuser") {
+		t.Fatalf("expected role in error, got %v", err)
+	}
+}
+
+func TestLookupStaticRoleMatchesPlainAndHashed(t *testing.T) {
+	sum := sha256.Sum256([]byte("s3cret"))
+	cfg := Config{StaticTokens: map[string]string{
+		"viewer":         "tok_v",
+		"platform_admin": "sha256:" + hex.EncodeToString(sum[:]),
+	}}
+	if role, ok := cfg.LookupStaticRole("tok_v"); !ok || role != "viewer" {
+		t.Fatalf("plain lookup = %q %v, want viewer true", role, ok)
+	}
+	if role, ok := cfg.LookupStaticRole("s3cret"); !ok || role != "platform_admin" {
+		t.Fatalf("hashed lookup = %q %v, want platform_admin true", role, ok)
+	}
+	if _, ok := cfg.LookupStaticRole("nope"); ok {
+		t.Fatal("unknown token must not match")
+	}
+	if _, ok := cfg.LookupStaticRole(""); ok {
+		t.Fatal("empty token must not match")
+	}
+}
+
+func TestAuthPostureWarnings(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		cfg     Config
+		wantSub []string
+		wantLen int
+	}{
+		{
+			name: "insecure hatch warns",
+			cfg:  Config{InsecureNoAuth: true, AuthMode: "static_token", StaticTokens: map[string]string{"platform_admin": "tok"}},
+			wantSub: []string{
+				"CLM_INSECURE_NO_AUTH",
+				"platform_admin",
+			},
+			wantLen: 1,
+		},
+		{
+			name: "empty static tokens without hatch warns",
+			cfg:  Config{AuthMode: "static_token"},
+			wantSub: []string{
+				"CLM_STATIC_TOKENS",
+				"401",
+			},
+			wantLen: 1,
+		},
+		{
+			name: "empty auth mode treated as static_token with empty tokens warns",
+			cfg:  Config{AuthMode: ""},
+			wantSub: []string{
+				"CLM_STATIC_TOKENS",
+			},
+			wantLen: 1,
+		},
+		{
+			name:    "hatch true and empty tokens only hatch warning",
+			cfg:     Config{InsecureNoAuth: true, AuthMode: "static_token"},
+			wantSub: []string{"CLM_INSECURE_NO_AUTH"},
+			wantLen: 1,
+		},
+		{
+			name:    "configured static tokens no warning",
+			cfg:     Config{AuthMode: "static_token", StaticTokens: map[string]string{"viewer": "tok_v"}},
+			wantLen: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := AuthPostureWarnings(tt.cfg)
+			if len(got) != tt.wantLen {
+				t.Fatalf("AuthPostureWarnings = %#v, want len %d", got, tt.wantLen)
+			}
+			for _, sub := range tt.wantSub {
+				found := false
+				for _, msg := range got {
+					if strings.Contains(msg, sub) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Fatalf("AuthPostureWarnings = %#v, want substring %q", got, sub)
+				}
+			}
+		})
 	}
 }

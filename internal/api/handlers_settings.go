@@ -16,15 +16,9 @@ import (
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/vault"
 )
 
-const (
-	rolePlatformAdmin = "platform_admin"
-	roleRemediator    = "remediator"
-)
-
 type settingsActorKey struct{}
 
-// ContextWithActor injects a Settings RBAC role for tests (and future M1
-// middleware). Production without M1 has no actor unless CLM_INSECURE_NO_AUTH.
+// ContextWithActor injects a control-plane role for auth middleware and tests.
 func ContextWithActor(ctx context.Context, role string) context.Context {
 	return context.WithValue(ctx, settingsActorKey{}, role)
 }
@@ -117,25 +111,20 @@ func (s *Server) requestActor(r *http.Request) string {
 }
 
 func (s *Server) requireSettingsRead(w http.ResponseWriter, r *http.Request) (string, bool) {
-	actor := s.requestActor(r)
-	if actor == "" {
-		writeError(w, r, http.StatusUnauthorized, "unauthorized")
-		return "", false
-	}
-	if actor != rolePlatformAdmin && actor != roleRemediator {
-		writeError(w, r, http.StatusForbidden, "forbidden")
-		return "", false
-	}
-	return actor, true
+	return s.requireSettingsAccess(w, r, http.MethodGet)
 }
 
 func (s *Server) requireSettingsWrite(w http.ResponseWriter, r *http.Request) (string, bool) {
+	return s.requireSettingsAccess(w, r, r.Method)
+}
+
+func (s *Server) requireSettingsAccess(w http.ResponseWriter, r *http.Request, method string) (string, bool) {
 	actor := s.requestActor(r)
 	if actor == "" {
 		writeError(w, r, http.StatusUnauthorized, "unauthorized")
 		return "", false
 	}
-	if actor != rolePlatformAdmin {
+	if !roleAllows(actor, method, r.URL.Path) {
 		writeError(w, r, http.StatusForbidden, "forbidden")
 		return "", false
 	}

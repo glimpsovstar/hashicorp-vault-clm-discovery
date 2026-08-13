@@ -40,7 +40,7 @@ export default async function CertificateDetailPage({
         actions={
           <a
             className="button button-secondary"
-            href={`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"}/api/v1/certificates/${cert.id}/pem`}
+            href={`/api/v1/certificates/${cert.id}/pem`}
           >
             Download PEM
           </a>

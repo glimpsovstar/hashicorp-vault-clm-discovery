@@ -81,8 +81,13 @@ resource "docker_container" "app" {
     "DATABASE_URL=${local.pg_dsn}",
     "ALLOW_PRIVATE_RANGES=true",
     "LOG_LEVEL=info",
+    # Hatch so the Go driver can keep calling the API without Bearer.
+    # Alternative: CLM_STATIC_TOKENS + Authorization on every request.
+    "CLM_INSECURE_NO_AUTH=true",
     "VAULT_ADDR=http://vault:8200",
     "VAULT_TOKEN=${var.vault_dev_root_token}",
+    # Split import identity — VAULT_TOKEN alone returns 503 on CA import.
+    "VAULT_IMPORT_TOKEN=${var.vault_dev_root_token}",
   ]
 
   ports {

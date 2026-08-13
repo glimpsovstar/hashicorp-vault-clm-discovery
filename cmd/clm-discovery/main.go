@@ -27,6 +27,9 @@ func main() {
 		os.Exit(1)
 	}
 	logger = logging.New(cfg.LogLevel)
+	for _, msg := range config.AuthPostureWarnings(cfg) {
+		logger.Warn(msg)
+	}
 
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)

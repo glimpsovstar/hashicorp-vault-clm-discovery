@@ -84,6 +84,26 @@ Discovered CA/intermediate certs for import via `pki/issuers/import/bundle`.
 - `scans` — scan run metadata and diagnostics
 - `issuers` — CA/intermediate inventory
 - `connections` — Vault / AAP / EDA Settings overlay (migration `000007`)
+- `audit_events` — append-only control-plane audit (migration `000008`; not the EDA `events` outbox)
+
+### Audit events (`audit_events`, migration `000008`)
+
+One row per 401/403 deny and per successful privileged mutation (scan create, renew, CA import, catalog-import, delete, reconcile, revoke). Never store tokens, PEM, AAP secrets, Authorization headers, or connection secret fields in `payload`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | uuid PK | Row id |
+| `at` | timestamptz | Event time |
+| `actor_id` | text | `static:<role>` for static tokens |
+| `actor_type` | text | `user` (no user directory in M1) |
+| `role` | text | RBAC role, empty on unauthenticated 401 |
+| `action` | text | e.g. `import_ca`, `create_scan`, or `METHOD /path` on deny |
+| `target_type` | text | `scan`, `certificate`, `issuer`, or empty |
+| `target_id` | text | Target UUID when known |
+| `decision` | text | `allow` or `deny` |
+| `request_id` | text | Chi request id |
+| `remote_ip` | text | Client address |
+| `payload` | jsonb | Redacted metadata only |
 
 ### Connections (`connections`, migration `000007`)
 

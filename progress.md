@@ -171,21 +171,20 @@ North star and roadmap: `docs/program-context.md`.
 
 ## Next (confirmed order)
 
-1. **Hardening (first):**
-   - ~~Private-IP deny on the CRL/OCSP fetch~~ — DONE (#46 / PR #47).
-   - ~~OCSP stapling capture at scan~~ — DONE (#48 / PR #49).
-2. **Mode C full automation** (Vault issues/governs; **AAP** deploys/rotates/
-   verifies; CLM = monitor + orchestrate + verify):
-   - ~~AAP client~~ (#50), ~~renew endpoint~~ (#52), ~~renewal-config persistence~~ (#54).
-   - ~~`POST /renew-expiring` batch auto-renewal~~ (#58).
-   - ~~AAP dynamic-inventory endpoint~~ (#61).
-   - ~~Transactional outbox~~ (#63) + ~~Ansible EDA webhook dispatcher~~ (#65) — event Phase 1 DONE.
-   - **Message bus transport** (event Phase 2; ADR 0001) — deferred until a 2nd consumer exists.
-   - **Live validation** against the user's real AAP Controller + EDA webhook —
-     user provides URL + token (like the HCP cluster); pending.
-3. **v2 cloud CA sources** — read-only collectors for ACM / Azure Key Vault /
-   GCP Certificate Manager into the same inventory (single pane; closes shadow-CA
-   blind spot).
+GCM closed-loop (2026-08-13): specs/plans under `docs/superpowers/`; tracker
+[`docs/superpowers/plans/2026-08-13-gcm-closed-loop-tracker.md`](docs/superpowers/plans/2026-08-13-gcm-closed-loop-tracker.md).
+Tackle **one GitHub issue at a time**.
+
+1. **M1 — Secure the control plane (P0)** — [#79](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/79). Spec `2026-08-13-m1-control-plane-security-design.md`.
+2. **M2 — Durable jobs + wire verify** — [#80](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/80). Spec `2026-08-13-m2-durable-lifecycle-jobs-design.md`.
+3. **M4 core — Durable scan queue** — [#81](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/81). Spec `2026-08-13-m4-durable-scan-queue-design.md`.
+4. **M3 — Explainable posture** — [#82](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/82). Spec `2026-08-13-m3-explainable-posture-design.md`.
+5. **M5 — Broader integrations** (after M1–M2) — [#83](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/83). Spec `2026-08-13-m5-broader-integrations-design.md`.
+6. **Connections Settings** (after M1) — [#85](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/85). Spec `2026-08-13-connections-settings-design.md`.
+7. **Migrate + pending verify** (after M2) — [#87](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/87). Spec `2026-08-13-migrate-pending-verify-design.md`.
+8. **ADCS then AKV collectors** (after M1; M5 sibling) — [#86](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/86). Spec `2026-08-13-adcs-akv-collectors-design.md`.
+9. **Live AAP/EDA validation** — still pending operator URL + token (orthogonal demo).
+10. **Message bus** (ADR Phase 2) — deferred until a 2nd consumer exists.
 
 ## HCP note
 - `hcpvenv` alias token is stale/expired — do NOT use it. Mint fresh via TPM:

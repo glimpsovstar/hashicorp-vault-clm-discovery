@@ -142,7 +142,7 @@ func TestHandleReconcile_RouteRegistered(t *testing.T) {
 	t.Parallel()
 
 	stub := &stubReconciler{summary: vault.Summary{Errors: []string{}}}
-	srv := NewServer(config.Config{VaultAddr: "http://vault.example:8200"}, &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv := NewServer(openTestConfig(config.Config{VaultAddr: "http://vault.example:8200"}), &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv.reconciler = stub
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/reconcile", nil)

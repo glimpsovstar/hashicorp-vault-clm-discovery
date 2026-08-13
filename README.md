@@ -73,7 +73,11 @@ It complements Vault PKI and HCP Certificates Inventory. It is **not** a Vault p
 - Compose env (`VAULT_*`, `AAP_*`, `EDA_*`) remains the 12-factor default; a UI save writes a per-target overlay (`source=db`) in Postgres
 - Secrets never reach the browser (masked `*_set` flags only). Persist them only with `CLM_CONNECTIONS_KEY` (AES-256-GCM)
 - **Test connection** is server-side and uses the resolved overlay (DB else env): Vault `GET /v1/sys/mounts` (AppRole logs in first); AAP `GET /api/v2/me` then template-by-name (**does not launch a job**); EDA signed ping (`Authorization: Bearer` when a token is set, body `clm.connection.test`, **no outbox write**)
-- M1 RBAC is not merged: Settings GET/PUT/PATCH/Test return **401** unless `CLM_INSECURE_NO_AUTH=true` (UAT) or future RBAC injects an actor
+- Control-plane AuthN is default-deny except `GET /api/v1/health`. The dashboard BFF attaches `CLM_API_TOKEN`; the browser never sees Bearer tokens. Roles come from `CLM_STATIC_TOKENS`. `CLM_INSECURE_NO_AUTH=true` is a UAT/integration hatch only.
+
+### Residual risk: dashboard BFF
+
+M1 default-deny applies to the **Go API** (`:8080`). The Next.js BFF (`/api/v1/...`) holds ambient `CLM_API_TOKEN` authority (demo compose: `platform_admin`) until OIDC/session lands. Anyone who can reach the Next origin can perform the API mutations M1 closed on `:8080`. The control plane is **not** closed to unauthenticated mutation at the deployment edge. Follow-up: [authenticate the dashboard BFF (OIDC/session)](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/89).
 
 ## Quick start
 
@@ -86,7 +90,7 @@ docker compose -f deploy/docker-compose.yml up --build
 - Dashboard: http://localhost:3000
 - API: http://localhost:8080/api/v1/health
 
-In Docker, the web container calls the API at `http://api:8080` during server rendering (`API_INTERNAL_URL`); your browser still uses `http://localhost:8080`.
+In Docker, the web container calls the API at `http://api:8080` during server rendering (`API_INTERNAL_URL` + `CLM_API_TOKEN`). Browser mutations go through the same-origin BFF (`/api/v1/...`); do not put tokens in `NEXT_PUBLIC_*`.
 
 Start a scan from the **Scans** page using **hostnames** (recommended for HTTPS sites) or CIDR ranges.
 
@@ -119,10 +123,12 @@ migrate -path migrations -database "$DATABASE_URL" up
 # API
 export ALLOW_PRIVATE_RANGES=true
 export LOG_LEVEL=info   # info (default), debug, trace, warn, error
+export CLM_STATIC_TOKENS=platform_admin:clm-demo-platform-admin
 go run ./cmd/clm-discovery
 
-# Dashboard
-cd web && npm install && NEXT_PUBLIC_API_URL=http://localhost:8080 npm run dev
+# Dashboard (BFF uses CLM_API_TOKEN; match a role in CLM_STATIC_TOKENS)
+export CLM_API_TOKEN=clm-demo-platform-admin
+cd web && npm ci && npm run dev
 ```
 
 ### CLI scan
@@ -137,6 +143,8 @@ go run ./cmd/clm-scan --cidrs=127.0.0.1/32 --ports=443 --i-consent-to-scan
 ## Authorized scanning
 
 Only scan networks you own or have explicit permission to test. The API and CLI require explicit consent before scanning.
+
+**Consent is not authorization.** RBAC runs first: an unauthenticated or under-privileged caller with `consent:true` gets **401/403**, not 400. After the caller is authorized, `consent:false` (or missing) on a consent-gated mutation still returns **400**. Checking the dashboard consent box does not grant a role.
 
 Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVATE_RANGES=true`.
 
@@ -155,10 +163,14 @@ Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVA
 | **Vault (reconcile / import)** | | |
 | `VAULT_ADDR` | (empty) | HashiCorp Vault API address; empty disables Vault integration |
 | `VAULT_NAMESPACE` | (empty) | Vault enterprise namespace header (`X-Vault-Namespace`) |
-| `VAULT_TOKEN` | (empty) | Vault token for `token` auth (`X-Vault-Token`) |
-| `VAULT_ROLE_ID` | (empty) | AppRole role_id when `VAULT_AUTH_METHOD=approle` |
+| `VAULT_TOKEN` | (empty) | Vault token for **read/reconcile** (`token` auth). Does **not** authorize CA import. |
+| `VAULT_ROLE_ID` | (empty) | AppRole role_id when `VAULT_AUTH_METHOD=approle` (read/reconcile) |
 | `VAULT_SECRET_ID` | (empty) | AppRole secret_id when `VAULT_AUTH_METHOD=approle` (never logged) |
 | `VAULT_AUTH_METHOD` | `token` | Auth method: `token` or `approle` (`aws` is not implemented) |
+| `VAULT_IMPORT_TOKEN` | (empty) | Dedicated Vault token for CA import. Required (or import AppRole) or `POST /issuers/{id}/import` returns **503**. |
+| `VAULT_IMPORT_AUTH_METHOD` | (empty) | Import auth method; empty inherits read method, or `token`/`approle` from which import creds are set |
+| `VAULT_IMPORT_ROLE_ID` | (empty) | Import AppRole role_id (with `VAULT_IMPORT_SECRET_ID`) |
+| `VAULT_IMPORT_SECRET_ID` | (empty) | Import AppRole secret_id (never logged) |
 | `RECONCILE_ON_SCAN_COMPLETE` | `false` | Automatically reconcile against Vault after each scan finishes |
 | **AAP (Mode C renewals)** | | |
 | `AAP_URL` | (empty) | Ansible Automation Platform Controller URL; empty ⇒ renew endpoints return 503 |
@@ -175,7 +187,11 @@ Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVA
 | `EVENT_MAX_ATTEMPTS` | `10` | Delivery attempts before an event is dead-lettered |
 | **Settings (Connections overlay)** | | |
 | `CLM_CONNECTIONS_KEY` | (empty) | AES-256-GCM key for UI-persisted connection secrets (32-byte raw or 64-char hex). Empty = env-only mode: Compose still works; PUT/PATCH that persist secrets return 503. Server-side only (not in Next.js) |
-| `CLM_INSECURE_NO_AUTH` | `false` | UAT-only escape hatch: treat Settings callers as `platform_admin`. Default deny (401) until M1 RBAC. Not a production auth substitute |
+| **Control plane (AuthN / RBAC)** | | |
+| `CLM_AUTH_MODE` | `static_token` | AuthN mode. Only `static_token` in M1 (empty is treated as `static_token`) |
+| `CLM_STATIC_TOKENS` | (empty) | Comma-separated `role:token` (or `role:sha256:<64 hex>`). Roles: `viewer`, `scanner_operator`, `remediator`, `vault_import_admin`, `approver`, `platform_admin`, `inventory`. DELETE requires `platform_admin`. `GET /inventory` is the AAP inventory role only — not a dashboard page |
+| `CLM_API_TOKEN` | (empty) | **Dashboard/BFF only** (Next.js server). Bearer sent to the Go API. Must match a `CLM_STATIC_TOKENS` value (typically `platform_admin` so demo Deletes succeed). Never `NEXT_PUBLIC_*` |
+| `CLM_INSECURE_NO_AUTH` | `false` | UAT/integration hatch: skip Bearer and treat the caller as `platform_admin` on **all** `/api/v1` routes except health (already public). Not a production auth substitute. Prefer this on existing UAT scripts; or send `Authorization: Bearer` |
 
 Both `clm-discovery` and `clm-scan` emit JSON logs to stdout. Set `LOG_LEVEL=debug` to see target expansion summaries; `trace` adds per-target probe outcomes. Vault/AAP/EDA tokens and URLs are read from the environment and never logged.
 
@@ -192,7 +208,7 @@ The web app mirrors HashiCorp Vault’s **AppFrame** layout (sidebar nav, page h
 - [docs/superpowers/specs/2026-06-14-vault-ui-design.md](docs/superpowers/specs/2026-06-14-vault-ui-design.md)
 - [docs/superpowers/plans/2026-06-14-vault-ui-dashboard.md](docs/superpowers/plans/2026-06-14-vault-ui-dashboard.md)
 
-**Settings → Connections** (`/settings/connections`) uses the existing Helios CSS (panels, form fields, badges) — not shadcn/ui. The Next.js BFF proxies `/api/settings/connections` to the Go API (`API_INTERNAL_URL`); the browser never calls `:8080` with `NEXT_PUBLIC_*` tokens.
+**Settings → Connections** (`/settings/connections`) uses the existing Helios CSS (panels, form fields, badges) — not shadcn/ui. The Next.js BFF proxies `/api/settings/connections` **and** `/api/v1/*` (except AAP `/inventory`) to the Go API with `CLM_API_TOKEN`. The browser never calls `:8080` with tokens. Delete buttons stay in the UI; they succeed only when the BFF token is `platform_admin`.
 
 Official Vault logo: `@hashicorp/flight-icons` **vault-color-24** (gold chevron), matching [Vault’s app header](https://github.com/hashicorp/vault/blob/main/ui/lib/core/addon/components/sidebar/frame.hbs).
 
@@ -243,7 +259,7 @@ See [docs/data-model.md](docs/data-model.md).
 | DELETE | `/api/v1/issuers/{id}` | Delete issuer |
 | POST | `/api/v1/reconcile` | Reconcile inventory against Vault PKI |
 | POST | `/api/v1/renew-expiring` | Batch auto-renew expiring certs (consent-gated) |
-| GET | `/api/v1/inventory` | Ansible dynamic inventory (`--list` JSON, `?within_days=N`) |
+| GET | `/api/v1/inventory` | Ansible dynamic inventory (`--list` JSON, `?within_days=N`). AAP service role only — not a dashboard page |
 | GET | `/api/v1/events` | List outbox events |
 | GET | `/api/v1/blindspot` | Global blind-spot (shadow certs) |
 | GET | `/api/v1/compliance/summary` | Global compliance summary |

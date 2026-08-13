@@ -48,7 +48,9 @@ type resourceStore interface {
 }
 
 // issuerImporter writes CA material into a Vault PKI mount (mode B). It is nil
-// when Vault is not configured, which the handler maps to 503.
+// when Vault is not configured or when only the read identity is set; the
+// handler maps those to 503 ("vault is not configured" / "import identity not
+// configured").
 type issuerImporter interface {
 	ImportIssuerBundle(ctx context.Context, mount, pemBundle string) (vault.IssuerImportResult, error)
 }
@@ -119,10 +121,18 @@ type Server struct {
 	renewer     renewLauncher
 	connections connectionsStore
 	actor       string // test helper; production uses context or InsecureNoAuth
+	auditor     auditor
+	scans       scanCreator
+}
+
+// scanCreator is the POST /scans persist seam. Production uses *store.Store;
+// RBAC tests inject a stub so consent/RBAC can be asserted without Postgres.
+type scanCreator interface {
+	CreateScan(ctx context.Context, cidrs, hostnames []string, ports []int, concurrency int) (store.Scan, error)
 }
 
 func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, store: st, scanner: sc, log: log, blindSpot: st, compliance: st, report: st, resources: st, connections: st}
+	s := &Server{cfg: cfg, store: st, scanner: sc, log: log, blindSpot: st, compliance: st, report: st, resources: st, connections: st, scans: st}
 	s.revCheck = func(ctx context.Context, in revocation.CheckInput) (revocation.Result, error) {
 		return revocation.Check(ctx, revocation.NewFetchClient(), in)
 	}
@@ -136,9 +146,22 @@ func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slo
 			SecretID:   cfg.VaultSecretID,
 		}); err == nil {
 			s.reconciler = vault.NewReconciler(vc, st)
-			s.importer = vc
 		} else {
 			log.Warn("vault client init failed", "err", err)
+		}
+		if cfg.HasVaultImportIdentity() {
+			if ic, err := vault.NewClient(vault.Config{
+				Address:    cfg.VaultAddr,
+				Namespace:  cfg.VaultNamespace,
+				Token:      cfg.VaultImportToken,
+				AuthMethod: cfg.ResolveVaultImportAuthMethod(),
+				RoleID:     cfg.VaultImportRoleID,
+				SecretID:   cfg.VaultImportSecretID,
+			}); err == nil {
+				s.importer = ic
+			} else {
+				log.Warn("vault import client init failed", "err", err)
+			}
 		}
 	}
 	if cfg.AAPURL != "" {
@@ -153,6 +176,9 @@ func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slo
 		}
 	}
 	s.worker = NewScanWorker(s)
+	if st != nil {
+		s.auditor = &storeAuditor{st: st}
+	}
 	return s
 }
 
@@ -174,6 +200,8 @@ func (s *Server) Router() http.Handler {
 	r.Get("/api/v1/health", s.handleHealth)
 
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Use(s.requireAuth)
+		r.Use(s.requirePermission)
 		r.Post("/scans", s.handleCreateScan)
 		r.Get("/scans", s.handleListScans)
 		r.Get("/scans/{id}", s.handleGetScan)
@@ -253,13 +281,20 @@ func (s *Server) handleCreateScan(w http.ResponseWriter, r *http.Request) {
 		req.Concurrency = s.cfg.DefaultConcurrency
 	}
 
-	scan, err := s.store.CreateScan(r.Context(), req.CIDRs, req.Hostnames, req.Ports, req.Concurrency)
+	create := s.scans
+	if create == nil {
+		create = s.store
+	}
+	scan, err := create.CreateScan(r.Context(), req.CIDRs, req.Hostnames, req.Ports, req.Concurrency)
 	if err != nil {
 		s.writeServerError(w, r, err, "failed to create scan")
 		return
 	}
 
 	s.worker.Enqueue(scan.ID, req.CIDRs, req.Hostnames, req.Ports, req.Concurrency)
+	s.auditAllow(r, "create_scan", "scan", scan.ID.String(), map[string]any{
+		"cidrs": req.CIDRs, "hostnames": req.Hostnames, "ports": req.Ports,
+	})
 	writeJSON(w, http.StatusAccepted, scan)
 }
 
@@ -320,6 +355,7 @@ func (s *Server) handleDeleteScan(w http.ResponseWriter, r *http.Request) {
 		s.writeLookupError(w, r, err, store.ErrScanNotFound, "scan not found", "failed to delete scan")
 		return
 	}
+	s.auditAllow(r, "delete", "scan", id.String(), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -333,6 +369,7 @@ func (s *Server) handleDeleteCertificate(w http.ResponseWriter, r *http.Request)
 		s.writeLookupError(w, r, err, store.ErrCertificateNotFound, "certificate not found", "failed to delete certificate")
 		return
 	}
+	s.auditAllow(r, "delete", "certificate", id.String(), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -346,6 +383,7 @@ func (s *Server) handleDeleteIssuer(w http.ResponseWriter, r *http.Request) {
 		s.writeLookupError(w, r, err, store.ErrIssuerNotFound, "issuer not found", "failed to delete issuer")
 		return
 	}
+	s.auditAllow(r, "delete", "issuer", id.String(), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -585,6 +623,9 @@ func (s *Server) handleRenewCertificate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.log.Info("aap renewal launched", "action", "renew", "certificate_id", id.String(), "job_id", ref.JobID, "workflow", ref.Workflow)
+	s.auditAllow(r, "renew", "certificate", id.String(), map[string]any{
+		"mount": mount, "role": cfg.Role, "job_id": ref.JobID,
+	})
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"status":      "launched",
 		"job":         ref,
@@ -704,6 +745,9 @@ func (s *Server) handleRenewExpiring(w http.ResponseWriter, r *http.Request) {
 		launched = append(launched, map[string]any{"certificate_id": c.ID, "common_name": cn, "job": ref})
 	}
 	s.log.Info("renew-expiring batch", "action", "renew_expiring", "within_days", within, "eligible", len(certs), "launched", len(launched), "failed", len(failed))
+	s.auditAllow(r, "renew", "", "", map[string]any{
+		"within_days": within, "eligible": len(certs), "launched": len(launched), "failed": len(failed),
+	})
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"within_days": within,
 		"eligible":    len(certs),
@@ -797,6 +841,9 @@ func (s *Server) handleRevocationCheck(w http.ResponseWriter, r *http.Request) {
 		}
 		s.log.Info("certificate revoked", "action", "revocation_check", "certificate_id", id.String(), "source", result.Source)
 	}
+	s.auditAllow(r, "revoke", "certificate", id.String(), map[string]any{
+		"status": string(result.Status), "source": result.Source, "verified": result.Verified,
+	})
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -862,6 +909,9 @@ func (s *Server) handleCatalogImport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.log.Info("catalog import", "action", "catalog_import", "certificate_id", id.String(), "managed_status", "imported")
+	s.auditAllow(r, "catalog_import", "certificate", id.String(), map[string]any{
+		"managed_status": "imported",
+	})
 	writeJSON(w, http.StatusOK, cert)
 }
 
@@ -946,6 +996,10 @@ func (s *Server) handleImportIssuer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.importer == nil {
+		if s.cfg.VaultAddr != "" {
+			writeError(w, r, http.StatusServiceUnavailable, "import identity not configured")
+			return
+		}
 		writeError(w, r, http.StatusServiceUnavailable, "vault is not configured")
 		return
 	}
@@ -979,6 +1033,9 @@ func (s *Server) handleImportIssuer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("vault issuer import", "action", "import_ca", "issuer_id", id.String(), "mount", mount)
+	s.auditAllow(r, "import_ca", "issuer", id.String(), map[string]any{
+		"mount": mount,
+	})
 	writeJSON(w, http.StatusOK, updated)
 }
 

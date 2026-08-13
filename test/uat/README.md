@@ -134,12 +134,24 @@ This starts `lego` (issues the cert into `./le/`) and `uat-letsencrypt`
 issued LE cert is expected to produce **zero compliance findings** and
 `cert_scope=external` — see intended behavior 2 below.
 
+## Auth (M1)
+
+The UAT compose sets `CLM_INSECURE_NO_AUTH=true` so `driver.sh` can keep calling the API without Bearer. That hatch treats every caller as `platform_admin` and is **not** for production.
+
+To exercise real AuthN instead: remove the hatch, set `CLM_STATIC_TOKENS` (e.g. `platform_admin:uat-admin`) on `app`, and add `-H "Authorization: Bearer uat-admin"` to every `curl` in `driver.sh`.
+
+**Consent is not authorization.** The driver still sends `"consent":true` on scan create; without the hatch or a `scanner_operator`+ token that would be 401/403, not 400.
+
+CA import is not part of this driver. If you add an import step, set `VAULT_IMPORT_TOKEN` (compose already forwards `${VAULT_IMPORT_TOKEN:-$VAULT_TOKEN}`). `VAULT_TOKEN` alone returns 503 on import.
+
 ## Environment variables
 
 | Variable | Where | Purpose |
 |---|---|---|
+| `CLM_INSECURE_NO_AUTH` | compose `app` | Set `true` so UAT scripts work without Bearer (API-wide hatch) |
 | `VAULT_ADDR` | shell env, `--profile vault` | Vault address the `app` service passes through (`http://vault:8200`) |
-| `VAULT_TOKEN` | shell env, `--profile vault` | Vault token the `app` service passes through (`root` in dev mode) |
+| `VAULT_TOKEN` | shell env, `--profile vault` | Vault **read/reconcile** token the `app` service passes through (`root` in dev mode) |
+| `VAULT_IMPORT_TOKEN` | shell env | Vault **import** token; defaults to `VAULT_TOKEN` in this compose. Required for CA import |
 | `ACME_EMAIL` | `test/uat/.env` (gitignored), `--profile letsencrypt` | ACME account email for Let's Encrypt staging |
 | `LE_DOMAIN` | `test/uat/.env` (gitignored), `--profile letsencrypt` | Public domain to issue the staging cert for |
 

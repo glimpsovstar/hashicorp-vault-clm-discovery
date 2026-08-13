@@ -184,7 +184,7 @@ func TestHandleGetScanCompliance_DBError(t *testing.T) {
 func TestHandleGetComplianceSummary_RouteRegistered(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(config.Config{}, &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv := NewServer(openTestConfig(config.Config{}), &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv.compliance = &fakeComplianceStore{}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/compliance/summary", nil)

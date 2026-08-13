@@ -180,9 +180,11 @@ Tackle **one GitHub issue at a time**.
 3. **M4 core — Durable scan queue** — [#81](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/81). Spec `2026-08-13-m4-durable-scan-queue-design.md`.
 4. **M3 — Explainable posture** — [#82](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/82). Spec `2026-08-13-m3-explainable-posture-design.md`.
 5. **M5 — Broader integrations** (after M1–M2) — [#83](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/83). Spec `2026-08-13-m5-broader-integrations-design.md`.
-6. **Live AAP/EDA validation** — still pending operator URL + token (orthogonal demo).
-7. **Message bus** (ADR Phase 2) — deferred until a 2nd consumer exists.
-8. **v2 cloud CA sources** — folded into M5 task 4; do not start before M1–M2.
+6. **Connections Settings** (after M1) — [#85](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/85). Spec `2026-08-13-connections-settings-design.md`.
+7. **Migrate + pending verify** (after M2) — [#87](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/87). Spec `2026-08-13-migrate-pending-verify-design.md`.
+8. **ADCS then AKV collectors** (after M1; M5 sibling) — [#86](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/86). Spec `2026-08-13-adcs-akv-collectors-design.md`.
+9. **Live AAP/EDA validation** — still pending operator URL + token (orthogonal demo).
+10. **Message bus** (ADR Phase 2) — deferred until a 2nd consumer exists.
 
 ## HCP note
 - `hcpvenv` alias token is stale/expired — do NOT use it. Mint fresh via TPM:

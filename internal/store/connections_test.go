@@ -156,6 +156,30 @@ func TestPrepareConnectionUpsertMissingKeyReturnsTypedError(t *testing.T) {
 	}
 }
 
+func TestPrepareConnectionUpsertEmptyNotKeptClearsSecret(t *testing.T) {
+	meta := json.RawMessage(`{}`)
+	first, err := prepareConnectionUpsert(testHexKey(), nil, "vault", meta, map[string]string{"token": "s.original"}, nil, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Empty incoming token not listed in keepSecrets is an explicit clear (JSON null).
+	cleared, err := prepareConnectionUpsert(testHexKey(), &first, "vault", meta, map[string]string{"token": ""}, nil, "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cleared.SecretsEnc) != 0 || cleared.SecretsSet {
+		t.Fatalf("cleared secrets should drop ciphertext, set=%v enc=%d", cleared.SecretsSet, len(cleared.SecretsEnc))
+	}
+	st := &Store{connectionsKey: testHexKey()}
+	got, err := st.DecryptSecrets(cleared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["token"]; ok {
+		t.Fatalf("token still present after clear: %#v", got)
+	}
+}
+
 func TestPrepareConnectionUpsertKeepSecretsDoesNotRequireKey(t *testing.T) {
 	meta := json.RawMessage(`{}`)
 	first, err := prepareConnectionUpsert(testHexKey(), nil, "eda", meta, map[string]string{"token": "s.eda"}, nil, "alice")

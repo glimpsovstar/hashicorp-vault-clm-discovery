@@ -37,6 +37,7 @@ func main() {
 	defer pool.Close()
 
 	st := store.New(pool, cfg.ExpiringSoonDays)
+	st.SetConnectionsKey(cfg.ConnectionsKey)
 	sc := scanner.New(scanner.Config{
 		Timeout:            cfg.ScanTimeout,
 		AllowPrivateRanges: cfg.AllowPrivateRanges,

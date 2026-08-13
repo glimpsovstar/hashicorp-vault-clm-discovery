@@ -104,23 +104,25 @@ func (a *aapRenewer) Renew(ctx context.Context, extraVars map[string]any) (Renew
 }
 
 type Server struct {
-	cfg        config.Config
-	store      *store.Store
-	scanner    *scanner.Scanner
-	log        *slog.Logger
-	worker     *ScanWorker
-	reconciler reconcileRunner
-	blindSpot  blindSpotStore
-	compliance complianceStore
-	report     reportStore
-	resources  resourceStore
-	importer   issuerImporter
-	revCheck   revChecker
-	renewer    renewLauncher
+	cfg         config.Config
+	store       *store.Store
+	scanner     *scanner.Scanner
+	log         *slog.Logger
+	worker      *ScanWorker
+	reconciler  reconcileRunner
+	blindSpot   blindSpotStore
+	compliance  complianceStore
+	report      reportStore
+	resources   resourceStore
+	importer    issuerImporter
+	revCheck    revChecker
+	renewer     renewLauncher
+	connections connectionsStore
+	actor       string // test helper; production uses context or InsecureNoAuth
 }
 
 func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, store: st, scanner: sc, log: log, blindSpot: st, compliance: st, report: st, resources: st}
+	s := &Server{cfg: cfg, store: st, scanner: sc, log: log, blindSpot: st, compliance: st, report: st, resources: st, connections: st}
 	s.revCheck = func(ctx context.Context, in revocation.CheckInput) (revocation.Result, error) {
 		return revocation.Check(ctx, revocation.NewFetchClient(), in)
 	}
@@ -164,7 +166,7 @@ func (s *Server) Router() http.Handler {
 
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   s.cfg.CORSOrigins,
-		AllowedMethods:   []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: true,
 	}))
@@ -203,6 +205,10 @@ func (s *Server) Router() http.Handler {
 
 		r.Get("/blindspot", s.handleGetBlindSpot)
 		r.Get("/compliance/summary", s.handleGetComplianceSummary)
+
+		r.Get("/settings/connections", s.handleGetConnections)
+		r.Put("/settings/connections", s.handlePutConnections)
+		r.Patch("/settings/connections", s.handlePatchConnections)
 	})
 
 	return r

@@ -17,6 +17,7 @@ var configEnvKeys = []string{
 	"CORS_ORIGINS",
 	"LOG_LEVEL",
 	"CLM_CONNECTIONS_KEY",
+	"CLM_INSECURE_NO_AUTH",
 	"VAULT_ROLE_ID",
 	"VAULT_SECRET_ID",
 	"VAULT_AUTH_METHOD",
@@ -93,6 +94,9 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if cfg.VaultAuthMethod != "token" {
 		t.Fatalf("VaultAuthMethod = %q, want token", cfg.VaultAuthMethod)
 	}
+	if cfg.InsecureNoAuth {
+		t.Fatal("InsecureNoAuth should default to false")
+	}
 }
 
 func TestLoadReadsCustomValues(t *testing.T) {
@@ -106,6 +110,7 @@ func TestLoadReadsCustomValues(t *testing.T) {
 	t.Setenv("CORS_ORIGINS", "http://a.example,http://b.example")
 	t.Setenv("LOG_LEVEL", "debug")
 	t.Setenv("CLM_CONNECTIONS_KEY", strings.Repeat("ab", 32))
+	t.Setenv("CLM_INSECURE_NO_AUTH", "true")
 
 	cfg, err := Load()
 	if err != nil {
@@ -134,6 +139,9 @@ func TestLoadReadsCustomValues(t *testing.T) {
 	}
 	if cfg.ConnectionsKey != strings.Repeat("ab", 32) {
 		t.Fatalf("ConnectionsKey = %q", cfg.ConnectionsKey)
+	}
+	if !cfg.InsecureNoAuth {
+		t.Fatal("expected InsecureNoAuth true")
 	}
 }
 

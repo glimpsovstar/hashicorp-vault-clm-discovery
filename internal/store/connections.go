@@ -165,13 +165,11 @@ func prepareConnectionUpsert(keyMaterial string, existing *Connection, target st
 
 func hasNewSecrets(incoming map[string]string, keep []string) bool {
 	held := heldSecrets(keep)
-	for k, v := range incoming {
-		if v == "" {
-			continue
-		}
+	for k := range incoming {
 		if _, ok := held[k]; ok {
 			continue
 		}
+		// Non-keep keys are a set (non-empty) or an explicit clear (empty).
 		return true
 	}
 	return false
@@ -188,6 +186,7 @@ func mergeSecrets(previous, incoming map[string]string, keep []string) map[strin
 			continue
 		}
 		if v == "" {
+			delete(out, k)
 			continue
 		}
 		out[k] = v

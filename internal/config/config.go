@@ -42,6 +42,10 @@ type Config struct {
 	// (32-byte raw or 64-char hex). Empty means env-only mode: Compose defaults
 	// still work; persisting new secrets from the UI fails until the key is set.
 	ConnectionsKey string `envconfig:"CLM_CONNECTIONS_KEY" default:""`
+	// InsecureNoAuth is a UAT-only escape hatch (CLM_INSECURE_NO_AUTH). When
+	// true, Settings handlers treat the caller as platform_admin. Default false:
+	// unauthenticated Settings GET/PUT/PATCH return 401. Not a substitute for M1 RBAC.
+	InsecureNoAuth bool `envconfig:"CLM_INSECURE_NO_AUTH" default:"false"`
 }
 
 func Load() (Config, error) {

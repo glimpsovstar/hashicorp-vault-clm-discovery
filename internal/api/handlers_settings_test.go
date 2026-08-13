@@ -844,3 +844,302 @@ func TestConnectionTest_IgnoresSecretsInBody(t *testing.T) {
 	}
 	assertNoSecrets(t, rec.Body.String(), overlayToken, "s.body-secret", "body-secret-id")
 }
+
+func doOptions(srv *Server, path, actor string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	if actor != "" {
+		req = req.WithContext(ContextWithActor(req.Context(), actor))
+	}
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	return rec
+}
+
+func TestOptionsVaultPKIMounts_ListsViaResolve(t *testing.T) {
+	t.Parallel()
+
+	const token = "s.db-vault-options-token"
+	var gotToken string
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotToken = r.Header.Get("X-Vault-Token")
+		if r.URL.Path != "/v1/sys/mounts" {
+			t.Errorf("path = %s, want /v1/sys/mounts", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"pki/":{"type":"pki"},
+			"pki-int/":{"type":"pki"},
+			"secret/":{"type":"kv"}
+		}`))
+	}))
+	t.Cleanup(peer.Close)
+
+	cs := newFakeConnections()
+	cs.rows["vault"] = store.Connection{
+		Target:     "vault",
+		Source:     "db",
+		Metadata:   json.RawMessage(`{"addr":"` + peer.URL + `","auth_method":"token"}`),
+		SecretsSet: true,
+	}
+	cs.secrets["vault"] = map[string]string{"token": token}
+
+	rec := doOptions(newConnectionsServer(config.Config{VaultAddr: "http://env-vault.invalid:8200", VaultToken: "s.env-token"}, cs),
+		"/api/v1/settings/connections/options/vault-pki-mounts", "platform_admin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Items []string `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v (body %s)", err, rec.Body.String())
+	}
+	want := map[string]bool{"pki/": true, "pki-int/": true}
+	if len(out.Items) != 2 {
+		t.Fatalf("items = %#v, want 2 pki mounts", out.Items)
+	}
+	for _, item := range out.Items {
+		if !want[item] {
+			t.Fatalf("unexpected item %q in %#v", item, out.Items)
+		}
+	}
+	if gotToken != token {
+		t.Fatalf("used token %q, want resolved overlay %q", gotToken, token)
+	}
+	assertNoSecrets(t, rec.Body.String(), token, "s.env-token")
+}
+
+func TestOptionsVaultPKIMounts_UnconfiguredEmpty(t *testing.T) {
+	t.Parallel()
+
+	rec := doOptions(newConnectionsServer(config.Config{}, newFakeConnections()),
+		"/api/v1/settings/connections/options/vault-pki-mounts", "platform_admin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Items []string `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Items == nil || len(out.Items) != 0 {
+		t.Fatalf("items = %#v, want empty slice", out.Items)
+	}
+}
+
+func TestOptionsVaultPKIMounts_ConfiguredPeerFail502(t *testing.T) {
+	t.Parallel()
+
+	const token = "s.fail-vault-token"
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"errors":["boom"]}`))
+	}))
+	t.Cleanup(peer.Close)
+
+	cs := newFakeConnections()
+	cs.rows["vault"] = store.Connection{
+		Target:     "vault",
+		Source:     "db",
+		Metadata:   json.RawMessage(`{"addr":"` + peer.URL + `","auth_method":"token"}`),
+		SecretsSet: true,
+	}
+	cs.secrets["vault"] = map[string]string{"token": token}
+
+	rec := doOptions(newConnectionsServer(config.Config{}, cs),
+		"/api/v1/settings/connections/options/vault-pki-mounts", "platform_admin")
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 (body: %s)", rec.Code, rec.Body.String())
+	}
+	assertNoSecrets(t, rec.Body.String(), token)
+}
+
+func TestOptionsAAPTemplates_KindJob(t *testing.T) {
+	t.Parallel()
+
+	const aapToken = "aap-options-token"
+	var launchHits int
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer "+aapToken {
+			t.Errorf("Authorization = %q", got)
+		}
+		if strings.Contains(r.URL.Path, "/launch") {
+			launchHits++
+			t.Errorf("must not launch: %s", r.URL.Path)
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		if r.URL.Path != "/api/v2/job_templates/" && r.URL.Path != "/api/v2/job_templates" {
+			t.Errorf("path = %s, want job_templates", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"count":1,"next":null,"results":[{"id":7,"name":"CLM - Issue Certificate"}]}`))
+	}))
+	t.Cleanup(peer.Close)
+
+	cs := newFakeConnections()
+	cs.rows["aap"] = store.Connection{
+		Target:     "aap",
+		Source:     "db",
+		Metadata:   json.RawMessage(`{"url":"` + peer.URL + `"}`),
+		SecretsSet: true,
+	}
+	cs.secrets["aap"] = map[string]string{"token": aapToken}
+
+	rec := doOptions(newConnectionsServer(config.Config{AAPURL: "https://env-aap.invalid", AAPToken: "env-token"}, cs),
+		"/api/v1/settings/connections/options/aap-templates?kind=job", "platform_admin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Kind  string `json:"kind"`
+		Items []struct {
+			ID   int    `json:"id"`
+			Name string `json:"name"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Kind != "job" || len(out.Items) != 1 || out.Items[0].ID != 7 || out.Items[0].Name != "CLM - Issue Certificate" {
+		t.Fatalf("got %+v", out)
+	}
+	if launchHits != 0 {
+		t.Fatalf("launchHits=%d, want 0", launchHits)
+	}
+	assertNoSecrets(t, rec.Body.String(), aapToken, "env-token")
+}
+
+func TestOptionsAAPTemplates_KindWorkflow(t *testing.T) {
+	t.Parallel()
+
+	const aapToken = "aap-wf-token"
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/launch") {
+			t.Errorf("must not launch")
+		}
+		if !strings.Contains(r.URL.Path, "workflow_job_templates") {
+			t.Errorf("path = %s, want workflow_job_templates", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"count":1,"next":null,"results":[{"id":3,"name":"CLM - Workflow Renew"}]}`))
+	}))
+	t.Cleanup(peer.Close)
+
+	cs := newFakeConnections()
+	cs.rows["aap"] = store.Connection{
+		Target:     "aap",
+		Source:     "db",
+		Metadata:   json.RawMessage(`{"url":"` + peer.URL + `"}`),
+		SecretsSet: true,
+	}
+	cs.secrets["aap"] = map[string]string{"token": aapToken}
+
+	rec := doOptions(newConnectionsServer(config.Config{}, cs),
+		"/api/v1/settings/connections/options/aap-templates?kind=workflow", "remediator")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Kind  string `json:"kind"`
+		Items []struct {
+			ID   int    `json:"id"`
+			Name string `json:"name"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Kind != "workflow" || len(out.Items) != 1 || out.Items[0].Name != "CLM - Workflow Renew" {
+		t.Fatalf("got %+v", out)
+	}
+	assertNoSecrets(t, rec.Body.String(), aapToken)
+}
+
+func TestOptionsAAPTemplates_BadKind400(t *testing.T) {
+	t.Parallel()
+
+	for _, kind := range []string{"", "jobs", "foo"} {
+		path := "/api/v1/settings/connections/options/aap-templates"
+		if kind != "" {
+			path += "?kind=" + kind
+		}
+		rec := doOptions(newConnectionsServer(config.Config{}, newFakeConnections()), path, "platform_admin")
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("kind=%q status = %d, want 400 (body: %s)", kind, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestOptionsAAPTemplates_UnconfiguredEmpty(t *testing.T) {
+	t.Parallel()
+
+	rec := doOptions(newConnectionsServer(config.Config{}, newFakeConnections()),
+		"/api/v1/settings/connections/options/aap-templates?kind=job", "platform_admin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Kind  string `json:"kind"`
+		Items []any  `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Kind != "job" || out.Items == nil || len(out.Items) != 0 {
+		t.Fatalf("got %+v, want kind=job empty items", out)
+	}
+}
+
+func TestOptionsAAPTemplates_ConfiguredPeerFail502(t *testing.T) {
+	t.Parallel()
+
+	const aapToken = "aap-fail-token"
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`server error`))
+	}))
+	t.Cleanup(peer.Close)
+
+	cs := newFakeConnections()
+	cs.rows["aap"] = store.Connection{
+		Target:     "aap",
+		Source:     "db",
+		Metadata:   json.RawMessage(`{"url":"` + peer.URL + `"}`),
+		SecretsSet: true,
+	}
+	cs.secrets["aap"] = map[string]string{"token": aapToken}
+
+	rec := doOptions(newConnectionsServer(config.Config{}, cs),
+		"/api/v1/settings/connections/options/aap-templates?kind=job", "platform_admin")
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 (body: %s)", rec.Code, rec.Body.String())
+	}
+	assertNoSecrets(t, rec.Body.String(), aapToken)
+}
+
+func TestOptions_UnauthenticatedIs401(t *testing.T) {
+	t.Parallel()
+
+	srv := newLockedConnectionsServer(newFakeConnections())
+	for _, path := range []string{
+		"/api/v1/settings/connections/options/vault-pki-mounts",
+		"/api/v1/settings/connections/options/aap-templates?kind=job",
+	} {
+		rec := doOptions(srv, path, "")
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s status = %d, want 401", path, rec.Code)
+		}
+	}
+}
+
+func TestOptions_ViewerIs403(t *testing.T) {
+	t.Parallel()
+
+	rec := doOptions(newConnectionsServer(config.Config{}, newFakeConnections()),
+		"/api/v1/settings/connections/options/vault-pki-mounts", "viewer")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 (body: %s)", rec.Code, rec.Body.String())
+	}
+}

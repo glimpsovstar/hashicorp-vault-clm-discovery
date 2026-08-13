@@ -48,7 +48,9 @@ type resourceStore interface {
 }
 
 // issuerImporter writes CA material into a Vault PKI mount (mode B). It is nil
-// when Vault is not configured, which the handler maps to 503.
+// when Vault is not configured or when only the read identity is set; the
+// handler maps those to 503 ("vault is not configured" / "import identity not
+// configured").
 type issuerImporter interface {
 	ImportIssuerBundle(ctx context.Context, mount, pemBundle string) (vault.IssuerImportResult, error)
 }
@@ -144,9 +146,22 @@ func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slo
 			SecretID:   cfg.VaultSecretID,
 		}); err == nil {
 			s.reconciler = vault.NewReconciler(vc, st)
-			s.importer = vc
 		} else {
 			log.Warn("vault client init failed", "err", err)
+		}
+		if cfg.HasVaultImportIdentity() {
+			if ic, err := vault.NewClient(vault.Config{
+				Address:    cfg.VaultAddr,
+				Namespace:  cfg.VaultNamespace,
+				Token:      cfg.VaultImportToken,
+				AuthMethod: cfg.ResolveVaultImportAuthMethod(),
+				RoleID:     cfg.VaultImportRoleID,
+				SecretID:   cfg.VaultImportSecretID,
+			}); err == nil {
+				s.importer = ic
+			} else {
+				log.Warn("vault import client init failed", "err", err)
+			}
 		}
 	}
 	if cfg.AAPURL != "" {
@@ -981,6 +996,10 @@ func (s *Server) handleImportIssuer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.importer == nil {
+		if s.cfg.VaultAddr != "" {
+			writeError(w, r, http.StatusServiceUnavailable, "import identity not configured")
+			return
+		}
 		writeError(w, r, http.StatusServiceUnavailable, "vault is not configured")
 		return
 	}

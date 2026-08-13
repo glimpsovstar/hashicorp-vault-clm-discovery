@@ -25,6 +25,10 @@ var configEnvKeys = []string{
 	"VAULT_ROLE_ID",
 	"VAULT_SECRET_ID",
 	"VAULT_AUTH_METHOD",
+	"VAULT_IMPORT_TOKEN",
+	"VAULT_IMPORT_ROLE_ID",
+	"VAULT_IMPORT_SECRET_ID",
+	"VAULT_IMPORT_AUTH_METHOD",
 }
 
 func resetConfigEnv(t *testing.T) {
@@ -97,6 +101,18 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	}
 	if cfg.VaultAuthMethod != "token" {
 		t.Fatalf("VaultAuthMethod = %q, want token", cfg.VaultAuthMethod)
+	}
+	if cfg.VaultImportToken != "" {
+		t.Fatalf("VaultImportToken = %q, want empty", cfg.VaultImportToken)
+	}
+	if cfg.VaultImportRoleID != "" {
+		t.Fatalf("VaultImportRoleID = %q, want empty", cfg.VaultImportRoleID)
+	}
+	if cfg.VaultImportSecretID != "" {
+		t.Fatalf("VaultImportSecretID = %q, want empty", cfg.VaultImportSecretID)
+	}
+	if cfg.VaultImportAuthMethod != "" {
+		t.Fatalf("VaultImportAuthMethod = %q, want empty", cfg.VaultImportAuthMethod)
 	}
 	if cfg.InsecureNoAuth {
 		t.Fatal("InsecureNoAuth should default to false")
@@ -174,6 +190,76 @@ func TestLoadReadsVaultAppRole(t *testing.T) {
 	}
 	if cfg.VaultSecretID != "secret-uuid" {
 		t.Fatalf("VaultSecretID = %q, want secret-uuid", cfg.VaultSecretID)
+	}
+}
+
+func TestLoadReadsVaultImportIdentity(t *testing.T) {
+	resetConfigEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/clm")
+	t.Setenv("VAULT_IMPORT_TOKEN", "hvs.import")
+	t.Setenv("VAULT_IMPORT_AUTH_METHOD", "approle")
+	t.Setenv("VAULT_IMPORT_ROLE_ID", "import-role")
+	t.Setenv("VAULT_IMPORT_SECRET_ID", "import-secret")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.VaultImportToken != "hvs.import" {
+		t.Fatalf("VaultImportToken = %q, want hvs.import", cfg.VaultImportToken)
+	}
+	if cfg.VaultImportAuthMethod != "approle" {
+		t.Fatalf("VaultImportAuthMethod = %q, want approle", cfg.VaultImportAuthMethod)
+	}
+	if cfg.VaultImportRoleID != "import-role" {
+		t.Fatalf("VaultImportRoleID = %q, want import-role", cfg.VaultImportRoleID)
+	}
+	if cfg.VaultImportSecretID != "import-secret" {
+		t.Fatalf("VaultImportSecretID = %q, want import-secret", cfg.VaultImportSecretID)
+	}
+}
+
+func TestHasVaultImportIdentity(t *testing.T) {
+	t.Parallel()
+
+	if (Config{VaultToken: "read"}).HasVaultImportIdentity() {
+		t.Fatal("read-only token must not count as import identity")
+	}
+	if (Config{VaultRoleID: "r", VaultSecretID: "s"}).HasVaultImportIdentity() {
+		t.Fatal("read AppRole must not count as import identity")
+	}
+	if !(Config{VaultImportToken: "hvs.import"}).HasVaultImportIdentity() {
+		t.Fatal("VAULT_IMPORT_TOKEN must count as import identity")
+	}
+	if !(Config{VaultImportRoleID: "r", VaultImportSecretID: "s"}).HasVaultImportIdentity() {
+		t.Fatal("import AppRole must count as import identity")
+	}
+	if (Config{VaultImportRoleID: "r"}).HasVaultImportIdentity() {
+		t.Fatal("role_id alone is not an import identity")
+	}
+}
+
+func TestResolveVaultImportAuthMethod(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		cfg  Config
+		want string
+	}{
+		{name: "explicit import method", cfg: Config{VaultImportAuthMethod: "approle", VaultAuthMethod: "token"}, want: "approle"},
+		{name: "only import token defaults to token", cfg: Config{VaultImportToken: "hvs.import", VaultAuthMethod: "approle"}, want: "token"},
+		{name: "only import approle defaults to approle", cfg: Config{VaultImportRoleID: "r", VaultImportSecretID: "s", VaultAuthMethod: "token"}, want: "approle"},
+		{name: "inherit read method", cfg: Config{VaultAuthMethod: "approle", VaultImportToken: "t", VaultImportRoleID: "r", VaultImportSecretID: "s"}, want: "approle"},
+		{name: "empty defaults to token", cfg: Config{}, want: "token"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.cfg.ResolveVaultImportAuthMethod(); got != tt.want {
+				t.Fatalf("ResolveVaultImportAuthMethod = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

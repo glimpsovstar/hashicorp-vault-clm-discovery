@@ -23,21 +23,28 @@ var knownStaticRoles = map[string]struct{}{
 }
 
 type Config struct {
-	Addr                    string        `envconfig:"ADDR" default:":8080"`
-	DatabaseURL             string        `envconfig:"DATABASE_URL" required:"true"`
-	ExpiringSoonDays        int           `envconfig:"EXPIRING_SOON_DAYS" default:"30"`
-	ScanTimeout             time.Duration `envconfig:"SCAN_TIMEOUT" default:"5s"`
-	DefaultConcurrency      int           `envconfig:"DEFAULT_CONCURRENCY" default:"50"`
-	AllowPrivateRanges      bool          `envconfig:"ALLOW_PRIVATE_RANGES" default:"false"`
-	CORSOrigins             []string      `envconfig:"CORS_ORIGINS" default:"http://localhost:3000"`
-	LogLevel                string        `envconfig:"LOG_LEVEL" default:"info"`
-	VaultAddr               string        `envconfig:"VAULT_ADDR" default:""`
-	VaultNamespace          string        `envconfig:"VAULT_NAMESPACE" default:""`
-	VaultToken              string        `envconfig:"VAULT_TOKEN" default:""`
-	VaultAuthMethod         string        `envconfig:"VAULT_AUTH_METHOD" default:"token"` // token | approle
-	VaultRoleID             string        `envconfig:"VAULT_ROLE_ID" default:""`          // AppRole; never logged
-	VaultSecretID           string        `envconfig:"VAULT_SECRET_ID" default:""`
-	ReconcileOnScanComplete bool          `envconfig:"RECONCILE_ON_SCAN_COMPLETE" default:"false"`
+	Addr               string        `envconfig:"ADDR" default:":8080"`
+	DatabaseURL        string        `envconfig:"DATABASE_URL" required:"true"`
+	ExpiringSoonDays   int           `envconfig:"EXPIRING_SOON_DAYS" default:"30"`
+	ScanTimeout        time.Duration `envconfig:"SCAN_TIMEOUT" default:"5s"`
+	DefaultConcurrency int           `envconfig:"DEFAULT_CONCURRENCY" default:"50"`
+	AllowPrivateRanges bool          `envconfig:"ALLOW_PRIVATE_RANGES" default:"false"`
+	CORSOrigins        []string      `envconfig:"CORS_ORIGINS" default:"http://localhost:3000"`
+	LogLevel           string        `envconfig:"LOG_LEVEL" default:"info"`
+	VaultAddr          string        `envconfig:"VAULT_ADDR" default:""`
+	VaultNamespace     string        `envconfig:"VAULT_NAMESPACE" default:""`
+	VaultToken         string        `envconfig:"VAULT_TOKEN" default:""`
+	VaultAuthMethod    string        `envconfig:"VAULT_AUTH_METHOD" default:"token"` // token | approle
+	VaultRoleID        string        `envconfig:"VAULT_ROLE_ID" default:""`          // AppRole; never logged
+	VaultSecretID      string        `envconfig:"VAULT_SECRET_ID" default:""`
+	// Import identity is separate from the read/reconcile client. Never logged.
+	// Empty VaultImportAuthMethod inherits the read method, or token if only
+	// VAULT_IMPORT_TOKEN is set (approle if only import role+secret are set).
+	VaultImportToken        string `envconfig:"VAULT_IMPORT_TOKEN" default:""`
+	VaultImportAuthMethod   string `envconfig:"VAULT_IMPORT_AUTH_METHOD" default:""`
+	VaultImportRoleID       string `envconfig:"VAULT_IMPORT_ROLE_ID" default:""`
+	VaultImportSecretID     string `envconfig:"VAULT_IMPORT_SECRET_ID" default:""`
+	ReconcileOnScanComplete bool   `envconfig:"RECONCILE_ON_SCAN_COMPLETE" default:"false"`
 	// AAP (Ansible Automation Platform) drives Mode C renewals. When AAPURL is
 	// empty the renew endpoint returns 503. Token/URL are read from the env and
 	// never logged.
@@ -177,4 +184,36 @@ func staticTokenMatches(configured, presented string) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(configured), []byte(presented)) == 1
+}
+
+// HasVaultImportIdentity reports whether a dedicated Vault write identity is
+// configured (import token and/or import AppRole). The read/reconcile identity
+// does not count.
+func (c Config) HasVaultImportIdentity() bool {
+	if strings.TrimSpace(c.VaultImportToken) != "" {
+		return true
+	}
+	return strings.TrimSpace(c.VaultImportRoleID) != "" && strings.TrimSpace(c.VaultImportSecretID) != ""
+}
+
+// ResolveVaultImportAuthMethod returns the auth method for the import client.
+// VAULT_IMPORT_AUTH_METHOD wins when set. Otherwise: token if only an import
+// token is present, approle if only import role+secret are present, else the
+// read client's method (default token).
+func (c Config) ResolveVaultImportAuthMethod() string {
+	if m := strings.TrimSpace(c.VaultImportAuthMethod); m != "" {
+		return m
+	}
+	hasToken := strings.TrimSpace(c.VaultImportToken) != ""
+	hasAppRole := strings.TrimSpace(c.VaultImportRoleID) != "" && strings.TrimSpace(c.VaultImportSecretID) != ""
+	switch {
+	case hasToken && !hasAppRole:
+		return "token"
+	case hasAppRole && !hasToken:
+		return "approle"
+	}
+	if m := strings.TrimSpace(c.VaultAuthMethod); m != "" {
+		return m
+	}
+	return "token"
 }

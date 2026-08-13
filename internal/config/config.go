@@ -111,6 +111,24 @@ func (c *Config) normalizeAuth() error {
 	return nil
 }
 
+// AuthPostureWarnings returns operator-facing warnings for insecure or
+// unusable AuthN config. Callers should log them at Warn and continue;
+// startup must not fail.
+func AuthPostureWarnings(cfg Config) []string {
+	var out []string
+	if cfg.InsecureNoAuth {
+		out = append(out, "CLM_INSECURE_NO_AUTH=true: hatch grants platform_admin on all /api/v1")
+	}
+	mode := strings.TrimSpace(cfg.AuthMode)
+	if mode == "" {
+		mode = "static_token"
+	}
+	if mode == "static_token" && len(cfg.StaticTokens) == 0 && !cfg.InsecureNoAuth {
+		out = append(out, "CLM_AUTH_MODE=static_token with empty CLM_STATIC_TOKENS: API will 401 everything except health")
+	}
+	return out
+}
+
 func parseStaticTokens(raw string) (map[string]string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

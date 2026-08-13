@@ -357,3 +357,73 @@ func TestLookupStaticRoleMatchesPlainAndHashed(t *testing.T) {
 		t.Fatal("empty token must not match")
 	}
 }
+
+func TestAuthPostureWarnings(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		cfg     Config
+		wantSub []string
+		wantLen int
+	}{
+		{
+			name: "insecure hatch warns",
+			cfg:  Config{InsecureNoAuth: true, AuthMode: "static_token", StaticTokens: map[string]string{"platform_admin": "tok"}},
+			wantSub: []string{
+				"CLM_INSECURE_NO_AUTH",
+				"platform_admin",
+			},
+			wantLen: 1,
+		},
+		{
+			name: "empty static tokens without hatch warns",
+			cfg:  Config{AuthMode: "static_token"},
+			wantSub: []string{
+				"CLM_STATIC_TOKENS",
+				"401",
+			},
+			wantLen: 1,
+		},
+		{
+			name: "empty auth mode treated as static_token with empty tokens warns",
+			cfg:  Config{AuthMode: ""},
+			wantSub: []string{
+				"CLM_STATIC_TOKENS",
+			},
+			wantLen: 1,
+		},
+		{
+			name:    "hatch true and empty tokens only hatch warning",
+			cfg:     Config{InsecureNoAuth: true, AuthMode: "static_token"},
+			wantSub: []string{"CLM_INSECURE_NO_AUTH"},
+			wantLen: 1,
+		},
+		{
+			name:    "configured static tokens no warning",
+			cfg:     Config{AuthMode: "static_token", StaticTokens: map[string]string{"viewer": "tok_v"}},
+			wantLen: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := AuthPostureWarnings(tt.cfg)
+			if len(got) != tt.wantLen {
+				t.Fatalf("AuthPostureWarnings = %#v, want len %d", got, tt.wantLen)
+			}
+			for _, sub := range tt.wantSub {
+				found := false
+				for _, msg := range got {
+					if strings.Contains(msg, sub) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Fatalf("AuthPostureWarnings = %#v, want substring %q", got, sub)
+				}
+			}
+		})
+	}
+}

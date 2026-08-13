@@ -7,6 +7,7 @@ const navItems = [
   { href: "/", label: "Certificate inventory", exact: true },
   { href: "/scans", label: "Scans" },
   { href: "/issuers", label: "Issuers" },
+  { href: "/settings/connections", label: "Settings" },
 ];
 
 export default function SidebarNav() {

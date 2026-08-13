@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -14,16 +15,30 @@ import (
 // the caller (notably the single post-scan reconcile goroutine).
 const httpTimeout = 30 * time.Second
 
+// Config is the Vault HTTP client configuration.
+//
+// AuthMethod is "token" (default) or "approle". Token auth sends Token as
+// X-Vault-Token. AppRole logs in with RoleID and SecretID and caches the
+// returned client token. Other methods (userpass, LDAP, JWT, AWS, cert, k8s)
+// are not implemented.
 type Config struct {
 	Address    string
 	Namespace  string
 	Token      string
 	AuthMethod string
+	RoleID     string
+	SecretID   string
 }
 
+// Client talks to the Vault HTTP API. Token auth uses Config.Token on every
+// request. AppRole auth caches a client token from Login/EnsureToken.
 type Client struct {
-	cfg    Config
-	http   *http.Client
+	cfg         Config
+	http        *http.Client
+	mu          sync.Mutex
+	clientToken string
+	expiry      time.Time
+	renewable   bool
 }
 
 func NewClient(cfg Config) (*Client, error) {
@@ -44,18 +59,15 @@ func (c *Client) ListMounts(ctx context.Context) (map[string]interface{}, error)
 	if !c.Configured() {
 		return nil, fmt.Errorf("vault client is not configured")
 	}
+	if err := c.EnsureToken(ctx); err != nil {
+		return nil, err
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(c.cfg.Address, "/")+"/v1/sys/mounts", nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-
-	if c.cfg.Token != "" {
-		req.Header.Set("X-Vault-Token", c.cfg.Token)
-	}
-	if c.cfg.Namespace != "" {
-		req.Header.Set("X-Vault-Namespace", c.cfg.Namespace)
-	}
+	c.setVaultHeaders(req)
 
 	resp, err := c.http.Do(req)
 	if err != nil {

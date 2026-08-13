@@ -16,6 +16,11 @@ var configEnvKeys = []string{
 	"ALLOW_PRIVATE_RANGES",
 	"CORS_ORIGINS",
 	"LOG_LEVEL",
+	"CLM_CONNECTIONS_KEY",
+	"CLM_INSECURE_NO_AUTH",
+	"VAULT_ROLE_ID",
+	"VAULT_SECRET_ID",
+	"VAULT_AUTH_METHOD",
 }
 
 func resetConfigEnv(t *testing.T) {
@@ -77,6 +82,21 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if cfg.LogLevel != "info" {
 		t.Fatalf("LogLevel = %q, want info", cfg.LogLevel)
 	}
+	if cfg.ConnectionsKey != "" {
+		t.Fatalf("ConnectionsKey = %q, want empty", cfg.ConnectionsKey)
+	}
+	if cfg.VaultRoleID != "" {
+		t.Fatalf("VaultRoleID = %q, want empty", cfg.VaultRoleID)
+	}
+	if cfg.VaultSecretID != "" {
+		t.Fatalf("VaultSecretID = %q, want empty", cfg.VaultSecretID)
+	}
+	if cfg.VaultAuthMethod != "token" {
+		t.Fatalf("VaultAuthMethod = %q, want token", cfg.VaultAuthMethod)
+	}
+	if cfg.InsecureNoAuth {
+		t.Fatal("InsecureNoAuth should default to false")
+	}
 }
 
 func TestLoadReadsCustomValues(t *testing.T) {
@@ -89,6 +109,8 @@ func TestLoadReadsCustomValues(t *testing.T) {
 	t.Setenv("ALLOW_PRIVATE_RANGES", "true")
 	t.Setenv("CORS_ORIGINS", "http://a.example,http://b.example")
 	t.Setenv("LOG_LEVEL", "debug")
+	t.Setenv("CLM_CONNECTIONS_KEY", strings.Repeat("ab", 32))
+	t.Setenv("CLM_INSECURE_NO_AUTH", "true")
 
 	cfg, err := Load()
 	if err != nil {
@@ -114,5 +136,33 @@ func TestLoadReadsCustomValues(t *testing.T) {
 	}
 	if cfg.LogLevel != "debug" {
 		t.Fatalf("LogLevel = %q", cfg.LogLevel)
+	}
+	if cfg.ConnectionsKey != strings.Repeat("ab", 32) {
+		t.Fatalf("ConnectionsKey = %q", cfg.ConnectionsKey)
+	}
+	if !cfg.InsecureNoAuth {
+		t.Fatal("expected InsecureNoAuth true")
+	}
+}
+
+func TestLoadReadsVaultAppRole(t *testing.T) {
+	resetConfigEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/clm")
+	t.Setenv("VAULT_AUTH_METHOD", "approle")
+	t.Setenv("VAULT_ROLE_ID", "role-uuid")
+	t.Setenv("VAULT_SECRET_ID", "secret-uuid")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.VaultAuthMethod != "approle" {
+		t.Fatalf("VaultAuthMethod = %q, want approle", cfg.VaultAuthMethod)
+	}
+	if cfg.VaultRoleID != "role-uuid" {
+		t.Fatalf("VaultRoleID = %q, want role-uuid", cfg.VaultRoleID)
+	}
+	if cfg.VaultSecretID != "secret-uuid" {
+		t.Fatalf("VaultSecretID = %q, want secret-uuid", cfg.VaultSecretID)
 	}
 }

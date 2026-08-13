@@ -51,4 +51,15 @@ describe("ReconcileButton", () => {
 
     expect(await screen.findByText(/Reconcile complete: 12 matched/i)).toBeInTheDocument();
   });
+
+  it("points operators to Settings when Vault is not configured", async () => {
+    mockedTriggerReconcile.mockRejectedValue(new Error("vault not configured"));
+
+    render(<ReconcileButton />);
+    await userEvent.click(screen.getByRole("button", { name: /reconcile with vault/i }));
+
+    const link = await screen.findByRole("link", { name: /settings/i });
+    expect(link).toHaveAttribute("href", "/settings/connections");
+    expect(screen.queryByRole("link", { name: /readme/i })).not.toBeInTheDocument();
+  });
 });

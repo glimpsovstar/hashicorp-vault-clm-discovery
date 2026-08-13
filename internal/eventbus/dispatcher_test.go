@@ -3,6 +3,7 @@ package eventbus
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -227,5 +228,56 @@ func TestNew_Defaults(t *testing.T) {
 	}
 	if d.cfg.Interval != 15*time.Second {
 		t.Fatalf("interval default = %v, want 15s", d.cfg.Interval)
+	}
+}
+
+func TestPing_PostsConnectionTestEvent(t *testing.T) {
+	t.Parallel()
+
+	var (
+		gotMethod, gotAuth string
+		gotBody            map[string]any
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotAuth = r.Header.Get("Authorization")
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	if err := Ping(context.Background(), srv.URL, "tok"); err != nil {
+		t.Fatalf("Ping: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %s, want POST", gotMethod)
+	}
+	if gotAuth != "Bearer tok" {
+		t.Fatalf("Authorization = %q, want Bearer", gotAuth)
+	}
+	if gotBody["event_type"] != "clm.connection.test" {
+		t.Fatalf("event_type = %v", gotBody["event_type"])
+	}
+	if _, err := uuid.Parse(fmt.Sprint(gotBody["id"])); err != nil {
+		t.Fatalf("id = %v: %v", gotBody["id"], err)
+	}
+	if _, err := time.Parse(time.RFC3339, fmt.Sprint(gotBody["created_at"])); err != nil {
+		t.Fatalf("created_at = %v: %v", gotBody["created_at"], err)
+	}
+}
+
+func TestPing_NoTokenOmitsAuthorization(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Errorf("Authorization should be absent")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	if err := Ping(context.Background(), srv.URL, ""); err != nil {
+		t.Fatalf("Ping: %v", err)
 	}
 }

@@ -345,6 +345,43 @@ func TestNoAuthHeaderWhenTokenEmpty(t *testing.T) {
 	}
 }
 
+func TestMe(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/api/v2/me/" && r.URL.Path != "/api/v2/me" {
+			t.Errorf("path = %s, want /api/v2/me/", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Errorf("Authorization = %q, want bearer token", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":1,"username":"admin"}`))
+	}))
+	defer srv.Close()
+
+	if err := newClient(t, srv).Me(context.Background()); err != nil {
+		t.Fatalf("Me: %v", err)
+	}
+}
+
+func TestMe_Unauthorized(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"detail":"Invalid token"}`))
+	}))
+	defer srv.Close()
+
+	if err := newClient(t, srv).Me(context.Background()); err == nil {
+		t.Fatal("expected error for 401")
+	}
+}
+
 func TestStatusHelpers(t *testing.T) {
 	t.Parallel()
 	if !StatusSuccessful.IsTerminal() || !StatusSuccessful.IsSuccess() {

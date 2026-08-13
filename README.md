@@ -67,6 +67,14 @@ It complements Vault PKI and HCP Certificates Inventory. It is **not** a Vault p
 - Event dispatcher delivers outbox events to an Ansible EDA webhook (at-least-once, dead-letters after `EVENT_MAX_ATTEMPTS`), gated by `EDA_WEBHOOK_URL`, drained on shutdown
 - Message-bus transport (NATS/Kafka) is deferred until a second consumer exists (see [ADR 0001](docs/adr/0001-source-of-truth-and-event-driven-automation.md))
 
+### Connections (Settings)
+
+- Dashboard **Settings → Connections** (`/settings/connections`) configures Vault, AAP Controller, and the EDA webhook
+- Compose env (`VAULT_*`, `AAP_*`, `EDA_*`) remains the 12-factor default; a UI save writes a per-target overlay (`source=db`) in Postgres
+- Secrets never reach the browser (masked `*_set` flags only). Persist them only with `CLM_CONNECTIONS_KEY` (AES-256-GCM)
+- **Test connection** is server-side and uses the resolved overlay (DB else env): Vault `GET /v1/sys/mounts` (AppRole logs in first); AAP `GET /api/v2/me` then template-by-name (**does not launch a job**); EDA signed ping (`Authorization: Bearer` when a token is set, body `clm.connection.test`, **no outbox write**)
+- M1 RBAC is not merged: Settings GET/PUT/PATCH/Test return **401** unless `CLM_INSECURE_NO_AUTH=true` (UAT) or future RBAC injects an actor
+
 ## Quick start
 
 ### Docker Compose
@@ -148,7 +156,9 @@ Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVA
 | `VAULT_ADDR` | (empty) | HashiCorp Vault API address; empty disables Vault integration |
 | `VAULT_NAMESPACE` | (empty) | Vault enterprise namespace header (`X-Vault-Namespace`) |
 | `VAULT_TOKEN` | (empty) | Vault token for `token` auth (`X-Vault-Token`) |
-| `VAULT_AUTH_METHOD` | `token` | Auth method: `token`, `approle`, or `aws` (only `token` is implemented) |
+| `VAULT_ROLE_ID` | (empty) | AppRole role_id when `VAULT_AUTH_METHOD=approle` |
+| `VAULT_SECRET_ID` | (empty) | AppRole secret_id when `VAULT_AUTH_METHOD=approle` (never logged) |
+| `VAULT_AUTH_METHOD` | `token` | Auth method: `token` or `approle` (`aws` is not implemented) |
 | `RECONCILE_ON_SCAN_COMPLETE` | `false` | Automatically reconcile against Vault after each scan finishes |
 | **AAP (Mode C renewals)** | | |
 | `AAP_URL` | (empty) | Ansible Automation Platform Controller URL; empty ⇒ renew endpoints return 503 |
@@ -163,8 +173,13 @@ Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVA
 | `EVENT_DISPATCH_INTERVAL` | `15s` | Outbox drain interval |
 | `EVENT_DISPATCH_BATCH` | `50` | Max events delivered per drain |
 | `EVENT_MAX_ATTEMPTS` | `10` | Delivery attempts before an event is dead-lettered |
+| **Settings (Connections overlay)** | | |
+| `CLM_CONNECTIONS_KEY` | (empty) | AES-256-GCM key for UI-persisted connection secrets (32-byte raw or 64-char hex). Empty = env-only mode: Compose still works; PUT/PATCH that persist secrets return 503. Server-side only (not in Next.js) |
+| `CLM_INSECURE_NO_AUTH` | `false` | UAT-only escape hatch: treat Settings callers as `platform_admin`. Default deny (401) until M1 RBAC. Not a production auth substitute |
 
 Both `clm-discovery` and `clm-scan` emit JSON logs to stdout. Set `LOG_LEVEL=debug` to see target expansion summaries; `trace` adds per-target probe outcomes. Vault/AAP/EDA tokens and URLs are read from the environment and never logged.
+
+**Env vs Settings overlay.** Compose env is the live default for reconcile, Mode C renew, and the EDA dispatcher (bound at process start). **Settings → Connections** stores metadata plus encrypted secrets (`source=db`) and **Test** uses `settings.Resolve` (DB overlay else env). A UI save does not rewire already-started reconcile/renew/dispatch clients — set the matching env (or restart after changing env) for those paths. AppRole (`VAULT_AUTH_METHOD=approle`) uses `VAULT_ROLE_ID` / `VAULT_SECRET_ID` (or the Settings AppRole fields); login + client-token cache/renew lives in `internal/vault`. Clearing a stored secret is an explicit JSON `null` so that target falls back to env.
 
 ## Architecture
 
@@ -176,6 +191,8 @@ The web app mirrors HashiCorp Vault’s **AppFrame** layout (sidebar nav, page h
 
 - [docs/superpowers/specs/2026-06-14-vault-ui-design.md](docs/superpowers/specs/2026-06-14-vault-ui-design.md)
 - [docs/superpowers/plans/2026-06-14-vault-ui-dashboard.md](docs/superpowers/plans/2026-06-14-vault-ui-dashboard.md)
+
+**Settings → Connections** (`/settings/connections`) uses the existing Helios CSS (panels, form fields, badges) — not shadcn/ui. The Next.js BFF proxies `/api/settings/connections` to the Go API (`API_INTERNAL_URL`); the browser never calls `:8080` with `NEXT_PUBLIC_*` tokens.
 
 Official Vault logo: `@hashicorp/flight-icons` **vault-color-24** (gold chevron), matching [Vault’s app header](https://github.com/hashicorp/vault/blob/main/ui/lib/core/addon/components/sidebar/frame.hbs).
 
@@ -230,6 +247,10 @@ See [docs/data-model.md](docs/data-model.md).
 | GET | `/api/v1/events` | List outbox events |
 | GET | `/api/v1/blindspot` | Global blind-spot (shadow certs) |
 | GET | `/api/v1/compliance/summary` | Global compliance summary |
+| GET | `/api/v1/settings/connections` | Masked Connections view (no secret values) |
+| PUT | `/api/v1/settings/connections` | Replace Vault, AAP, and EDA metadata (write-only secrets) |
+| PATCH | `/api/v1/settings/connections` | Partial Connections update (omit/empty secret = keep; JSON `null` = clear) |
+| POST | `/api/v1/settings/connections/test` | Server-side probe (`{"target":"vault"|"aap"|"eda"}`; no secrets in body) |
 
 ## License
 

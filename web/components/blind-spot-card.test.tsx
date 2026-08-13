@@ -1,16 +1,30 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { fetchBlindSpot, triggerReconcile } from "@/lib/api";
 
 // fetchBlindSpot runs in an effect on mount; stub the API module so the card
-// renders in isolation. triggerReconcile is unused by these assertions.
+// renders in isolation.
 vi.mock("@/lib/api", () => ({
-  fetchBlindSpot: vi.fn().mockResolvedValue({
-    vault_managed: 34, discovered: 50, shadow: 16, sc081_violations: 4,
-  }),
+  fetchBlindSpot: vi.fn(),
   triggerReconcile: vi.fn(),
 }));
 
 import BlindSpotCard from "./blind-spot-card";
+
+const mockedFetchBlindSpot = vi.mocked(fetchBlindSpot);
+const mockedTriggerReconcile = vi.mocked(triggerReconcile);
+
+beforeEach(() => {
+  mockedFetchBlindSpot.mockReset();
+  mockedTriggerReconcile.mockReset();
+  mockedFetchBlindSpot.mockResolvedValue({
+    vault_managed: 34,
+    discovered: 50,
+    shadow: 16,
+    sc081_violations: 4,
+  });
+});
 
 function renderCard() {
   return render(<BlindSpotCard scanId="s1" scanStatus="completed" />);
@@ -39,5 +53,18 @@ describe("BlindSpotCard help popovers", () => {
     // The old popovers were labelled "What does Show shadow certs do?" / "What is the report?".
     expect(screen.queryByRole("button", { name: /What does Show shadow certs/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /What is the report/ })).toBeNull();
+  });
+});
+
+describe("BlindSpotCard Vault not configured", () => {
+  it("points operators to Settings instead of README-only env setup", async () => {
+    mockedTriggerReconcile.mockRejectedValue(new Error("vault not configured"));
+
+    renderCard();
+    await userEvent.click(await screen.findByRole("button", { name: /Show shadow certs/ }));
+
+    const link = await screen.findByRole("link", { name: /settings/i });
+    expect(link).toHaveAttribute("href", "/settings/connections");
+    expect(screen.queryByRole("link", { name: /readme/i })).not.toBeInTheDocument();
   });
 });

@@ -6,7 +6,7 @@ Operator steps for live demos (Docker Compose on a laptop).
 
 - Docker Desktop running
 - Repo cloned; org Cursor rules installed ([`cursor-org-rules`](https://github.com/glimpsovstar/cursor-org-rules))
-- Optional for blind-spot POV: a reachable Vault with PKI (`VAULT_ADDR`, `VAULT_TOKEN` in compose env)
+- Optional for blind-spot POV: a reachable Vault with PKI — configure via **Settings → Connections** or Compose env (`VAULT_ADDR` + `VAULT_TOKEN`, or AppRole `VAULT_ROLE_ID` / `VAULT_SECRET_ID`)
 
 ## Start or rebuild stack
 
@@ -23,16 +23,30 @@ docker compose -f deploy/docker-compose.yml up --build -d
 
 ### Vault reconcile (Phase 1 POV)
 
-Add to `deploy/docker-compose.yml` API service environment (or `.env`):
+**Preferred:** open **Settings → Connections** (`/settings/connections`), fill the Vault card (token or AppRole), **Save**, then **Test connection**. Env remains valid for Compose.
+
+M1 RBAC is not merged. To use the Settings page in this stack, add to the API service environment:
+
+```yaml
+CLM_INSECURE_NO_AUTH: "true"   # UAT only; Settings otherwise 401
+# Required to persist secrets from the UI (32-byte raw or 64-char hex):
+# CLM_CONNECTIONS_KEY: "..."
+```
+
+Compose env still works without Settings (reconcile/import bind these at process start):
 
 ```yaml
 VAULT_ADDR: https://your-vault.example.com
 VAULT_TOKEN: s.xxx
+# Or AppRole:
+# VAULT_AUTH_METHOD: approle
+# VAULT_ROLE_ID: "..."
+# VAULT_SECRET_ID: "..."
 # Optional: auto-reconcile when scan completes
 RECONCILE_ON_SCAN_COMPLETE: "false"
 ```
 
-See [README § Environment variables](../README.md#environment-variables) for `VAULT_NAMESPACE` and auth options.
+See [README § Environment variables](../README.md#environment-variables) for `VAULT_NAMESPACE`, `CLM_CONNECTIONS_KEY`, and auth options. Settings **Test** uses the resolved overlay (DB else env); it does not launch AAP jobs or write the EDA outbox.
 
 ## Reset between demos (optional)
 
@@ -52,7 +66,7 @@ Add `docker compose ... down -v` only when you need a full database wipe.
 | Step | Action | Talking point |
 |------|--------|---------------|
 | 1 | `docker compose -f deploy/docker-compose.yml up --build -d` | Stack: API + Postgres + dashboard |
-| 2 | Set `VAULT_ADDR` + token in compose env (if not already) | Read-only PKI reconcile — no Vault writes |
+| 2 | **Settings → Connections** (or set `VAULT_ADDR` + token in compose env) | Read-only PKI reconcile — no Vault writes |
 | 3 | **Scans** → hostnames from README → consent → **Start scan** | Network truth vs Vault telemetry |
 | 4 | Open scan detail → **Reconcile with Vault** on blind-spot card | Fingerprints matched; Vault column updates |
 | 5 | Blind-spot card: Vault managed / On wire / Shadow / SC-081 | **N** vs **M** vs shadow count |
@@ -68,7 +82,7 @@ Add `docker compose ... down -v` only when you need a full database wipe.
 6. Click **View results** on the scan row → `/scans/{id}` shows:
    - **Blind-spot reveal** card (four metrics + reconcile + report download)
    - Scan diagnostics and discovered certificates
-7. Click **Reconcile with Vault** (requires `VAULT_ADDR`) — refresh metrics; inventory **Vault** column shows **Connected** for matched certs
+7. Click **Reconcile with Vault** (requires `VAULT_ADDR` in process env; Settings **Test** can verify the overlay separately) — refresh metrics; inventory **Vault** column shows **Connected** for matched certs
 8. Click **Download report** — Markdown with executive summary, blind-spot, SC-081, PCI, algorithm inventory, diagnostics
 9. Open **Inventory** — verify governance columns:
    - **Vault** — Connected after reconcile (or Not connected without Vault)

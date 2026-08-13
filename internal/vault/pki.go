@@ -40,6 +40,9 @@ func (c *Client) ListCertSerials(ctx context.Context, mount string) ([]string, e
 	if !c.Configured() {
 		return nil, fmt.Errorf("vault client is not configured")
 	}
+	if err := c.EnsureToken(ctx); err != nil {
+		return nil, err
+	}
 
 	mount = normalizeMount(mount)
 	url := strings.TrimRight(c.cfg.Address, "/") + "/v1/" + mount + "certs"
@@ -88,6 +91,9 @@ func (c *Client) ListCertSerials(ctx context.Context, mount string) ([]string, e
 func (c *Client) ReadCert(ctx context.Context, mount, serial string) (string, map[string]interface{}, error) {
 	if !c.Configured() {
 		return "", nil, fmt.Errorf("vault client is not configured")
+	}
+	if err := c.EnsureToken(ctx); err != nil {
+		return "", nil, err
 	}
 
 	mount = normalizeMount(mount)
@@ -157,6 +163,9 @@ type IssuerImportResult struct {
 func (c *Client) ImportIssuerBundle(ctx context.Context, mount, pemBundle string) (IssuerImportResult, error) {
 	if !c.Configured() {
 		return IssuerImportResult{}, fmt.Errorf("vault client is not configured")
+	}
+	if err := c.EnsureToken(ctx); err != nil {
+		return IssuerImportResult{}, err
 	}
 	mount = normalizeMount(mount)
 	url := strings.TrimRight(c.cfg.Address, "/") + "/v1/" + mount + "issuers/import/bundle"
@@ -230,10 +239,8 @@ func revocationFromMeta(meta map[string]interface{}) bool {
 }
 
 func (c *Client) setVaultHeaders(req *http.Request) {
-	if c.cfg.Token != "" {
-		req.Header.Set("X-Vault-Token", c.cfg.Token)
+	if tok := c.currentToken(); tok != "" {
+		req.Header.Set("X-Vault-Token", tok)
 	}
-	if c.cfg.Namespace != "" {
-		req.Header.Set("X-Vault-Namespace", c.cfg.Namespace)
-	}
+	c.setNamespaceHeader(req)
 }

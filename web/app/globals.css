@@ -326,7 +326,8 @@ textarea:focus {
   outline-offset: 1px;
 }
 
-input[type="checkbox"] {
+input[type="checkbox"],
+input[type="radio"] {
   width: auto;
   min-height: auto;
   box-shadow: none;

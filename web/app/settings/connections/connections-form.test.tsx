@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -61,6 +63,14 @@ beforeEach(() => {
 });
 
 describe("ConnectionsForm", () => {
+  it("overrides radio inputs to compact size like checkboxes", () => {
+    const css = readFileSync(resolve(__dirname, "../../globals.css"), "utf8");
+    const radioRule = css.match(/input\[type=["']radio["']\]\s*\{[^}]+\}/);
+    expect(radioRule?.[0]).toMatch(/width:\s*auto/);
+    expect(radioRule?.[0]).toMatch(/min-height:\s*auto/);
+    expect(radioRule?.[0]).toMatch(/box-shadow:\s*none/);
+  });
+
   it("does not render secret values after save; shows token_set configured", async () => {
     const secret = "vault-token-should-never-appear";
     mockedPatch.mockResolvedValue({

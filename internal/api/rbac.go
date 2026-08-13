@@ -125,21 +125,3 @@ func (s *Server) requirePermission(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
-
-func (s *Server) auditDeny(r *http.Request, role string) {
-	if s.auditor == nil {
-		return
-	}
-	ev := AuditEvent{
-		Role:      role,
-		Action:    r.Method + " " + r.URL.Path,
-		Decision:  "deny",
-		RequestID: requestID(r),
-		RemoteIP:  r.RemoteAddr,
-	}
-	if role != "" {
-		ev.ActorID = "static:" + role
-		ev.ActorType = "static"
-	}
-	_ = s.auditor.AppendAudit(r.Context(), ev)
-}

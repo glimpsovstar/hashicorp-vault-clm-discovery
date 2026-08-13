@@ -161,6 +161,9 @@ func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slo
 		}
 	}
 	s.worker = NewScanWorker(s)
+	if st != nil {
+		s.auditor = &storeAuditor{st: st}
+	}
 	return s
 }
 
@@ -274,6 +277,9 @@ func (s *Server) handleCreateScan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.worker.Enqueue(scan.ID, req.CIDRs, req.Hostnames, req.Ports, req.Concurrency)
+	s.auditAllow(r, "create_scan", "scan", scan.ID.String(), map[string]any{
+		"cidrs": req.CIDRs, "hostnames": req.Hostnames, "ports": req.Ports,
+	})
 	writeJSON(w, http.StatusAccepted, scan)
 }
 
@@ -334,6 +340,7 @@ func (s *Server) handleDeleteScan(w http.ResponseWriter, r *http.Request) {
 		s.writeLookupError(w, r, err, store.ErrScanNotFound, "scan not found", "failed to delete scan")
 		return
 	}
+	s.auditAllow(r, "delete", "scan", id.String(), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -347,6 +354,7 @@ func (s *Server) handleDeleteCertificate(w http.ResponseWriter, r *http.Request)
 		s.writeLookupError(w, r, err, store.ErrCertificateNotFound, "certificate not found", "failed to delete certificate")
 		return
 	}
+	s.auditAllow(r, "delete", "certificate", id.String(), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -360,6 +368,7 @@ func (s *Server) handleDeleteIssuer(w http.ResponseWriter, r *http.Request) {
 		s.writeLookupError(w, r, err, store.ErrIssuerNotFound, "issuer not found", "failed to delete issuer")
 		return
 	}
+	s.auditAllow(r, "delete", "issuer", id.String(), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -599,6 +608,9 @@ func (s *Server) handleRenewCertificate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.log.Info("aap renewal launched", "action", "renew", "certificate_id", id.String(), "job_id", ref.JobID, "workflow", ref.Workflow)
+	s.auditAllow(r, "renew", "certificate", id.String(), map[string]any{
+		"mount": mount, "role": cfg.Role, "job_id": ref.JobID,
+	})
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"status":      "launched",
 		"job":         ref,
@@ -718,6 +730,9 @@ func (s *Server) handleRenewExpiring(w http.ResponseWriter, r *http.Request) {
 		launched = append(launched, map[string]any{"certificate_id": c.ID, "common_name": cn, "job": ref})
 	}
 	s.log.Info("renew-expiring batch", "action", "renew_expiring", "within_days", within, "eligible", len(certs), "launched", len(launched), "failed", len(failed))
+	s.auditAllow(r, "renew", "", "", map[string]any{
+		"within_days": within, "eligible": len(certs), "launched": len(launched), "failed": len(failed),
+	})
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"within_days": within,
 		"eligible":    len(certs),
@@ -811,6 +826,9 @@ func (s *Server) handleRevocationCheck(w http.ResponseWriter, r *http.Request) {
 		}
 		s.log.Info("certificate revoked", "action", "revocation_check", "certificate_id", id.String(), "source", result.Source)
 	}
+	s.auditAllow(r, "revoke", "certificate", id.String(), map[string]any{
+		"status": string(result.Status), "source": result.Source, "verified": result.Verified,
+	})
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -876,6 +894,9 @@ func (s *Server) handleCatalogImport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.log.Info("catalog import", "action", "catalog_import", "certificate_id", id.String(), "managed_status", "imported")
+	s.auditAllow(r, "catalog_import", "certificate", id.String(), map[string]any{
+		"managed_status": "imported",
+	})
 	writeJSON(w, http.StatusOK, cert)
 }
 
@@ -993,6 +1014,9 @@ func (s *Server) handleImportIssuer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("vault issuer import", "action", "import_ca", "issuer_id", id.String(), "mount", mount)
+	s.auditAllow(r, "import_ca", "issuer", id.String(), map[string]any{
+		"mount": mount,
+	})
 	writeJSON(w, http.StatusOK, updated)
 }
 

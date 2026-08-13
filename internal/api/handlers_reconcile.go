@@ -33,6 +33,7 @@ func (s *Server) handleReconcile(w http.ResponseWriter, r *http.Request) {
 		s.writeServerError(w, r, err, "reconcile failed")
 		return
 	}
+	s.auditAllow(r, "reconcile", "", "", map[string]any{"status": summary.Status})
 	writeJSON(w, http.StatusOK, summary)
 }
 

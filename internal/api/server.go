@@ -119,10 +119,18 @@ type Server struct {
 	renewer     renewLauncher
 	connections connectionsStore
 	actor       string // test helper; production uses context or InsecureNoAuth
+	auditor     auditor
+	scans       scanCreator
+}
+
+// scanCreator is the POST /scans persist seam. Production uses *store.Store;
+// RBAC tests inject a stub so consent/RBAC can be asserted without Postgres.
+type scanCreator interface {
+	CreateScan(ctx context.Context, cidrs, hostnames []string, ports []int, concurrency int) (store.Scan, error)
 }
 
 func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, store: st, scanner: sc, log: log, blindSpot: st, compliance: st, report: st, resources: st, connections: st}
+	s := &Server{cfg: cfg, store: st, scanner: sc, log: log, blindSpot: st, compliance: st, report: st, resources: st, connections: st, scans: st}
 	s.revCheck = func(ctx context.Context, in revocation.CheckInput) (revocation.Result, error) {
 		return revocation.Check(ctx, revocation.NewFetchClient(), in)
 	}
@@ -175,6 +183,7 @@ func (s *Server) Router() http.Handler {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(s.requireAuth)
+		r.Use(s.requirePermission)
 		r.Post("/scans", s.handleCreateScan)
 		r.Get("/scans", s.handleListScans)
 		r.Get("/scans/{id}", s.handleGetScan)
@@ -254,7 +263,11 @@ func (s *Server) handleCreateScan(w http.ResponseWriter, r *http.Request) {
 		req.Concurrency = s.cfg.DefaultConcurrency
 	}
 
-	scan, err := s.store.CreateScan(r.Context(), req.CIDRs, req.Hostnames, req.Ports, req.Concurrency)
+	create := s.scans
+	if create == nil {
+		create = s.store
+	}
+	scan, err := create.CreateScan(r.Context(), req.CIDRs, req.Hostnames, req.Ports, req.Concurrency)
 	if err != nil {
 		s.writeServerError(w, r, err, "failed to create scan")
 		return

@@ -18,6 +18,7 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 		}
 		role, ok := s.cfg.LookupStaticRole(bearerToken(r.Header.Get("Authorization")))
 		if !ok {
+			s.auditDeny(r, "")
 			writeError(w, r, http.StatusUnauthorized, "unauthorized")
 			return
 		}

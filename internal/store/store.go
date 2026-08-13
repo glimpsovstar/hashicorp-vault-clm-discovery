@@ -28,10 +28,17 @@ var (
 type Store struct {
 	pool             *pgxpool.Pool
 	expiringSoonDays int
+	connectionsKey   string
 }
 
 func New(pool *pgxpool.Pool, expiringSoonDays int) *Store {
 	return &Store{pool: pool, expiringSoonDays: expiringSoonDays}
+}
+
+// SetConnectionsKey sets the AEAD key material used to seal and open
+// connection secrets (CLM_CONNECTIONS_KEY: 32-byte raw or 64-char hex).
+func (s *Store) SetConnectionsKey(key string) {
+	s.connectionsKey = key
 }
 
 func (s *Store) Ping(ctx context.Context) error {

@@ -36,6 +36,10 @@ type Config struct {
 	EventDispatchInterval time.Duration `envconfig:"EVENT_DISPATCH_INTERVAL" default:"15s"`
 	EventDispatchBatch    int           `envconfig:"EVENT_DISPATCH_BATCH" default:"50"`
 	EventMaxAttempts      int           `envconfig:"EVENT_MAX_ATTEMPTS" default:"10"`
+	// ConnectionsKey is the AES-256-GCM key for Settings connection secrets
+	// (32-byte raw or 64-char hex). Empty means env-only mode: Compose defaults
+	// still work; persisting new secrets from the UI fails until the key is set.
+	ConnectionsKey string `envconfig:"CLM_CONNECTIONS_KEY" default:""`
 }
 
 func Load() (Config, error) {

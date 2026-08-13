@@ -16,6 +16,7 @@ var configEnvKeys = []string{
 	"ALLOW_PRIVATE_RANGES",
 	"CORS_ORIGINS",
 	"LOG_LEVEL",
+	"CLM_CONNECTIONS_KEY",
 }
 
 func resetConfigEnv(t *testing.T) {
@@ -77,6 +78,9 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if cfg.LogLevel != "info" {
 		t.Fatalf("LogLevel = %q, want info", cfg.LogLevel)
 	}
+	if cfg.ConnectionsKey != "" {
+		t.Fatalf("ConnectionsKey = %q, want empty", cfg.ConnectionsKey)
+	}
 }
 
 func TestLoadReadsCustomValues(t *testing.T) {
@@ -89,6 +93,7 @@ func TestLoadReadsCustomValues(t *testing.T) {
 	t.Setenv("ALLOW_PRIVATE_RANGES", "true")
 	t.Setenv("CORS_ORIGINS", "http://a.example,http://b.example")
 	t.Setenv("LOG_LEVEL", "debug")
+	t.Setenv("CLM_CONNECTIONS_KEY", strings.Repeat("ab", 32))
 
 	cfg, err := Load()
 	if err != nil {
@@ -114,5 +119,8 @@ func TestLoadReadsCustomValues(t *testing.T) {
 	}
 	if cfg.LogLevel != "debug" {
 		t.Fatalf("LogLevel = %q", cfg.LogLevel)
+	}
+	if cfg.ConnectionsKey != strings.Repeat("ab", 32) {
+		t.Fatalf("ConnectionsKey = %q", cfg.ConnectionsKey)
 	}
 }

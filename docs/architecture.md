@@ -133,7 +133,7 @@ The service needs outbound network access to scan targets and inbound access to 
 
 `internal/vault` provides a read-only PKI client and reconciler:
 
-- Authenticate via token (AppRole/AWS deferred)
+- Authenticate via token or AppRole (login + client-token cache/renew); AWS/K8s deferred
 - List PKI mounts, serials (via Vault's `LIST` cert operation), and stored certificates
 - Match by `fingerprint_sha256` to set `managed_status`, `vault_pki_mount`, `vault_issuer_ref`, `serial_number`
 - All Vault HTTP calls use a bounded client timeout
@@ -141,7 +141,7 @@ The service needs outbound network access to scan targets and inbound access to 
 
 HCP Vault Dedicated uses the same HTTP API with namespace headers.
 
-Future: CA bundle import via `pki/issuers/import/bundle`, AppRole/K8s auth.
+Future: Kubernetes/AWS auth. CA import uses `pki/issuers/import/bundle`.
 
 ## Security considerations
 

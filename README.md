@@ -148,7 +148,9 @@ Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVA
 | `VAULT_ADDR` | (empty) | HashiCorp Vault API address; empty disables Vault integration |
 | `VAULT_NAMESPACE` | (empty) | Vault enterprise namespace header (`X-Vault-Namespace`) |
 | `VAULT_TOKEN` | (empty) | Vault token for `token` auth (`X-Vault-Token`) |
-| `VAULT_AUTH_METHOD` | `token` | Auth method: `token`, `approle`, or `aws` (only `token` is implemented) |
+| `VAULT_ROLE_ID` | (empty) | AppRole role_id when `VAULT_AUTH_METHOD=approle` |
+| `VAULT_SECRET_ID` | (empty) | AppRole secret_id when `VAULT_AUTH_METHOD=approle` (never logged) |
+| `VAULT_AUTH_METHOD` | `token` | Auth method: `token` or `approle` (`aws` is not implemented) |
 | `RECONCILE_ON_SCAN_COMPLETE` | `false` | Automatically reconcile against Vault after each scan finishes |
 | **AAP (Mode C renewals)** | | |
 | `AAP_URL` | (empty) | Ansible Automation Platform Controller URL; empty ⇒ renew endpoints return 503 |

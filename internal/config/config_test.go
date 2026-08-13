@@ -17,6 +17,9 @@ var configEnvKeys = []string{
 	"CORS_ORIGINS",
 	"LOG_LEVEL",
 	"CLM_CONNECTIONS_KEY",
+	"VAULT_ROLE_ID",
+	"VAULT_SECRET_ID",
+	"VAULT_AUTH_METHOD",
 }
 
 func resetConfigEnv(t *testing.T) {
@@ -81,6 +84,15 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if cfg.ConnectionsKey != "" {
 		t.Fatalf("ConnectionsKey = %q, want empty", cfg.ConnectionsKey)
 	}
+	if cfg.VaultRoleID != "" {
+		t.Fatalf("VaultRoleID = %q, want empty", cfg.VaultRoleID)
+	}
+	if cfg.VaultSecretID != "" {
+		t.Fatalf("VaultSecretID = %q, want empty", cfg.VaultSecretID)
+	}
+	if cfg.VaultAuthMethod != "token" {
+		t.Fatalf("VaultAuthMethod = %q, want token", cfg.VaultAuthMethod)
+	}
 }
 
 func TestLoadReadsCustomValues(t *testing.T) {
@@ -122,5 +134,27 @@ func TestLoadReadsCustomValues(t *testing.T) {
 	}
 	if cfg.ConnectionsKey != strings.Repeat("ab", 32) {
 		t.Fatalf("ConnectionsKey = %q", cfg.ConnectionsKey)
+	}
+}
+
+func TestLoadReadsVaultAppRole(t *testing.T) {
+	resetConfigEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/clm")
+	t.Setenv("VAULT_AUTH_METHOD", "approle")
+	t.Setenv("VAULT_ROLE_ID", "role-uuid")
+	t.Setenv("VAULT_SECRET_ID", "secret-uuid")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.VaultAuthMethod != "approle" {
+		t.Fatalf("VaultAuthMethod = %q, want approle", cfg.VaultAuthMethod)
+	}
+	if cfg.VaultRoleID != "role-uuid" {
+		t.Fatalf("VaultRoleID = %q, want role-uuid", cfg.VaultRoleID)
+	}
+	if cfg.VaultSecretID != "secret-uuid" {
+		t.Fatalf("VaultSecretID = %q, want secret-uuid", cfg.VaultSecretID)
 	}
 }

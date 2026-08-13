@@ -18,7 +18,9 @@ type Config struct {
 	VaultAddr               string        `envconfig:"VAULT_ADDR" default:""`
 	VaultNamespace          string        `envconfig:"VAULT_NAMESPACE" default:""`
 	VaultToken              string        `envconfig:"VAULT_TOKEN" default:""`
-	VaultAuthMethod         string        `envconfig:"VAULT_AUTH_METHOD" default:"token"` // token | approle | aws (only token impl required now)
+	VaultAuthMethod         string        `envconfig:"VAULT_AUTH_METHOD" default:"token"` // token | approle
+	VaultRoleID             string        `envconfig:"VAULT_ROLE_ID" default:""`          // AppRole; never logged
+	VaultSecretID           string        `envconfig:"VAULT_SECRET_ID" default:""`
 	ReconcileOnScanComplete bool          `envconfig:"RECONCILE_ON_SCAN_COMPLETE" default:"false"`
 	// AAP (Ansible Automation Platform) drives Mode C renewals. When AAPURL is
 	// empty the renew endpoint returns 503. Token/URL are read from the env and

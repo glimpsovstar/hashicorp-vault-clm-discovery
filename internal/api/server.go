@@ -130,6 +130,8 @@ func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slo
 			Namespace:  cfg.VaultNamespace,
 			Token:      cfg.VaultToken,
 			AuthMethod: cfg.VaultAuthMethod,
+			RoleID:     cfg.VaultRoleID,
+			SecretID:   cfg.VaultSecretID,
 		}); err == nil {
 			s.reconciler = vault.NewReconciler(vc, st)
 			s.importer = vc

@@ -278,6 +278,72 @@ describe("ConnectionsForm", () => {
     expect(await screen.findByRole("option", { name: "WF Renew" })).toBeInTheDocument();
   });
 
+  it("ignores stale options when Job/Workflow is toggled before a prior fetch settles", async () => {
+    let resolveWorkflow: (value: { kind: string; items: { id: number; name: string }[] }) => void;
+    const workflowPending = new Promise<{ kind: string; items: { id: number; name: string }[] }>(
+      (resolve) => {
+        resolveWorkflow = resolve;
+      }
+    );
+
+    mockedTemplates
+      .mockResolvedValueOnce({ kind: "job", items: [{ id: 1, name: "Initial Job" }] })
+      .mockImplementationOnce(() => workflowPending)
+      .mockResolvedValueOnce({
+        kind: "job",
+        items: [{ id: 2, name: "Latest Job" }],
+      });
+    mockedMounts.mockResolvedValue({ items: [] });
+
+    render(<ConnectionsForm />);
+    await screen.findByRole("option", { name: "Initial Job" });
+
+    await userEvent.click(screen.getByRole("radio", { name: /^Workflow$/i }));
+    await waitFor(() => {
+      expect(mockedTemplates).toHaveBeenCalledWith("workflow");
+    });
+
+    await userEvent.click(screen.getByRole("radio", { name: /^Job template$/i }));
+    expect(await screen.findByRole("option", { name: "Latest Job" })).toBeInTheDocument();
+
+    resolveWorkflow!({ kind: "workflow", items: [{ id: 99, name: "Stale Workflow" }] });
+    await waitFor(() => {
+      expect(screen.queryByRole("option", { name: "Stale Workflow" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("option", { name: "Latest Job" })).toBeInTheDocument();
+  });
+
+  it("shows optionsError and free-text fallback when options fetch rejects; clears on success", async () => {
+    mockedTemplates
+      .mockRejectedValueOnce(new Error("AAP templates unavailable"))
+      .mockResolvedValueOnce({
+        kind: "workflow",
+        items: [{ id: 4, name: "WF Renew" }],
+      });
+    mockedMounts
+      .mockRejectedValueOnce(new Error("Vault mounts unavailable"))
+      .mockResolvedValueOnce({ items: ["pki/"] });
+
+    render(<ConnectionsForm />);
+    const optionsErrors = await screen.findAllByText(/AAP templates unavailable|Vault mounts unavailable/);
+    expect(optionsErrors.length).toBeGreaterThan(0);
+    for (const node of optionsErrors) {
+      expect(node.textContent).not.toMatch(/vault-token|approle-secret|aap-token-value/i);
+    }
+
+    const template = screen.getByLabelText(/^Template name$/i);
+    const mount = screen.getByLabelText(/^Default Vault PKI mount$/i);
+    expect(template.tagName).toBe("INPUT");
+    expect(mount.tagName).toBe("INPUT");
+
+    await userEvent.click(screen.getByRole("radio", { name: /^Workflow$/i }));
+    await waitFor(() => {
+      expect(screen.queryByText(/AAP templates unavailable|Vault mounts unavailable/)).not.toBeInTheDocument();
+    });
+    expect(await screen.findByRole("option", { name: "WF Renew" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "pki/" })).toBeInTheDocument();
+  });
+
   it("persists renew_template and default_mount from selects", async () => {
     mockedTemplates.mockResolvedValue({
       kind: "job",

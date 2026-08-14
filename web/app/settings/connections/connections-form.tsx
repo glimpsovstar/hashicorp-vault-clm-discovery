@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getAAPTemplateOptions,
   getConnections,
@@ -29,6 +29,13 @@ const emptyStatus: CardStatus = { saving: false, testing: false };
 const MOUNT_HELP =
   "Used when a certificate renew does not already set a mount. Passed to AAP as the Vault PKI path (not an AAP resource id).";
 
+function optionsFailureMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message.trim()) {
+    return err.message.trim();
+  }
+  return fallback;
+}
+
 export default function ConnectionsForm() {
   const [view, setView] = useState<ConnectionsView | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -50,6 +57,8 @@ export default function ConnectionsForm() {
 
   const [mountOptions, setMountOptions] = useState<string[]>([]);
   const [templateOptions, setTemplateOptions] = useState<AAPTemplateOption[]>([]);
+  const [optionsError, setOptionsError] = useState("");
+  const optionsGeneration = useRef(0);
 
   const [edaUrl, setEdaUrl] = useState("");
   const [edaToken, setEdaToken] = useState("");
@@ -61,11 +70,15 @@ export default function ConnectionsForm() {
   });
 
   const loadOptions = useCallback(async (renewWorkflow: boolean) => {
+    const generation = ++optionsGeneration.current;
     const kind = renewWorkflow ? "workflow" : "job";
     const [mountsResult, templatesResult] = await Promise.allSettled([
       getVaultPKIMountOptions(),
       getAAPTemplateOptions(kind),
     ]);
+    if (generation !== optionsGeneration.current) {
+      return;
+    }
     const mounts =
       mountsResult.status === "fulfilled" && Array.isArray(mountsResult.value.items)
         ? mountsResult.value.items
@@ -76,6 +89,15 @@ export default function ConnectionsForm() {
         : [];
     setMountOptions(mounts);
     setTemplateOptions(templates);
+
+    const errors: string[] = [];
+    if (mountsResult.status === "rejected") {
+      errors.push(optionsFailureMessage(mountsResult.reason, "Vault mount options unavailable"));
+    }
+    if (templatesResult.status === "rejected") {
+      errors.push(optionsFailureMessage(templatesResult.reason, "AAP template options unavailable"));
+    }
+    setOptionsError(errors.join(" · "));
   }, []);
 
   useEffect(() => {
@@ -423,6 +445,7 @@ export default function ConnectionsForm() {
                   autoComplete="off"
                 />
               )}
+              {optionsError && <p className="error-text">{optionsError}</p>}
             </div>
 
             <label className="checkbox-row">
@@ -456,6 +479,7 @@ export default function ConnectionsForm() {
                   autoComplete="off"
                 />
               )}
+              {optionsError && <p className="error-text">{optionsError}</p>}
               <p className="help-text">{MOUNT_HELP}</p>
             </div>
           </div>

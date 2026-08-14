@@ -33,32 +33,32 @@
 
 ### Task 1: CSS — compact radios
 
-- [ ] Override `input[type="radio"]` like checkboxes (`width: auto; min-height: auto; box-shadow: none`).
-- [ ] Visual/regression: Connections form still renders radios (Vitest role=radio).
-- [ ] Commit.
+- [x] Override `input[type="radio"]` like checkboxes (`width: auto; min-height: auto; box-shadow: none`).
+- [x] Visual/regression: Connections form still renders radios (Vitest role=radio).
+- [x] Commit.
 
 ### Task 2: AAP list templates
 
-- [ ] TDD: httptest paginated list for job_templates and workflow_job_templates.
-- [ ] `ListJobTemplates` / `ListWorkflowJobTemplates` returning `{ID, Name}` (cap ~200).
-- [ ] Must not call launch endpoints.
-- [ ] Commit.
+- [x] TDD: httptest paginated list for job_templates and workflow_job_templates.
+- [x] `ListJobTemplates` / `ListWorkflowJobTemplates` returning `{ID, Name}` (cap ~200).
+- [x] Must not call launch endpoints.
+- [x] Commit.
 
 ### Task 3: Options API handlers
 
-- [ ] TDD: vault-pki-mounts returns ListPKIMounts via Resolve; aap-templates?kind=; 400 bad kind; empty when unconfigured; 502 when configured but peer fails (or document 200+detail — match spec **502**).
-- [ ] Wire routes; RBAC via existing Settings read gate.
-- [ ] Commit.
+- [x] TDD: vault-pki-mounts returns ListPKIMounts via Resolve; aap-templates?kind=; 400 bad kind; empty when unconfigured; 502 when configured but peer fails (or document 200+detail — match spec **502**).
+- [x] Wire routes; RBAC via existing Settings read gate.
+- [x] Commit.
 
 ### Task 4: Connections UI
 
-- [ ] TDD: human labels; Job/Workflow radios; selects with free-text fallback; mount help text.
-- [ ] Fetch options via same-origin BFF; reload after successful save.
-- [ ] Commit.
+- [x] TDD: human labels; Job/Workflow radios; selects with free-text fallback; mount help text.
+- [x] Fetch options via same-origin BFF; reload after successful save.
+- [x] Commit.
 
 ### Task 5: Docs + verify
 
-- [ ] README / architecture: options endpoints, UI labels, mount meaning.
-- [ ] Close/link #92 into #91 narrative.
-- [ ] `go test ./...`, `go build ./...`, `cd web && npm test && npm run build`.
-- [ ] Commit.
+- [x] README / architecture: options endpoints, UI labels, mount meaning.
+- [x] Close/link #92 into #91 narrative.
+- [x] `go test ./...`, `go build ./...`, `cd web && npm test && npm run build`.
+- [x] Commit.

@@ -153,7 +153,11 @@ Future: Kubernetes/AWS auth. CA import uses `pki/issuers/import/bundle`.
 
 ## Connections settings
 
-Operators configure Vault, AAP Controller, and the EDA webhook from **Settings → Connections** (`/settings/connections`). Compose env remains the 12-factor default; a UI save overlays that target.
+Operators configure Vault, AAP Controller, and the EDA webhook from **Settings → Connections** (`/settings/connections`). Compose env remains the 12-factor default; a UI save overlays that target. The UI uses human labels (**Deployment**, **Renew with**, **Template name**, **Default Vault PKI mount**); env names (`AAP_DEFAULT_MOUNT`, etc.) are unchanged.
+
+**Default Vault PKI mount** (`default_mount` / `AAP_DEFAULT_MOUNT`) is the Vault PKI path passed to Mode C renewals when the cert/request has no mount — not an AAP resource id.
+
+Dropdowns for PKI mounts and AAP job/workflow template **names** load from read-only options endpoints (resolved connection). Empty list or peer failure → free-text input. Options never return secrets and never launch jobs.
 
 ### Resolve order (`internal/settings`)
 
@@ -162,7 +166,7 @@ Operators configure Vault, AAP Controller, and the EDA webhook from **Settings �
 3. **Write-only secrets** — omitted or empty secret fields keep the stored value. JSON `null` clears a secret so the target can fall back to env.
 4. **Missing `CLM_CONNECTIONS_KEY`** — env-only mode still works. PUT/PATCH that would persist new secrets → **503**. Plaintext secrets are never stored.
 
-`settings.Resolve` is used by GET (masked `PublicView`) and Test. Reconcile, Mode C renew, and the EDA dispatcher still bind process env at startup and do not re-read the overlay.
+`settings.Resolve` is used by GET (masked `PublicView`), Test, and options. Reconcile, Mode C renew, and the EDA dispatcher still bind process env at startup and do **not** hot-reload from a UI save.
 
 ### API
 
@@ -174,8 +178,10 @@ All under `/api/v1/settings/connections`. The Next BFF proxies with `Authorizati
 | `PUT` | Replace all three targets (`vault`, `aap`, `eda` required). Invalid `deployment` / `auth_method` → 400. |
 | `PATCH` | Partial update (one or more targets). Same write-only secret rule. |
 | `POST /test` | Body `{"target":"vault"|"aap"|"eda"}` only. Uses **resolved** credentials on the server. Never accept a secret in the test body. |
+| `GET /options/vault-pki-mounts` | `{items}` PKI mount paths via `ListPKIMounts`. Unconfigured → empty; configured but list fails → **502**. |
+| `GET /options/aap-templates?kind=job\|workflow` | `{kind, items:[{id,name}]}` for selects (Settings stores **name** + `renew_workflow`). Unconfigured → empty; peer fail → **502**; bad `kind` → **400**. Never launches jobs. |
 
-Auth: unauthenticated GET/PUT/PATCH/Test → **401**. `CLM_INSECURE_NO_AUTH=true` (UAT/integration) treats the caller as `platform_admin`. With a static token: `platform_admin` can read and mutate; `remediator` GET 200 (still no secrets), PUT/Test 403; other roles 403. 401/403 from the auth middleware write `audit_events`.
+Auth: unauthenticated GET/PUT/PATCH/Test/options → **401**. `CLM_INSECURE_NO_AUTH=true` (UAT/integration) treats the caller as `platform_admin`. With a static token: `platform_admin` can read and mutate; `remediator` GET/options 200 (still no secrets), PUT/Test 403; other roles 403. 401/403 from the auth middleware write `audit_events`.
 
 ### Test probes
 

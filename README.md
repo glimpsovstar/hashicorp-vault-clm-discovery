@@ -69,8 +69,10 @@ It complements Vault PKI and HCP Certificates Inventory. It is **not** a Vault p
 
 ### Connections (Settings)
 
-- Dashboard **Settings → Connections** (`/settings/connections`) configures Vault, AAP Controller, and the EDA webhook
-- Compose env (`VAULT_*`, `AAP_*`, `EDA_*`) remains the 12-factor default; a UI save writes a per-target overlay (`source=db`) in Postgres
+- Dashboard **Settings → Connections** (`/settings/connections`) configures Vault, AAP Controller, and the EDA webhook with human labels (not raw env names on the fields we polish): **Deployment**, **Renew with** (Job template / Workflow), **Template name**, **Default Vault PKI mount** ([#91](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/91); mount clarity [#92](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/92))
+- Compose env (`VAULT_*`, `AAP_*`, `EDA_*`) remains the 12-factor default; env **names** are unchanged (`AAP_DEFAULT_MOUNT`, `AAP_RENEW_TEMPLATE`, `AAP_RENEW_WORKFLOW`, …). A UI save writes a per-target overlay (`source=db`) in Postgres
+- **Default Vault PKI mount** (env `AAP_DEFAULT_MOUNT`) is the Vault PKI mount path passed to AAP on Mode C renew when the cert/request does not already set a mount — not an AAP resource id
+- Dropdowns for PKI mounts and AAP templates are filled from read-only options APIs (resolved connection, same auth as Settings GET). Empty list or peer error → free-text input so operators can still type a path/name. Options never return secrets and never launch AAP jobs
 - Secrets never reach the browser (masked `*_set` flags only). Persist them only with `CLM_CONNECTIONS_KEY` (AES-256-GCM)
 - **Test connection** is server-side and uses the resolved overlay (DB else env): Vault `GET /v1/sys/mounts` (AppRole logs in first); AAP `GET /api/v2/me` then template-by-name (**does not launch a job**); EDA signed ping (`Authorization: Bearer` when a token is set, body `clm.connection.test`, **no outbox write**)
 - Control-plane AuthN is default-deny except `GET /api/v1/health`. The dashboard BFF attaches `CLM_API_TOKEN`; the browser never sees Bearer tokens. Roles come from `CLM_STATIC_TOKENS`. `CLM_INSECURE_NO_AUTH=true` is a UAT/integration hatch only.
@@ -175,10 +177,10 @@ Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVA
 | **AAP (Mode C renewals)** | | |
 | `AAP_URL` | (empty) | Ansible Automation Platform Controller URL; empty ⇒ renew endpoints return 503 |
 | `AAP_TOKEN` | (empty) | AAP API token (never logged) |
-| `AAP_RENEW_TEMPLATE` | `CLM - Issue Certificate` | Job template (or workflow) name resolved by the renew endpoints |
-| `AAP_RENEW_WORKFLOW` | `false` | Resolve `AAP_RENEW_TEMPLATE` as a workflow job template instead of a job template |
+| `AAP_RENEW_TEMPLATE` | `CLM - Issue Certificate` | Job template (or workflow) name resolved by the renew endpoints (Settings label: **Template name**) |
+| `AAP_RENEW_WORKFLOW` | `false` | When true, resolve `AAP_RENEW_TEMPLATE` as a workflow job template (Settings: **Renew with** → Workflow) |
 | `AAP_SKIP_TLS_VERIFY` | `false` | Skip TLS verification to the AAP Controller (lab use only) |
-| `AAP_DEFAULT_MOUNT` | `pki` | Default Vault PKI mount passed to the renewal template |
+| `AAP_DEFAULT_MOUNT` | `pki` | Default **Vault PKI mount path** for Mode C renew when the cert/request has no mount (AAP `extra_vars.mount`). Not an AAP id. Settings label: **Default Vault PKI mount** |
 | **Events (EDA dispatcher)** | | |
 | `EDA_WEBHOOK_URL` | (empty) | Ansible EDA webhook URL; empty ⇒ dispatcher does not start |
 | `EDA_WEBHOOK_TOKEN` | (empty) | Bearer token for the EDA webhook (never logged) |
@@ -195,7 +197,7 @@ Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVA
 
 Both `clm-discovery` and `clm-scan` emit JSON logs to stdout. Set `LOG_LEVEL=debug` to see target expansion summaries; `trace` adds per-target probe outcomes. Vault/AAP/EDA tokens and URLs are read from the environment and never logged.
 
-**Env vs Settings overlay.** Compose env is the live default for reconcile, Mode C renew, and the EDA dispatcher (bound at process start). **Settings → Connections** stores metadata plus encrypted secrets (`source=db`) and **Test** uses `settings.Resolve` (DB overlay else env). A UI save does not rewire already-started reconcile/renew/dispatch clients — set the matching env (or restart after changing env) for those paths. AppRole (`VAULT_AUTH_METHOD=approle`) uses `VAULT_ROLE_ID` / `VAULT_SECRET_ID` (or the Settings AppRole fields); login + client-token cache/renew lives in `internal/vault`. Clearing a stored secret is an explicit JSON `null` so that target falls back to env.
+**Env vs Settings overlay.** Compose env is the live default for reconcile, Mode C renew, and the EDA dispatcher (bound at process start). **Settings → Connections** stores metadata plus encrypted secrets (`source=db`). **Test** and the Connections **options** endpoints use `settings.Resolve` (DB overlay else env). A UI save does **not** hot-reload already-started reconcile/renew/dispatch clients — set the matching env (or restart the process after changing env) for those runtime paths. AppRole (`VAULT_AUTH_METHOD=approle`) uses `VAULT_ROLE_ID` / `VAULT_SECRET_ID` (or the Settings AppRole fields); login + client-token cache/renew lives in `internal/vault`. Clearing a stored secret is an explicit JSON `null` so that target falls back to env.
 
 ## Architecture
 
@@ -208,7 +210,7 @@ The web app mirrors HashiCorp Vault’s **AppFrame** layout (sidebar nav, page h
 - [docs/superpowers/specs/2026-06-14-vault-ui-design.md](docs/superpowers/specs/2026-06-14-vault-ui-design.md)
 - [docs/superpowers/plans/2026-06-14-vault-ui-dashboard.md](docs/superpowers/plans/2026-06-14-vault-ui-dashboard.md)
 
-**Settings → Connections** (`/settings/connections`) uses the existing Helios CSS (panels, form fields, badges) — not shadcn/ui. The Next.js BFF proxies `/api/settings/connections` **and** `/api/v1/*` (except AAP `/inventory`) to the Go API with `CLM_API_TOKEN`. The browser never calls `:8080` with tokens. Delete buttons stay in the UI; they succeed only when the BFF token is `platform_admin`.
+**Settings → Connections** (`/settings/connections`) uses the existing Helios CSS (panels, form fields, badges) — not shadcn/ui. Compact **Deployment** radios (Self-managed / HCP Dedicated); AAP **Renew with** radios (Job template / Workflow); **Template name** and **Default Vault PKI mount** as `<select>` when options APIs return items, otherwise free-text. The Next.js BFF proxies `/api/settings/connections` **and** `/api/v1/*` (except AAP `/inventory`) to the Go API with `CLM_API_TOKEN`. The browser never calls Vault/AAP or `:8080` with tokens. Delete buttons stay in the UI; they succeed only when the BFF token is `platform_admin`.
 
 Official Vault logo: `@hashicorp/flight-icons` **vault-color-24** (gold chevron), matching [Vault’s app header](https://github.com/hashicorp/vault/blob/main/ui/lib/core/addon/components/sidebar/frame.hbs).
 
@@ -267,6 +269,8 @@ See [docs/data-model.md](docs/data-model.md).
 | PUT | `/api/v1/settings/connections` | Replace Vault, AAP, and EDA metadata (write-only secrets) |
 | PATCH | `/api/v1/settings/connections` | Partial Connections update (omit/empty secret = keep; JSON `null` = clear) |
 | POST | `/api/v1/settings/connections/test` | Server-side probe (`{"target":"vault"|"aap"|"eda"}`; no secrets in body) |
+| GET | `/api/v1/settings/connections/options/vault-pki-mounts` | PKI mount paths from resolved Vault (`{items}`; empty if unconfigured; **502** if configured but list fails). No secrets |
+| GET | `/api/v1/settings/connections/options/aap-templates?kind=job\|workflow` | Template `{id,name}` list for selects (Settings stores **name** only). Empty if unconfigured; **502** on peer fail; **400** bad `kind`. Never launches jobs |
 
 ## License
 

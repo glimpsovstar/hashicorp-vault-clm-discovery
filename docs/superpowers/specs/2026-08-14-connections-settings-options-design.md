@@ -1,6 +1,6 @@
 # Connections Settings UX — dynamic Vault/AAP options — design
 
-**Status:** Approved  
+**Status:** Implemented (branch `feature/91-connections-options`)  
 **Date:** 2026-08-14  
 **Parent:** [Connections Settings](2026-08-13-connections-settings-design.md)  
 **Issues:** [#91](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/91), [#92](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/92)  

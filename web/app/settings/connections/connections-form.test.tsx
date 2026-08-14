@@ -326,10 +326,8 @@ describe("ConnectionsForm", () => {
 
     render(<ConnectionsForm />);
     const optionsErrors = await screen.findAllByText(/AAP templates unavailable|Vault mounts unavailable/);
-    expect(optionsErrors.length).toBeGreaterThan(0);
-    for (const node of optionsErrors) {
-      expect(node.textContent).not.toMatch(/vault-token|approle-secret|aap-token-value/i);
-    }
+    expect(optionsErrors).toHaveLength(1);
+    expect(optionsErrors[0].textContent).not.toMatch(/vault-token|approle-secret|aap-token-value/i);
 
     const template = screen.getByLabelText(/^Template name$/i);
     const mount = screen.getByLabelText(/^Default Vault PKI mount$/i);
@@ -375,5 +373,24 @@ describe("ConnectionsForm", () => {
         }),
       })
     );
+  });
+
+  it("includes a blank select option when current template/mount is empty", async () => {
+    mockedGet.mockResolvedValue({
+      ...emptyView,
+      aap: { ...emptyView.aap, renew_template: "", default_mount: "" },
+    });
+    mockedTemplates.mockResolvedValue({
+      kind: "job",
+      items: [{ id: 1, name: "CLM - Issue Certificate" }],
+    });
+    mockedMounts.mockResolvedValue({ items: ["pki/"] });
+
+    render(<ConnectionsForm />);
+    const template = await screen.findByRole("combobox", { name: /^Template name$/i });
+    const mount = screen.getByRole("combobox", { name: /^Default Vault PKI mount$/i });
+    expect(template).toHaveValue("");
+    expect(mount).toHaveValue("");
+    expect(screen.getAllByRole("option", { name: "—" })).toHaveLength(2);
   });
 });

@@ -423,6 +423,8 @@ export default function ConnectionsForm() {
               </div>
             </fieldset>
 
+            {optionsError && <p className="error-text">{optionsError}</p>}
+
             <div className="form-field">
               <label htmlFor="aap-template">Template name</label>
               {showTemplateSelect ? (
@@ -431,6 +433,7 @@ export default function ConnectionsForm() {
                   value={aapTemplate}
                   onChange={(e) => setAapTemplate(e.target.value)}
                 >
+                  <option value="">—</option>
                   {templateSelectValues.map((name) => (
                     <option key={name} value={name}>
                       {name}
@@ -445,7 +448,6 @@ export default function ConnectionsForm() {
                   autoComplete="off"
                 />
               )}
-              {optionsError && <p className="error-text">{optionsError}</p>}
             </div>
 
             <label className="checkbox-row">
@@ -465,6 +467,7 @@ export default function ConnectionsForm() {
                   value={aapMount}
                   onChange={(e) => setAapMount(e.target.value)}
                 >
+                  <option value="">—</option>
                   {mountSelectValues.map((path) => (
                     <option key={path} value={path}>
                       {path}
@@ -479,7 +482,6 @@ export default function ConnectionsForm() {
                   autoComplete="off"
                 />
               )}
-              {optionsError && <p className="error-text">{optionsError}</p>}
               <p className="help-text">{MOUNT_HELP}</p>
             </div>
           </div>

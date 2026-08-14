@@ -431,6 +431,37 @@ export function testConnection(target: ConnectionTarget) {
   });
 }
 
+export type VaultPKIMountOptions = {
+  items: string[];
+  detail?: string;
+};
+
+export type AAPTemplateOption = {
+  id: number;
+  name: string;
+};
+
+export type AAPTemplateOptions = {
+  kind: string;
+  items: AAPTemplateOption[];
+  detail?: string;
+};
+
+export type AAPTemplateKind = "job" | "workflow";
+
+// Same-origin BFF catch-all — never NEXT_PUBLIC_* secrets or direct Vault/AAP.
+export function getVaultPKIMountOptions() {
+  return fetchSameOrigin<VaultPKIMountOptions>(
+    "/api/v1/settings/connections/options/vault-pki-mounts"
+  );
+}
+
+export function getAAPTemplateOptions(kind: AAPTemplateKind) {
+  return fetchSameOrigin<AAPTemplateOptions>(
+    `/api/v1/settings/connections/options/aap-templates?kind=${kind}`
+  );
+}
+
 export async function downloadReport(scanId: string, format: "markdown" | "json" | "csv" = "markdown") {
   const res = await fetch(
     `${getApiBaseUrl()}/api/v1/scans/${scanId}/report?format=${format}`,

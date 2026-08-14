@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getConnections, patchConnections, testConnection } from "@/lib/api";
+import {
+  getAAPTemplateOptions,
+  getConnections,
+  getVaultPKIMountOptions,
+  patchConnections,
+  testConnection,
+} from "@/lib/api";
 
 function jsonResponse(body: unknown, status = 200) {
   return Promise.resolve(
@@ -53,5 +59,43 @@ describe("connections client helpers", () => {
     expect(urls.every((u) => u.startsWith("/api/settings/connections"))).toBe(true);
     expect(urls.join(" ")).not.toContain("evil.example");
     expect(JSON.stringify(fetchMock.mock.calls)).not.toContain("must-not-be-used");
+  });
+
+  it("getVaultPKIMountOptions GETs same-origin /api/v1 options, not NEXT_PUBLIC_API_URL", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://evil.example:8080");
+    const fetchMock = vi.fn().mockImplementation(() =>
+      jsonResponse({ items: ["pki/", "pki-int/"] })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getVaultPKIMountOptions();
+
+    expect(result).toEqual({ items: ["pki/", "pki-int/"] });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe("/api/v1/settings/connections/options/vault-pki-mounts");
+    expect(url).not.toContain("evil.example");
+  });
+
+  it("getAAPTemplateOptions GETs same-origin /api/v1 options with kind query", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://evil.example:8080");
+    const fetchMock = vi.fn().mockImplementation(() =>
+      jsonResponse({
+        kind: "workflow",
+        items: [{ id: 3, name: "CLM Renew Workflow" }],
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getAAPTemplateOptions("workflow");
+
+    expect(result).toEqual({
+      kind: "workflow",
+      items: [{ id: 3, name: "CLM Renew Workflow" }],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe("/api/v1/settings/connections/options/aap-templates?kind=workflow");
+    expect(url).not.toContain("evil.example");
   });
 });

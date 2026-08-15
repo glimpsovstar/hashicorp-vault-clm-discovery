@@ -158,7 +158,7 @@ behaviors to check before treating a failure as a bug. Design rationale:
 - Inventory table: Vault, Imported, Scope, Expiry governance columns; delete actions on inventory, scans, and issuers
 - Styling uses a subset of [Helios design tokens](https://helios.hashicorp.design/foundations/colors); header logo is Flight Icons `vault-color-24` (same glyph as Vault UI)
 - Connections page uses the same Helios CSS (`panel`, form fields, badges) — not shadcn/ui
-- Server components call the Go API via `web/lib/api.ts` (`API_INTERNAL_URL` + `CLM_API_TOKEN`). Browser traffic uses the same-origin BFF (`web/app/api/v1/[...path]` and Settings `web/app/api/settings/connections`) which attaches server-only Authorization. No `NEXT_PUBLIC_*` tokens. AAP `GET /inventory` is not proxied and is not a dashboard page. Delete buttons remain; they succeed only when the BFF token is `platform_admin`
+- Server components call the Go API via `web/lib/api.ts` (`API_INTERNAL_URL` + `CLM_API_TOKEN`). Browser traffic uses the same-origin BFF (`web/app/api/v1/[...path]` and Settings `web/app/api/settings/connections`) which requires a signed session cookie (demo login or OIDC) before attaching server-only Authorization. No `NEXT_PUBLIC_*` tokens. AAP `GET /inventory` is not proxied and is not a dashboard page. Delete buttons remain; they succeed only when the BFF token is `platform_admin`
 
 See [docs/superpowers/specs/2026-06-14-vault-ui-design.md](superpowers/specs/2026-06-14-vault-ui-design.md) for UI design rationale and file map.
 
@@ -230,7 +230,7 @@ HCP vs self-managed does not change probes.
 
 ## Security considerations
 
-- API is default-deny except health. Dashboard BFF attaches `CLM_API_TOKEN`; never `NEXT_PUBLIC_*` tokens
+- API is default-deny except health. Dashboard BFF attaches `CLM_API_TOKEN` only after a valid BFF session (or `CLM_BFF_INSECURE_NO_SESSION`); never `NEXT_PUBLIC_*` tokens
 - Scan consent required at API and CLI — **consent is not authorization** (RBAC first, then consent)
 - Private range scanning disabled by default
 - Maximum IPv4 scan size: /16
@@ -239,7 +239,4 @@ HCP vs self-managed does not change probes.
 - Connection secrets are AES-256-GCM in `connections.secrets_enc` under `CLM_CONNECTIONS_KEY`; GET never echoes them; Test details redact known secret substrings
 - `CLM_INSECURE_NO_AUTH` is UAT/integration-only and applies API-wide, not Settings-only
 - Privileged mutations and 401/403 are recorded in `audit_events` (no tokens, PEM, or AAP secrets in `payload`)
-
-### Residual risk: dashboard BFF
-
-M1 default-deny applies to the **Go API** (`:8080`). The Next.js BFF (`web/app/api/v1/[...path]/route.ts`) holds ambient `CLM_API_TOKEN` authority (demo compose: `platform_admin`) until OIDC/session lands. Anyone who can reach the Next origin can perform the API mutations M1 closed on `:8080`. Do **not** treat the control plane as closed to unauthenticated mutation at the deployment edge. Follow-up: [authenticate the dashboard BFF (OIDC/session)](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/89).
+- BFF session auth (#89): unauthenticated browser→BFF returns 401 and does not forward to `:8080`

@@ -117,6 +117,8 @@ export default function ConnectionsForm() {
       });
     return () => {
       cancelled = true;
+      // Invalidate in-flight loadOptions so it does not setState after unmount.
+      optionsGeneration.current += 1;
     };
   }, [loadOptions]);
 

@@ -22,18 +22,63 @@ export type Finding = {
   issuer?: Issuer;
 };
 
+/** Day cutoffs for report shadow/issuer severity (#74). Defaults match shipped #73 rubric. */
+export type SeverityThresholds = {
+  shadowCriticalDays: number;
+  shadowHighDays: number;
+  issuerHighDays: number;
+};
+
+export const DEFAULT_SEVERITY_THRESHOLDS: SeverityThresholds = {
+  shadowCriticalDays: 7,
+  shadowHighDays: 30,
+  issuerHighDays: 30,
+};
+
+function parseDayThreshold(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return n;
+}
+
+/** Resolve thresholds from env (SSR / deploy policy). Invalid values fall back per field. */
+export function resolveSeverityThresholds(
+  env: Record<string, string | undefined> = process.env as Record<string, string | undefined>
+): SeverityThresholds {
+  let shadowCriticalDays = parseDayThreshold(
+    env.CLM_REPORT_SHADOW_CRITICAL_DAYS,
+    DEFAULT_SEVERITY_THRESHOLDS.shadowCriticalDays
+  );
+  const shadowHighDays = parseDayThreshold(
+    env.CLM_REPORT_SHADOW_HIGH_DAYS,
+    DEFAULT_SEVERITY_THRESHOLDS.shadowHighDays
+  );
+  const issuerHighDays = parseDayThreshold(
+    env.CLM_REPORT_ISSUER_HIGH_DAYS,
+    DEFAULT_SEVERITY_THRESHOLDS.issuerHighDays
+  );
+  if (shadowCriticalDays > shadowHighDays) shadowCriticalDays = shadowHighDays;
+  return { shadowCriticalDays, shadowHighDays, issuerHighDays };
+}
+
 // Shadow certs are unmanaged by definition; severity escalates with expiry proximity.
-// NOTE: thresholds are hard-coded for v1 — see #73 follow-up to make them configurable.
-export function deriveShadowSeverity(cert: Certificate): FindingSeverity {
+export function deriveShadowSeverity(
+  cert: Certificate,
+  thresholds: SeverityThresholds = DEFAULT_SEVERITY_THRESHOLDS
+): FindingSeverity {
   if (cert.status === "expired" || cert.days_until_expiry < 0) return "critical";
-  if (cert.days_until_expiry <= 7) return "critical";
-  if (cert.days_until_expiry <= 30) return "high";
+  if (cert.days_until_expiry <= thresholds.shadowCriticalDays) return "critical";
+  if (cert.days_until_expiry <= thresholds.shadowHighDays) return "high";
   return "medium";
 }
 
 // CA-import opportunities are lower urgency unless the CA itself is expiring.
-export function deriveIssuerSeverity(issuer: Issuer): FindingSeverity {
-  return issuer.days_until_expiry <= 30 ? "high" : "low";
+export function deriveIssuerSeverity(
+  issuer: Issuer,
+  thresholds: SeverityThresholds = DEFAULT_SEVERITY_THRESHOLDS
+): FindingSeverity {
+  return issuer.days_until_expiry <= thresholds.issuerHighDays ? "high" : "low";
 }
 
 const SEVERITY_WORDS = new Set(["critical", "high", "medium", "low", "warning", "info"]);
@@ -64,11 +109,11 @@ function insightToFinding(insight: ReportInsight, i: number): Finding {
   };
 }
 
-function shadowToFinding(cert: Certificate): Finding {
+function shadowToFinding(cert: Certificate, thresholds: SeverityThresholds): Finding {
   return {
     key: `shadow-${cert.id}`,
     kind: "shadow",
-    severity: deriveShadowSeverity(cert),
+    severity: deriveShadowSeverity(cert, thresholds),
     typeLabel: "Shadow certificate",
     subject: cert.subject_cn || cert.serial_number,
     secondary: cert.serial_number,
@@ -86,11 +131,11 @@ function shadowToFinding(cert: Certificate): Finding {
   };
 }
 
-function issuerToFinding(iss: Issuer): Finding {
+function issuerToFinding(iss: Issuer, thresholds: SeverityThresholds): Finding {
   return {
     key: `issuer-${iss.id}`,
     kind: "issuer",
-    severity: deriveIssuerSeverity(iss),
+    severity: deriveIssuerSeverity(iss, thresholds),
     typeLabel: "CA issuer",
     subject: iss.subject_cn || iss.issuer_dn,
     secondary: iss.issuer_dn,
@@ -134,18 +179,22 @@ export function buildFindings(
   report: ReportDocument,
   certs: Certificate[],
   issuers: Issuer[],
-  persisted?: PersistedFinding[]
+  persisted?: PersistedFinding[],
+  thresholds: SeverityThresholds = DEFAULT_SEVERITY_THRESHOLDS
 ): Finding[] {
   // Prefer persisted pack+ops findings when the API returns them (M3).
   if (persisted && persisted.length > 0) {
     const rows = persisted.map((f) => persistedToFinding(f, certs));
     // Keep CA-import issuer opportunities; shadow/insight are covered by ops+packs.
-    return [...rows, ...selectScanIssuers(certs, issuers).map(issuerToFinding)];
+    return [
+      ...rows,
+      ...selectScanIssuers(certs, issuers).map((iss) => issuerToFinding(iss, thresholds)),
+    ];
   }
   return [
     ...(report.insights ?? []).map(insightToFinding),
-    ...selectShadowCerts(certs).map(shadowToFinding),
-    ...selectScanIssuers(certs, issuers).map(issuerToFinding),
+    ...selectShadowCerts(certs).map((c) => shadowToFinding(c, thresholds)),
+    ...selectScanIssuers(certs, issuers).map((iss) => issuerToFinding(iss, thresholds)),
   ];
 }
 

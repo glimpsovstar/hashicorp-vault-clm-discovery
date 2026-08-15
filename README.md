@@ -219,6 +219,9 @@ Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVA
 | `CLM_BFF_DEMO_PASSWORD` | (empty) | Demo operator password for `POST /api/auth/login` (compose: `clm-demo`) |
 | `CLM_BFF_INSECURE_NO_SESSION` | `false` | UAT hatch: restore ambient BFF token attach without a session cookie |
 | `CLM_BFF_OIDC_ISSUER` / `CLM_BFF_OIDC_CLIENT_ID` / `CLM_BFF_OIDC_CLIENT_SECRET` | (empty) | Optional OIDC (Authorization Code + PKCE); callback at `/api/auth/oidc/callback` |
+| `CLM_REPORT_SHADOW_CRITICAL_DAYS` | `7` | **Dashboard (SSR).** Shadow-cert report severity: days until expiry at or below this → critical (expired always critical). Invalid/negative → default |
+| `CLM_REPORT_SHADOW_HIGH_DAYS` | `30` | **Dashboard (SSR).** Shadow-cert report severity: days at or below this (and above critical) → high; else medium. If critical &gt; high after parse, critical is clamped to high |
+| `CLM_REPORT_ISSUER_HIGH_DAYS` | `30` | **Dashboard (SSR).** CA-issuer finding severity: days at or below this → high; else low |
 | `CLM_INSECURE_NO_AUTH` | `false` | UAT/integration hatch: skip Bearer and treat the caller as `platform_admin` on **all** `/api/v1` routes except health (already public). Not a production auth substitute. Prefer this on existing UAT scripts; or send `Authorization: Bearer` |
 
 Both `clm-discovery` and `clm-scan` emit JSON logs to stdout. Set `LOG_LEVEL=debug` to see target expansion summaries; `trace` adds per-target probe outcomes. Vault/AAP/EDA tokens and URLs are read from the environment and never logged.

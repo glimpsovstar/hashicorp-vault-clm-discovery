@@ -3,7 +3,11 @@ import PageHeader from "@/components/page-header";
 import ReportDownloadMenu from "@/components/report-download-menu";
 import ReportExplorer from "@/components/report-explorer";
 import { fetchReport, getScan, listScanCertificates, listIssuers, listScanFindings } from "@/lib/api";
-import { buildFindings, coverageFromBlindSpot } from "@/lib/findings";
+import {
+  buildFindings,
+  coverageFromBlindSpot,
+  resolveSeverityThresholds,
+} from "@/lib/findings";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +51,14 @@ export default async function ScanReportPage({
   const persisted = findingsResp.items ?? [];
 
   // Prefer persisted M3 findings when present; fall back to on-read insights.
-  const findings = buildFindings(report, certs, issuers, persisted);
+  // Shadow/issuer severity day cutoffs come from deploy env (#74).
+  const findings = buildFindings(
+    report,
+    certs,
+    issuers,
+    persisted,
+    resolveSeverityThresholds()
+  );
   const coverage = coverageFromBlindSpot(report.blind_spot);
 
   // Defensive default: a version skew where the report omits recommendations

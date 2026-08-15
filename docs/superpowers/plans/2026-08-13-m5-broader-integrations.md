@@ -30,18 +30,18 @@
 
 ### Task 2: Freeze AAP contract + revoke via AAP
 
-- [ ] Spec extra_vars for `clm_revoke` (serial, mount, certificate_id, reason).
-- [ ] Consent `POST /certificates/{id}/revoke` → named template; verify OCSP/CRL + reconcile.
-- [ ] No `vault.Client.Revoke`.
+- [x] Spec extra_vars for `clm_revoke` (serial, mount, certificate_id, reason).
+- [x] Consent `POST /certificates/{id}/revoke` → named template; verify OCSP/CRL + reconcile.
+- [x] No `vault.Client.Revoke`.
 
 ### Task 3: ITSM webhook (optional)
 
-- [ ] HTTP templates from catalogue events; HMAC optional; no ServiceNow SDK.
+- [x] HTTP templates from catalogue events; HMAC optional; no ServiceNow SDK.
 
 ### Task 4: Cloud collectors (v2)
 
-- [ ] Read-only ACM/AKV/GCP → same fingerprint inventory; `scan_source=cloud_*`.
+- [x] Read-only ACM/AKV/GCP → same fingerprint inventory; `scan_source=cloud_*`.
 
 ### Task 5: AI last or skip
 
-- [ ] Summary only if 1–3 exist; never LLM-chosen severity.
+- [x] Summary only if 1–3 exist; never LLM-chosen severity. (Skipped — no LLM in this slice.)

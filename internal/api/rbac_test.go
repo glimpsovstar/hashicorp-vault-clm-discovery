@@ -256,6 +256,7 @@ func TestRoleAllows_PermissionMatrix(t *testing.T) {
 		{roleRemediator, http.MethodPost, "/api/v1/scans", true},
 		{roleRemediator, http.MethodPost, "/api/v1/certificates/" + uuid.New().String() + "/catalog-import", true},
 		{roleRemediator, http.MethodPost, "/api/v1/certificates/" + uuid.New().String() + "/renew", true},
+		{roleRemediator, http.MethodPost, "/api/v1/certificates/" + uuid.New().String() + "/revoke", true},
 		{roleRemediator, http.MethodPost, "/api/v1/renew-expiring", true},
 		{roleRemediator, http.MethodPost, "/api/v1/certificates/" + uuid.New().String() + "/revocation-check", true},
 		{roleRemediator, http.MethodPatch, "/api/v1/certificates/" + uuid.New().String(), true},

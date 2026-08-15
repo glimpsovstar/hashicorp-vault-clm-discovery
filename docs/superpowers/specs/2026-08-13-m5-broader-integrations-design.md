@@ -35,11 +35,11 @@ Complete the catalogue, add revoke-via-AAP (not `vault.Client.Revoke`), then opt
 
 ## Acceptance criteria (when this milestone starts)
 
-- [ ] `GET /events?event_type=` filters; catalogue documented.
-- [ ] Revoke action 503 if AAP unset; does not call Vault revoke from CLM.
-- [ ] extra_vars contain no secrets; find-by-name only.
-- [ ] ITSM is templates over catalogue events.
-- [ ] Cloud collectors upsert by `fingerprint_sha256`; no cloud root keys in CLM.
+- [x] `GET /events?event_type=` filters; catalogue documented.
+- [x] Revoke action 503 if AAP unset; does not call Vault revoke from CLM.
+- [x] extra_vars contain no secrets; find-by-name only.
+- [x] ITSM is templates over catalogue events.
+- [x] Cloud collectors upsert by `fingerprint_sha256`; no cloud root keys in CLM.
 
 ## Out of scope
 

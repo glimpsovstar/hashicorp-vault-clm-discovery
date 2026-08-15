@@ -73,6 +73,12 @@ type renewLauncher interface {
 	Renew(ctx context.Context, extraVars map[string]any) (RenewRef, error)
 }
 
+// revokeLauncher launches a Vault revoke via AAP (not vault.Client). Find-by-name
+// only; nil when AAP is unset → 503. CLM never calls Vault pki/revoke.
+type revokeLauncher interface {
+	Revoke(ctx context.Context, extraVars map[string]any) (RenewRef, error)
+}
+
 // lifecycleJobsStore persists durable renew jobs (M2). Injectable for handler tests.
 type lifecycleJobsStore interface {
 	PersistRenewLaunch(ctx context.Context, certID uuid.UUID, cfg store.RenewalConfig, fingerprint string, aapJobID int, workflow bool, expected json.RawMessage) (store.LifecycleJob, error)
@@ -90,23 +96,46 @@ type aapRenewer struct {
 }
 
 func (a *aapRenewer) Renew(ctx context.Context, extraVars map[string]any) (RenewRef, error) {
+	return a.launch(ctx, extraVars)
+}
+
+// aapRevoker is the production revokeLauncher (same find-by-name launch path).
+type aapRevoker struct {
+	client       *aap.Client
+	templateName string
+	workflow     bool
+}
+
+func (a *aapRevoker) Revoke(ctx context.Context, extraVars map[string]any) (RenewRef, error) {
+	return a.launch(ctx, extraVars)
+}
+
+func (a *aapRenewer) launch(ctx context.Context, extraVars map[string]any) (RenewRef, error) {
+	return launchAAPTemplate(ctx, a.client, a.templateName, a.workflow, extraVars)
+}
+
+func (a *aapRevoker) launch(ctx context.Context, extraVars map[string]any) (RenewRef, error) {
+	return launchAAPTemplate(ctx, a.client, a.templateName, a.workflow, extraVars)
+}
+
+func launchAAPTemplate(ctx context.Context, client *aap.Client, templateName string, workflow bool, extraVars map[string]any) (RenewRef, error) {
 	var (
 		id  int
 		err error
 	)
-	if a.workflow {
-		id, err = a.client.FindWorkflowJobTemplate(ctx, a.templateName)
+	if workflow {
+		id, err = client.FindWorkflowJobTemplate(ctx, templateName)
 	} else {
-		id, err = a.client.FindJobTemplate(ctx, a.templateName)
+		id, err = client.FindJobTemplate(ctx, templateName)
 	}
 	if err != nil {
 		return RenewRef{}, err
 	}
 	var res aap.LaunchResult
-	if a.workflow {
-		res, err = a.client.LaunchWorkflowJobTemplate(ctx, id, extraVars)
+	if workflow {
+		res, err = client.LaunchWorkflowJobTemplate(ctx, id, extraVars)
 	} else {
-		res, err = a.client.LaunchJobTemplate(ctx, id, extraVars)
+		res, err = client.LaunchJobTemplate(ctx, id, extraVars)
 	}
 	if err != nil {
 		return RenewRef{}, err
@@ -128,6 +157,7 @@ type Server struct {
 	importer    issuerImporter
 	revCheck    revChecker
 	renewer     renewLauncher
+	revoker     revokeLauncher
 	lifecycle   lifecycleJobsStore
 	connections connectionsStore
 	actor       string // test helper; production uses context or InsecureNoAuth
@@ -181,6 +211,7 @@ func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slo
 			SkipTLSVerify: cfg.AAPSkipTLSVerify,
 		}); err == nil {
 			s.renewer = &aapRenewer{client: ac, templateName: cfg.AAPRenewTemplate, workflow: cfg.AAPRenewWorkflow}
+			s.revoker = &aapRevoker{client: ac, templateName: cfg.AAPRevokeTemplate, workflow: cfg.AAPRevokeWorkflow}
 		} else {
 			log.Warn("aap client init failed", "err", err)
 		}
@@ -221,6 +252,7 @@ func (s *Server) Router() http.Handler {
 		r.Use(s.requireAuth)
 		r.Use(s.requirePermission)
 		r.Post("/scans", s.handleCreateScan)
+		r.Post("/scans/collect", s.handleCollectScan)
 		r.Get("/scans", s.handleListScans)
 		r.Get("/scans/{id}", s.handleGetScan)
 		r.Get("/scans/{id}/blindspot", s.handleGetScanBlindSpot)
@@ -240,6 +272,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/certificates/{id}/renewal-kit", s.handleRenewalKit)
 		r.Post("/certificates/{id}/revocation-check", s.handleRevocationCheck)
 		r.Post("/certificates/{id}/renew", s.handleRenewCertificate)
+		r.Post("/certificates/{id}/revoke", s.handleRevokeCertificate)
 		r.Patch("/certificates/{id}", s.handlePatchCertificate)
 		r.Post("/certificates/{id}/catalog-import", s.handleCatalogImport)
 		r.Delete("/certificates/{id}", s.handleDeleteCertificate)
@@ -775,6 +808,94 @@ func renewExtraVars(cn string, cfg store.RenewalConfig) map[string]any {
 // use to fire an AAP renewal. Callers MUST validate cfg first.
 func (s *Server) launchRenewal(ctx context.Context, cn string, cfg store.RenewalConfig) (RenewRef, error) {
 	return s.renewer.Renew(ctx, renewExtraVars(cn, cfg))
+}
+
+// handleRevokeCertificate launches a Vault PKI revoke via AAP (find-by-name
+// template). CLM does not call Vault pki/revoke. Consent-gated; 503 when AAP is
+// unset. After AAP succeeds, operators confirm via POST .../revocation-check
+// (OCSP/CRL) and optional reconcile.
+func (s *Server) handleRevokeCertificate(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid certificate id")
+		return
+	}
+	if s.revoker == nil {
+		writeError(w, r, http.StatusServiceUnavailable, "AAP not configured")
+		return
+	}
+
+	var body struct {
+		Consent bool   `json:"consent"`
+		Mount   string `json:"mount"`
+		Reason  string `json:"reason"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if !body.Consent {
+		writeError(w, r, http.StatusBadRequest, "consent required to launch a revoke")
+		return
+	}
+	reason := strings.TrimSpace(body.Reason)
+	if !renewal.ValidReason(reason) {
+		writeError(w, r, http.StatusBadRequest, "invalid reason")
+		return
+	}
+	mount := strings.TrimSpace(body.Mount)
+	if mount == "" {
+		mount = s.cfg.AAPDefaultMount
+	}
+	if err := renewal.Validate(renewal.KitInput{CommonName: "x.example.com", Mount: mount, Role: "web"}); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid mount")
+		return
+	}
+
+	cert, err := s.resources.GetCertificate(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrCertificateNotFound) {
+			writeError(w, r, http.StatusNotFound, "certificate not found")
+			return
+		}
+		s.writeServerError(w, r, err, "failed to load certificate")
+		return
+	}
+
+	extra := revokeExtraVars(id, cert.SerialNumber, cert.FingerprintSHA256, mount, reason)
+	ref, err := s.revoker.Revoke(r.Context(), extra)
+	if err != nil {
+		s.log.Warn("aap revoke launch failed", "action", "revoke", "certificate_id", id.String(), "err", err)
+		writeError(w, r, http.StatusBadGateway, "failed to launch AAP revoke")
+		return
+	}
+
+	s.log.Info("aap revoke launched", "action", "revoke", "certificate_id", id.String(), "job_id", ref.JobID, "workflow", ref.Workflow)
+	s.auditAllow(r, "revoke_launch", "certificate", id.String(), map[string]any{
+		"mount": mount, "job_id": ref.JobID, "reason": reason,
+	})
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"status": "launched",
+		"job":    ref,
+		"mount":  mount,
+		"reason": reason,
+		"serial": cert.SerialNumber,
+		"verify": "POST /api/v1/certificates/{id}/revocation-check after AAP success",
+	})
+}
+
+// revokeExtraVars is the frozen AAP contract for clm_revoke. No secrets — Vault
+// AppRole creds are injected by an AAP credential. Callers MUST validate mount
+// and reason first.
+func revokeExtraVars(certID uuid.UUID, serial, fingerprint, mount, reason string) map[string]any {
+	return map[string]any{
+		"clm_action":         "clm_revoke",
+		"serial_number":      serial,
+		"fingerprint_sha256": fingerprint,
+		"vault_pki_mount":    mount,
+		"certificate_id":     certID.String(),
+		"reason":             reason,
+	}
 }
 
 // handleRenewExpiring is the expiry-threshold auto-policy: it enqueues a durable

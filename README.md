@@ -56,6 +56,7 @@ It complements Vault PKI and HCP Certificates Inventory. It is **not** a Vault p
 
 - **Renewal kit generator** — renders vault-agent HCL / an AAP playbook to reissue+deploy a cert (`GET /certificates/{id}/renewal-kit`)
 - **On-demand renew** — `POST /certificates/{id}/renew` launches AAP, persists a `lifecycle_jobs` row + `renewal.launched` **before** 202 (`lifecycle_job_id` in the body), and stores `renewal_config`
+- **Revoke via AAP** — `POST /certificates/{id}/revoke` (consent-gated) launches a named revoke template with `clm_action=clm_revoke`; CLM never calls Vault `pki/revoke`. Confirm with `POST .../revocation-check` after AAP success
 - **Batch auto-renewal** — `POST /renew-expiring` enqueues one durable job per eligible cert (worker launches AAP); defaults to `EXPIRING_SOON_DAYS`
 - **Durable lifecycle worker** — claims jobs, polls with `WaitForJob` (never on the HTTP request context), maps AAP status → CLM status, and marks **verified** only after wire check (same CN, new fingerprint, later `not_after`). AAP success alone is not completed
 - **Read API** — `GET /lifecycle-jobs/{id}`, `GET /certificates/{id}/lifecycle-jobs`
@@ -188,11 +189,15 @@ Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVA
 | `AAP_TOKEN` | (empty) | AAP API token (never logged) |
 | `AAP_RENEW_TEMPLATE` | `CLM - Issue Certificate` | Job template (or workflow) name resolved by the renew endpoints (Settings label: **Template name**) |
 | `AAP_RENEW_WORKFLOW` | `false` | When true, resolve `AAP_RENEW_TEMPLATE` as a workflow job template (Settings: **Renew with** → Workflow) |
+| `AAP_REVOKE_TEMPLATE` | `CLM - Revoke Certificate` | Job/workflow template name for `POST /certificates/{id}/revoke` (find-by-name only) |
+| `AAP_REVOKE_WORKFLOW` | `false` | When true, resolve `AAP_REVOKE_TEMPLATE` as a workflow job template |
 | `AAP_SKIP_TLS_VERIFY` | `false` | Skip TLS verification to the AAP Controller (lab use only) |
-| `AAP_DEFAULT_MOUNT` | `pki` | Default **Vault PKI mount path** for Mode C renew when the cert/request has no mount (AAP `extra_vars.mount`). Not an AAP id. Settings label: **Default Vault PKI mount** |
+| `AAP_DEFAULT_MOUNT` | `pki` | Default **Vault PKI mount path** for Mode C renew/revoke when the cert/request has no mount. Not an AAP id. Settings label: **Default Vault PKI mount** |
 | **Events (EDA dispatcher)** | | |
-| `EDA_WEBHOOK_URL` | (empty) | Ansible EDA webhook URL; empty ⇒ dispatcher does not start |
+| `EDA_WEBHOOK_URL` | (empty) | Ansible EDA webhook URL; empty ⇒ EDA delivery skipped (ITSM-only still runs if set) |
 | `EDA_WEBHOOK_TOKEN` | (empty) | Bearer token for the EDA webhook (never logged) |
+| `ITSM_WEBHOOK_URL` | (empty) | Optional ITSM HTTP webhook; receives ticket templates over catalogue events |
+| `ITSM_WEBHOOK_HMAC_SECRET` | (empty) | Optional HMAC secret for `X-CLM-Signature: sha256=…` (never logged) |
 | `EVENT_DISPATCH_INTERVAL` | `15s` | Outbox drain interval |
 | `EVENT_DISPATCH_BATCH` | `50` | Max events delivered per drain |
 | `EVENT_MAX_ATTEMPTS` | `10` | Delivery attempts before an event is dead-lettered |
@@ -248,6 +253,7 @@ See [docs/data-model.md](docs/data-model.md).
 |--------|------|-------------|
 | GET | `/api/v1/health` | Health check |
 | POST | `/api/v1/scans` | Start scan (`consent: true` required) |
+| POST | `/api/v1/scans/collect` | Cloud collector ingest (`source`: `cloud_akv`\|`cloud_acm`\|`cloud_gcp`; public PEMs only; consent-gated) |
 | GET | `/api/v1/scans` | List scans |
 | GET | `/api/v1/scans/{id}` | Scan detail (status, diagnostics, counts) |
 | GET | `/api/v1/scans/{id}/certificates` | Certificates discovered in a scan |
@@ -268,6 +274,7 @@ See [docs/data-model.md](docs/data-model.md).
 | POST | `/api/v1/certificates/{id}/revocation-check` | CRL/OCSP revocation check |
 | POST | `/api/v1/certificates/{id}/catalog-import` | Track cert in CLM (Modes A/D, consent-gated) |
 | POST | `/api/v1/certificates/{id}/renew` | On-demand renew via Vault + AAP (consent-gated); 202 includes `lifecycle_job_id` |
+| POST | `/api/v1/certificates/{id}/revoke` | Revoke via AAP (`clm_revoke` extra_vars; consent-gated); 503 if AAP unset; does not call Vault revoke |
 | PATCH | `/api/v1/certificates/{id}` | Update governance fields |
 | DELETE | `/api/v1/certificates/{id}` | Delete certificate |
 | GET | `/api/v1/certificates/{id}/lifecycle-jobs` | List durable lifecycle jobs for a certificate |

@@ -207,9 +207,18 @@ type EnrichmentUpdate struct {
 	Tags        []string
 }
 
-// CreateScan inserts a pending scan row. When maxPending > 0 and that many
-// pending scans already exist, it returns ErrScanQueueFull (no insert).
+// CreateScan inserts a pending scan row with source=network. When maxPending > 0
+// and that many pending scans already exist, it returns ErrScanQueueFull (no insert).
 func (s *Store) CreateScan(ctx context.Context, cidrs, hostnames []string, ports []int, concurrency, maxPending int) (Scan, error) {
+	return s.CreateScanWithSource(ctx, "network", cidrs, hostnames, ports, concurrency, maxPending)
+}
+
+// CreateScanWithSource inserts a pending scan with an explicit source
+// (network | cloud_* | future collectors). Empty source defaults to network.
+func (s *Store) CreateScanWithSource(ctx context.Context, source string, cidrs, hostnames []string, ports []int, concurrency, maxPending int) (Scan, error) {
+	if source == "" {
+		source = "network"
+	}
 	if cidrs == nil {
 		cidrs = []string{}
 	}
@@ -224,13 +233,13 @@ func (s *Store) CreateScan(ctx context.Context, cidrs, hostnames []string, ports
 			WITH pending AS (
 				SELECT COUNT(*)::int AS c FROM scans WHERE status = 'pending'
 			)
-			INSERT INTO scans (cidrs, hostnames, ports, concurrency, targets_total)
-			SELECT $1, $2, $3, $4, 0 FROM pending WHERE c < $5
+			INSERT INTO scans (source, cidrs, hostnames, ports, concurrency, targets_total)
+			SELECT $1, $2, $3, $4, $5, 0 FROM pending WHERE c < $6
 			RETURNING id, source, status::text, cidrs, hostnames, ports, concurrency,
 				started_at, finished_at, targets_total, targets_scanned, targets_succeeded, targets_failed,
 				certs_found, upsert_failures, expansion_warnings, failure_samples, error,
 				claimed_by, claimed_at, created_at
-		`, cidrs, hostnames, ports, concurrency, maxPending).Scan(
+		`, source, cidrs, hostnames, ports, concurrency, maxPending).Scan(
 			&scan.ID, &scan.Source, &scan.Status, &scan.CIDRs, &scan.Hostnames, &scan.Ports, &scan.Concurrency,
 			&scan.StartedAt, &scan.FinishedAt, &scan.TargetsTotal, &scan.TargetsScanned,
 			&scan.TargetsSucceeded, &scan.TargetsFailed, &scan.CertsFound, &scan.UpsertFailures,
@@ -243,13 +252,13 @@ func (s *Store) CreateScan(ctx context.Context, cidrs, hostnames []string, ports
 		return scan, err
 	}
 	err = s.pool.QueryRow(ctx, `
-		INSERT INTO scans (cidrs, hostnames, ports, concurrency, targets_total)
-		VALUES ($1, $2, $3, $4, 0)
+		INSERT INTO scans (source, cidrs, hostnames, ports, concurrency, targets_total)
+		VALUES ($1, $2, $3, $4, $5, 0)
 		RETURNING id, source, status::text, cidrs, hostnames, ports, concurrency,
 			started_at, finished_at, targets_total, targets_scanned, targets_succeeded, targets_failed,
 			certs_found, upsert_failures, expansion_warnings, failure_samples, error,
 			claimed_by, claimed_at, created_at
-	`, cidrs, hostnames, ports, concurrency).Scan(
+	`, source, cidrs, hostnames, ports, concurrency).Scan(
 		&scan.ID, &scan.Source, &scan.Status, &scan.CIDRs, &scan.Hostnames, &scan.Ports, &scan.Concurrency,
 		&scan.StartedAt, &scan.FinishedAt, &scan.TargetsTotal, &scan.TargetsScanned,
 		&scan.TargetsSucceeded, &scan.TargetsFailed, &scan.CertsFound, &scan.UpsertFailures,
@@ -585,13 +594,13 @@ func (s *Store) emitDiscoveryCatalogueEvents(
 
 func cataloguePayload(certID uuid.UUID, fp, cn, status string, days int, managed, scope string) ([]byte, error) {
 	return json.Marshal(map[string]any{
-		"certificate_id":      certID.String(),
-		"fingerprint_sha256":  fp,
-		"subject_cn":          cn,
-		"status":              status,
-		"days_until_expiry":   days,
-		"managed_status":      managed,
-		"cert_scope":          scope,
+		"certificate_id":     certID.String(),
+		"fingerprint_sha256": fp,
+		"subject_cn":         cn,
+		"status":             status,
+		"days_until_expiry":  days,
+		"managed_status":     managed,
+		"cert_scope":         scope,
 	})
 }
 

@@ -11,8 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/api"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/aap"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/api"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/config"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/eventbus"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/lifecyclejobs"
@@ -62,11 +62,13 @@ func main() {
 	defer dispCancel()
 	var dispWG sync.WaitGroup
 	dispatcher := eventbus.New(eventbus.Config{
-		WebhookURL:  cfg.EDAWebhookURL,
-		Token:       cfg.EDAWebhookToken,
-		Interval:    cfg.EventDispatchInterval,
-		BatchSize:   cfg.EventDispatchBatch,
-		MaxAttempts: cfg.EventMaxAttempts,
+		WebhookURL:            cfg.EDAWebhookURL,
+		Token:                 cfg.EDAWebhookToken,
+		Interval:              cfg.EventDispatchInterval,
+		BatchSize:             cfg.EventDispatchBatch,
+		MaxAttempts:           cfg.EventMaxAttempts,
+		ITSMWebhookURL:        cfg.ITSMWebhookURL,
+		ITSMWebhookHMACSecret: cfg.ITSMWebhookHMACSecret,
 	}, st, logger)
 	if dispatcher.Configured() {
 		logger.Info("starting event dispatcher", "interval", cfg.EventDispatchInterval)

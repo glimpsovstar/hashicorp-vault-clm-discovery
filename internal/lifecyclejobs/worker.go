@@ -16,10 +16,13 @@ import (
 // JobStore is the durable job surface the worker needs.
 type JobStore interface {
 	ClaimLifecycleJobs(ctx context.Context, owner string, leaseTTL time.Duration, limit int) ([]store.LifecycleJob, error)
+	ClaimDueVerifyJobs(ctx context.Context, now time.Time, limit int, leaseTTL time.Duration) ([]store.LifecycleJob, error)
 	GetCertificate(ctx context.Context, id uuid.UUID) (store.Certificate, error)
 	ListCertificates(ctx context.Context, f store.CertificateFilter) ([]store.Certificate, int, error)
 	SetLifecycleAAPRef(ctx context.Context, id uuid.UUID, aapJobID int, workflow bool, status string) error
 	UpdateLifecycleStatus(ctx context.Context, id uuid.UUID, p store.UpdateLifecycleStatusParams) error
+	ScheduleNextVerify(ctx context.Context, id uuid.UUID, attempt int, next time.Time) error
+	ExpireTimedOutVerifyJobs(ctx context.Context, now time.Time) ([]store.LifecycleJob, error)
 	AppendLifecycleJobEvent(ctx context.Context, jobID uuid.UUID, eventType string, payload json.RawMessage) error
 	AppendRenewalOutboxEvent(ctx context.Context, eventType string, certID *uuid.UUID, payload json.RawMessage) error
 }
@@ -41,6 +44,7 @@ type Config struct {
 	LeaseTTL  time.Duration
 	BatchSize int
 	PollEvery time.Duration
+	Now       func() time.Time // optional clock for tests
 }
 
 // Worker claims durable lifecycle jobs, launches AAP when needed, polls, and verifies.
@@ -69,6 +73,9 @@ func New(cfg Config, st JobStore, renewer Renewer, poller AAPPoller, log *slog.L
 	if cfg.PollEvery <= 0 {
 		cfg.PollEvery = 5 * time.Second
 	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
 	return &Worker{cfg: cfg, store: st, renewer: renewer, aap: poller, log: log}
 }
 
@@ -88,6 +95,10 @@ func (w *Worker) Run(ctx context.Context) {
 }
 
 func (w *Worker) tick(ctx context.Context) {
+	now := w.cfg.Now().UTC()
+	if err := w.expireTimedOut(ctx, now); err != nil {
+		w.log.Warn("lifecycle timeout sweep failed", "err", err)
+	}
 	jobs, err := w.store.ClaimLifecycleJobs(ctx, w.cfg.Owner, w.cfg.LeaseTTL, w.cfg.BatchSize)
 	if err != nil {
 		w.log.Warn("lifecycle claim failed", "err", err)
@@ -98,6 +109,29 @@ func (w *Worker) tick(ctx context.Context) {
 			w.log.Warn("lifecycle job failed", "job_id", job.ID.String(), "status", job.Status, "err", err)
 		}
 	}
+	due, err := w.store.ClaimDueVerifyJobs(ctx, now, w.cfg.BatchSize, w.cfg.LeaseTTL)
+	if err != nil {
+		w.log.Warn("lifecycle verify claim failed", "err", err)
+		return
+	}
+	for _, job := range due {
+		if err := w.verifyPending(ctx, job, now); err != nil {
+			w.log.Warn("lifecycle verify failed", "job_id", job.ID.String(), "err", err)
+		}
+	}
+}
+
+func (w *Worker) expireTimedOut(ctx context.Context, now time.Time) error {
+	expired, err := w.store.ExpireTimedOutVerifyJobs(ctx, now)
+	if err != nil {
+		return err
+	}
+	for _, job := range expired {
+		payload, _ := json.Marshal(map[string]any{"timeout_at": job.TimeoutAt.UTC().Format(time.RFC3339)})
+		_ = w.store.AppendLifecycleJobEvent(ctx, job.ID, "job.timed_out", payload)
+		_ = w.store.AppendRenewalOutboxEvent(ctx, "renewal.timed_out", job.PredecessorCertID, payload)
+	}
+	return nil
 }
 
 func (w *Worker) process(ctx context.Context, job store.LifecycleJob) error {
@@ -106,8 +140,18 @@ func (w *Worker) process(ctx context.Context, job store.LifecycleJob) error {
 		return w.launch(ctx, job)
 	case store.LifecycleAAPPending, store.LifecycleAAPRunning:
 		return w.pollAAP(ctx, job)
-	case store.LifecycleAAPSuccessful, store.LifecycleVerifying:
-		return w.verify(ctx, job)
+	case store.LifecycleAAPSuccessful:
+		return w.enterPendingVerify(ctx, job)
+	case store.LifecycleVerifying:
+		// Legacy M2 path: treat as an immediate pending_verify probe.
+		return w.verifyPending(ctx, job, w.cfg.Now().UTC())
+	case store.LifecyclePendingVerify:
+		now := w.cfg.Now().UTC()
+		if job.NextVerifyAt != nil && job.NextVerifyAt.After(now) {
+			_ = w.store.UpdateLifecycleStatus(ctx, job.ID, store.UpdateLifecycleStatusParams{ClearLease: true})
+			return nil
+		}
+		return w.verifyPending(ctx, job, now)
 	default:
 		reason := "unexpected status"
 		_ = w.store.UpdateLifecycleStatus(ctx, job.ID, store.UpdateLifecycleStatusParams{
@@ -214,11 +258,8 @@ func (w *Worker) pollAAP(ctx context.Context, job store.LifecycleJob) error {
 		return nil
 	}
 	if mapped == store.LifecycleAAPSuccessful {
-		_ = w.store.UpdateLifecycleStatus(ctx, job.ID, store.UpdateLifecycleStatusParams{
-			Status: store.LifecycleVerifying, ClearLease: true,
-		})
 		_ = w.store.AppendLifecycleJobEvent(ctx, job.ID, "job.aap_successful", json.RawMessage(`{}`))
-		return w.verify(ctx, job)
+		return w.enterPendingVerify(ctx, job)
 	}
 	_ = w.store.UpdateLifecycleStatus(ctx, job.ID, store.UpdateLifecycleStatusParams{
 		Status: mapped, ClearLease: true,
@@ -226,15 +267,40 @@ func (w *Worker) pollAAP(ctx context.Context, job store.LifecycleJob) error {
 	return nil
 }
 
-func (w *Worker) verify(ctx context.Context, job store.LifecycleJob) error {
-	_ = w.store.UpdateLifecycleStatus(ctx, job.ID, store.UpdateLifecycleStatusParams{
-		Status: store.LifecycleVerifying,
-	})
+func (w *Worker) enterPendingVerify(ctx context.Context, job store.LifecycleJob) error {
+	now := w.cfg.Now().UTC()
+	timeoutAt := job.TimeoutAt
+	if timeoutAt.IsZero() {
+		timeoutAt = now.Add(24 * time.Hour)
+	}
+	next, _ := NextVerifyAt(now, 1, timeoutAt)
+	if err := w.store.ScheduleNextVerify(ctx, job.ID, 0, next); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *Worker) verifyPending(ctx context.Context, job store.LifecycleJob, now time.Time) error {
+	timeoutAt := job.TimeoutAt
+	if timeoutAt.IsZero() {
+		timeoutAt = now.Add(24 * time.Hour)
+	}
+	if !now.Before(timeoutAt) {
+		reason := "verify timeout"
+		_ = w.store.UpdateLifecycleStatus(ctx, job.ID, store.UpdateLifecycleStatusParams{
+			Status: store.LifecycleTimedOut, FailureReason: &reason, ClearLease: true,
+		})
+		payload, _ := json.Marshal(map[string]any{"timeout_at": timeoutAt.UTC().Format(time.RFC3339)})
+		_ = w.store.AppendLifecycleJobEvent(ctx, job.ID, "job.timed_out", payload)
+		_ = w.store.AppendRenewalOutboxEvent(ctx, "renewal.timed_out", job.PredecessorCertID, payload)
+		return nil
+	}
+
 	expected, err := UnmarshalExpected(job.Expected)
 	if err != nil {
 		reason := "invalid expected payload"
 		_ = w.store.UpdateLifecycleStatus(ctx, job.ID, store.UpdateLifecycleStatusParams{
-			Status: store.LifecycleVerifyFailed, FailureReason: &reason, ClearLease: true,
+			Status: store.LifecycleFailed, FailureReason: &reason, ClearLease: true,
 		})
 		return err
 	}
@@ -244,29 +310,38 @@ func (w *Worker) verify(ctx context.Context, job store.LifecycleJob) error {
 	}
 	obsJSON, _ := json.Marshal(observed)
 	result := VerifyWire(expected, observed)
-	if !result.OK {
-		reason := result.Reason
+	if result.OK {
+		var successorID *uuid.UUID
+		if observed.SuccessorCertID != "" {
+			if id, err := uuid.Parse(observed.SuccessorCertID); err == nil {
+				successorID = &id
+			}
+		}
 		_ = w.store.UpdateLifecycleStatus(ctx, job.ID, store.UpdateLifecycleStatusParams{
-			Status: store.LifecycleVerifyFailed, FailureReason: &reason, Observed: obsJSON, ClearLease: true,
+			Status: store.LifecycleVerified, Observed: obsJSON, SuccessorCertID: successorID, ClearLease: true,
 		})
-		payload, _ := json.Marshal(map[string]any{"reason": reason, "observed": observed})
-		_ = w.store.AppendLifecycleJobEvent(ctx, job.ID, "job.verify_failed", payload)
-		_ = w.store.AppendRenewalOutboxEvent(ctx, "renewal.failed", job.PredecessorCertID, payload)
+		payload, _ := json.Marshal(map[string]any{"observed": observed})
+		_ = w.store.AppendLifecycleJobEvent(ctx, job.ID, "job.verified", payload)
+		_ = w.store.AppendRenewalOutboxEvent(ctx, "renewal.verified", job.PredecessorCertID, payload)
 		return nil
 	}
-	var successorID *uuid.UUID
-	if observed.SuccessorCertID != "" {
-		if id, err := uuid.Parse(observed.SuccessorCertID); err == nil {
-			successorID = &id
-		}
+
+	attempt := job.VerifyAttempt + 1
+	next, last := NextVerifyAt(now, attempt, timeoutAt)
+	if last && !next.After(now) {
+		reason := result.Reason
+		_ = w.store.UpdateLifecycleStatus(ctx, job.ID, store.UpdateLifecycleStatusParams{
+			Status: store.LifecycleTimedOut, FailureReason: &reason, Observed: obsJSON, ClearLease: true,
+		})
+		payload, _ := json.Marshal(map[string]any{"reason": reason, "observed": observed})
+		_ = w.store.AppendLifecycleJobEvent(ctx, job.ID, "job.timed_out", payload)
+		_ = w.store.AppendRenewalOutboxEvent(ctx, "renewal.timed_out", job.PredecessorCertID, payload)
+		return nil
 	}
 	_ = w.store.UpdateLifecycleStatus(ctx, job.ID, store.UpdateLifecycleStatusParams{
-		Status: store.LifecycleVerified, Observed: obsJSON, SuccessorCertID: successorID, ClearLease: true,
+		Observed: obsJSON,
 	})
-	payload, _ := json.Marshal(map[string]any{"observed": observed})
-	_ = w.store.AppendLifecycleJobEvent(ctx, job.ID, "job.verified", payload)
-	_ = w.store.AppendRenewalOutboxEvent(ctx, "renewal.completed", job.PredecessorCertID, payload)
-	return nil
+	return w.store.ScheduleNextVerify(ctx, job.ID, attempt, next)
 }
 
 func (w *Worker) observeSuccessor(ctx context.Context, expected ExpectedWire) (ObservedWire, error) {

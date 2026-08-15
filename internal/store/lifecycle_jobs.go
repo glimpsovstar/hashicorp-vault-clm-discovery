@@ -106,6 +106,11 @@ func RenewIdempotencyKey(certID uuid.UUID, fingerprint string) string {
 	return fmt.Sprintf("renew:%s:%s", certID.String(), fingerprint)
 }
 
+// MigrateIdempotencyKey builds a stable key for Mode C migrate jobs.
+func MigrateIdempotencyKey(certID uuid.UUID, fingerprint string) string {
+	return fmt.Sprintf("migrate:%s:%s", certID.String(), fingerprint)
+}
+
 // InsertLifecycleJob inserts a job row. On unique idempotency conflict it returns
 // ErrLifecycleIdempotencyConflict (caller may Get by key).
 func (s *Store) InsertLifecycleJob(ctx context.Context, p InsertLifecycleJobParams) (LifecycleJob, error) {
@@ -429,6 +434,153 @@ func (s *Store) InsertLifecycleJobPending(ctx context.Context, certID uuid.UUID,
 	return job, nil
 }
 
+// PersistMigrateLaunch writes renewal config, inserts a migrate job in pending_verify
+// with AAP ref, and emits renewal.requested then renewal.launched before return.
+func (s *Store) PersistMigrateLaunch(ctx context.Context, certID uuid.UUID, cfg RenewalConfig, fingerprint string, aapJobID int, workflow bool, expected json.RawMessage, timeout time.Duration, nextVerifyAt time.Time) (LifecycleJob, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return LifecycleJob{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return LifecycleJob{}, err
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE certificates SET renewal_config = $2, updated_at = NOW() WHERE id = $1
+	`, certID, data)
+	if err != nil {
+		return LifecycleJob{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		return LifecycleJob{}, ErrCertificateNotFound
+	}
+
+	key := MigrateIdempotencyKey(certID, fingerprint)
+	if len(expected) == 0 {
+		expected = json.RawMessage(`{}`)
+	}
+	if timeout <= 0 {
+		timeout = 24 * time.Hour
+	}
+	timeoutAt := time.Now().UTC().Add(timeout)
+	if nextVerifyAt.IsZero() {
+		nextVerifyAt = time.Now().UTC().Add(10 * time.Second)
+	}
+	var job LifecycleJob
+	err = tx.QueryRow(ctx, `
+		INSERT INTO lifecycle_jobs (
+			kind, status, predecessor_cert_id, idempotency_key, expected,
+			aap_job_id, aap_workflow, next_verify_at, timeout_at, verify_attempt
+		) VALUES ('migrate', $1, $2, $3, $4, $5, $6, $7, $8, 0)
+		RETURNING id, kind, status, predecessor_cert_id, successor_cert_id,
+			aap_job_id, aap_workflow, idempotency_key, expected, observed,
+			failure_reason, lease_owner, lease_expires_at,
+			next_verify_at, timeout_at, verify_attempt, created_at, updated_at
+	`, LifecyclePendingVerify, certID, key, expected, aapJobID, workflow, nextVerifyAt.UTC(), timeoutAt).Scan(
+		&job.ID, &job.Kind, &job.Status, &job.PredecessorCertID, &job.SuccessorCertID,
+		&job.AAPJobID, &job.AAPWorkflow, &job.IdempotencyKey, &job.Expected, &job.Observed,
+		&job.FailureReason, &job.LeaseOwner, &job.LeaseExpiresAt,
+		&job.NextVerifyAt, &job.TimeoutAt, &job.VerifyAttempt, &job.CreatedAt, &job.UpdatedAt,
+	)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return LifecycleJob{}, ErrLifecycleIdempotencyConflict
+		}
+		return LifecycleJob{}, err
+	}
+
+	reqPayload, _ := json.Marshal(map[string]any{"certificate_id": certID, "kind": "migrate"})
+	if err := appendEventTx(ctx, tx, "renewal.requested", &certID, reqPayload); err != nil {
+		return LifecycleJob{}, err
+	}
+	launchPayload, _ := json.Marshal(map[string]any{
+		"aap_job_id": aapJobID, "workflow": workflow, "certificate_id": certID,
+	})
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO lifecycle_job_events (job_id, event_type, payload)
+		VALUES ($1, 'job.launched', $2)
+	`, job.ID, launchPayload); err != nil {
+		return LifecycleJob{}, err
+	}
+	if err := appendEventTx(ctx, tx, "renewal.launched", &certID, launchPayload); err != nil {
+		return LifecycleJob{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO lifecycle_approvals (job_id, actor, decision)
+		VALUES ($1, 'consent', 'auto_approved')
+	`, job.ID); err != nil {
+		return LifecycleJob{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return LifecycleJob{}, err
+	}
+	return job, nil
+}
+
+// InsertMigrateJobPending inserts a batch migrate job (EDA launches AAP).
+func (s *Store) InsertMigrateJobPending(ctx context.Context, certID uuid.UUID, fingerprint string, expected json.RawMessage, timeout time.Duration, nextVerifyAt time.Time) (LifecycleJob, error) {
+	key := MigrateIdempotencyKey(certID, fingerprint)
+	if timeout <= 0 {
+		timeout = 24 * time.Hour
+	}
+	if nextVerifyAt.IsZero() {
+		nextVerifyAt = time.Now().UTC().Add(10 * time.Second)
+	}
+	timeoutAt := time.Now().UTC().Add(timeout)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return LifecycleJob{}, err
+	}
+	defer tx.Rollback(ctx)
+	if len(expected) == 0 {
+		expected = json.RawMessage(`{}`)
+	}
+	var job LifecycleJob
+	err = tx.QueryRow(ctx, `
+		INSERT INTO lifecycle_jobs (
+			kind, status, predecessor_cert_id, idempotency_key, expected,
+			next_verify_at, timeout_at, verify_attempt
+		) VALUES ('migrate', $1, $2, $3, $4, $5, $6, 0)
+		RETURNING id, kind, status, predecessor_cert_id, successor_cert_id,
+			aap_job_id, aap_workflow, idempotency_key, expected, observed,
+			failure_reason, lease_owner, lease_expires_at,
+			next_verify_at, timeout_at, verify_attempt, created_at, updated_at
+	`, LifecyclePendingVerify, certID, key, expected, nextVerifyAt.UTC(), timeoutAt).Scan(
+		&job.ID, &job.Kind, &job.Status, &job.PredecessorCertID, &job.SuccessorCertID,
+		&job.AAPJobID, &job.AAPWorkflow, &job.IdempotencyKey, &job.Expected, &job.Observed,
+		&job.FailureReason, &job.LeaseOwner, &job.LeaseExpiresAt,
+		&job.NextVerifyAt, &job.TimeoutAt, &job.VerifyAttempt, &job.CreatedAt, &job.UpdatedAt,
+	)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return LifecycleJob{}, ErrLifecycleIdempotencyConflict
+		}
+		return LifecycleJob{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO lifecycle_approvals (job_id, actor, decision)
+		VALUES ($1, 'consent', 'auto_approved')
+	`, job.ID); err != nil {
+		return LifecycleJob{}, err
+	}
+	payload, _ := json.Marshal(map[string]any{"certificate_id": certID, "kind": "migrate"})
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO lifecycle_job_events (job_id, event_type, payload)
+		VALUES ($1, 'job.enqueued', $2)
+	`, job.ID, payload); err != nil {
+		return LifecycleJob{}, err
+	}
+	if err := appendEventTx(ctx, tx, "renewal.requested", &certID, payload); err != nil {
+		return LifecycleJob{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return LifecycleJob{}, err
+	}
+	return job, nil
+}
+
 func appendEventStandalone(ctx context.Context, s *Store, eventType string, certID *uuid.UUID, payload []byte) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -495,6 +647,7 @@ func (s *Store) ClaimDueVerifyJobs(ctx context.Context, now time.Time, limit int
 		WHERE status = 'pending_verify'
 		  AND next_verify_at IS NOT NULL
 		  AND next_verify_at <= $1
+		  AND timeout_at > $1
 		  AND (lease_expires_at IS NULL OR lease_expires_at < $1)
 		ORDER BY next_verify_at
 		FOR UPDATE SKIP LOCKED
@@ -562,6 +715,41 @@ func (s *Store) ScheduleNextVerify(ctx context.Context, id uuid.UUID, attempt in
 		return ErrLifecycleJobNotFound
 	}
 	return nil
+}
+
+// ExpireTimedOutVerifyJobs marks overdue pending_verify jobs as timed_out and
+// returns them so the worker can emit renewal.timed_out.
+func (s *Store) ExpireTimedOutVerifyJobs(ctx context.Context, now time.Time) ([]LifecycleJob, error) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	rows, err := s.pool.Query(ctx, `
+		UPDATE lifecycle_jobs SET
+			status = $2,
+			lease_owner = NULL,
+			lease_expires_at = NULL,
+			failure_reason = COALESCE(failure_reason, 'verify timeout'),
+			updated_at = NOW()
+		WHERE status = 'pending_verify'
+		  AND timeout_at <= $1
+		RETURNING id, kind, status, predecessor_cert_id, successor_cert_id,
+			aap_job_id, aap_workflow, idempotency_key, expected, observed,
+			failure_reason, lease_owner, lease_expires_at,
+			next_verify_at, timeout_at, verify_attempt, created_at, updated_at
+	`, now, LifecycleTimedOut)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []LifecycleJob
+	for rows.Next() {
+		job, err := scanLifecycleJobRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, job)
+	}
+	return out, rows.Err()
 }
 
 // ClaimByIdempotency attaches an AAP job id to an existing outbox-driven job

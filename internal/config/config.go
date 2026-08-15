@@ -73,6 +73,9 @@ type Config struct {
 	EventDispatchInterval time.Duration `envconfig:"EVENT_DISPATCH_INTERVAL" default:"15s"`
 	EventDispatchBatch    int           `envconfig:"EVENT_DISPATCH_BATCH" default:"50"`
 	EventMaxAttempts      int           `envconfig:"EVENT_MAX_ATTEMPTS" default:"10"`
+	// Lifecycle verify (Mode C migrate / renew): Pending until wire predicate or timeout.
+	LifecycleVerifyTimeout time.Duration `envconfig:"LIFECYCLE_VERIFY_TIMEOUT" default:"24h"`
+	LifecycleVerifyPoll    time.Duration `envconfig:"LIFECYCLE_VERIFY_POLL_INTERVAL" default:"5s"`
 	// ConnectionsKey is the AES-256-GCM key for Settings connection secrets
 	// (32-byte raw or 64-char hex). Empty means env-only mode: Compose defaults
 	// still work; persisting new secrets from the UI fails until the key is set.

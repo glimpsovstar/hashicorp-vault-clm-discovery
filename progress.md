@@ -14,6 +14,11 @@ North star and roadmap: `docs/program-context.md`.
 
 ## Done
 
+- **#78 GCM closed-loop roadmap** — M1–M5 (+ Connections #85, collectors #86,
+  migrate #87) documented as shipped; roadmap status and tracker checkboxes
+  updated. Umbrella closed via docs PR.
+- **#74 report severity thresholds** — shadow/issuer day cutoffs from
+  `CLM_REPORT_*_DAYS` SSR env; defaults preserve #73 rubric.
 - **#80 M2 durable lifecycle jobs** — migration `000009` (`lifecycle_jobs` +
   events/approvals), persist before renew 202, batch enqueue for
   `renew-expiring`, background worker (`WaitForJob` + wire verify),

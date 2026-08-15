@@ -1,8 +1,9 @@
 # GCM closed-loop tracker
 
-> Master checkbox list. Implement **one milestone issue at a time** using that milestone’s plan. Do not start M5 before M1–M2.
+> Master checkbox list. Core milestones **M1–M5** and follow-ons (#85–#87) are **shipped**. Use child plans only for residual/regression work.
 
-**Roadmap spec:** [2026-08-13-gcm-closed-loop-roadmap-design.md](../specs/2026-08-13-gcm-closed-loop-roadmap-design.md)
+**Roadmap spec:** [2026-08-13-gcm-closed-loop-roadmap-design.md](../specs/2026-08-13-gcm-closed-loop-roadmap-design.md)  
+**Umbrella:** [#78](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/78) — closed when M1–M5 + follow-ons documented as shipped.
 
 **Source:** `gcm-vault-pki-gap-analysis2.md` + parallel code research (2026-08-13).
 
@@ -28,10 +29,8 @@
 4. [x] **M3** Explainable posture — [#82](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/82) · [spec](../specs/2026-08-13-m3-explainable-posture-design.md) · [plan](2026-08-13-m3-explainable-posture.md)
 5. [x] **M5** Broader integrations — [#83](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/83) · [spec](../specs/2026-08-13-m5-broader-integrations-design.md) · [plan](2026-08-13-m5-broader-integrations.md)
 6. [x] **Connections Settings** (after M1) — [#85](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/85) · [spec](../specs/2026-08-13-connections-settings-design.md) · [plan](2026-08-13-connections-settings.md)
-7. [ ] **Migrate + pending verify** (after M2) — [#87](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/87) · [spec](../specs/2026-08-13-migrate-pending-verify-design.md) · [plan](2026-08-13-migrate-pending-verify.md)
-8. [ ] **ADCS then AKV collectors** (after M1; M5 sibling) — [#86](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/86) · [spec](../specs/2026-08-13-adcs-akv-collectors-design.md) · [plan](2026-08-13-adcs-akv-collectors.md)
-
-M3 can run after M1 (needs actor for waivers). M4 core can overlap M2 (M2 verify has a `scanrunner.Run` stopgap). Connections Settings consumes M1 AppRole. Migrate extends M2. Collectors must not ship collect APIs before M1.
+7. [x] **Migrate + pending verify** (after M2) — [#87](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/87) · [spec](../specs/2026-08-13-migrate-pending-verify-design.md) · [plan](2026-08-13-migrate-pending-verify.md)
+8. [x] **ADCS then AKV collectors** (after M1; M5 sibling) — [#86](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/86) · [spec](../specs/2026-08-13-adcs-akv-collectors-design.md) · [plan](2026-08-13-adcs-akv-collectors.md)
 
 ## Won’t do
 
@@ -46,3 +45,4 @@ M3 can run after M1 (needs actor for waivers). M4 core can overlap M2 (M2 verify
 - [x] SC-081 / PCI / crypto + scan report
 - [x] AAP renewal **launch** (kit, on-demand, batch)
 - [x] Outbox + EDA (`cert.revoked` only)
+- [x] M1–M5 closed loop + Connections / collectors / Mode C migrate (see Priority order)

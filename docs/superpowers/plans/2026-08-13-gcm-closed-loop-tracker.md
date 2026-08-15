@@ -23,8 +23,8 @@
 ## Priority order
 
 1. [ ] **M1** Secure the control plane — [#79](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/79) · [spec](../specs/2026-08-13-m1-control-plane-security-design.md) · [plan](2026-08-13-m1-control-plane-security.md)
-2. [ ] **M2** Durable jobs + wire verify — [#80](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/80) · [spec](../specs/2026-08-13-m2-durable-lifecycle-jobs-design.md) · [plan](2026-08-13-m2-durable-lifecycle-jobs.md)
-3. [ ] **M4 core** Durable scan queue — [#81](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/81) · [spec](../specs/2026-08-13-m4-durable-scan-queue-design.md) · [plan](2026-08-13-m4-durable-scan-queue.md)
+2. [x] **M2** Durable jobs + wire verify — [#80](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/80) · [spec](../specs/2026-08-13-m2-durable-lifecycle-jobs-design.md) · [plan](2026-08-13-m2-durable-lifecycle-jobs.md)
+3. [x] **M4 core** Durable scan queue — [#81](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/81) · [spec](../specs/2026-08-13-m4-durable-scan-queue-design.md) · [plan](2026-08-13-m4-durable-scan-queue.md)
 4. [ ] **M3** Explainable posture — [#82](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/82) · [spec](../specs/2026-08-13-m3-explainable-posture-design.md) · [plan](2026-08-13-m3-explainable-posture.md)
 5. [ ] **M5** Broader integrations — [#83](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/83) · [spec](../specs/2026-08-13-m5-broader-integrations-design.md) · [plan](2026-08-13-m5-broader-integrations.md)
 6. [ ] **Connections Settings** (after M1) — [#85](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/85) · [spec](../specs/2026-08-13-connections-settings-design.md) · [plan](2026-08-13-connections-settings.md)

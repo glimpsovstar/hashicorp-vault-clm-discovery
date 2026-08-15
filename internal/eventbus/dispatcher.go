@@ -28,7 +28,7 @@ import (
 
 // eventStore is the outbox surface the dispatcher needs (satisfied by *store.Store).
 type eventStore interface {
-	ListUndeliveredEvents(ctx context.Context, limit, maxAttempts int) ([]store.Event, error)
+	ClaimUndeliveredEvents(ctx context.Context, owner string, leaseTTL time.Duration, limit, maxAttempts int) ([]store.Event, error)
 	MarkEventDelivered(ctx context.Context, id uuid.UUID) error
 	MarkEventFailed(ctx context.Context, id uuid.UUID, errMsg string) error
 }
@@ -41,6 +41,8 @@ type Config struct {
 	Interval    time.Duration
 	BatchSize   int
 	MaxAttempts int
+	Owner       string
+	LeaseTTL    time.Duration
 }
 
 // Dispatcher polls the outbox and delivers events to the EDA webhook.
@@ -62,6 +64,12 @@ func New(cfg Config, st eventStore, log *slog.Logger) *Dispatcher {
 	}
 	if cfg.MaxAttempts <= 0 {
 		cfg.MaxAttempts = 10
+	}
+	if cfg.Owner == "" {
+		cfg.Owner = "eda-dispatcher"
+	}
+	if cfg.LeaseTTL <= 0 {
+		cfg.LeaseTTL = 2 * time.Minute
 	}
 	return &Dispatcher{
 		cfg:   cfg,
@@ -105,7 +113,7 @@ func (d *Dispatcher) Run(ctx context.Context) {
 // delivered and failed events. A per-event delivery failure is recorded and does
 // not stop the batch; only a store read error aborts the cycle.
 func (d *Dispatcher) RunOnce(ctx context.Context) (delivered, failed int, err error) {
-	events, err := d.store.ListUndeliveredEvents(ctx, d.cfg.BatchSize, d.cfg.MaxAttempts)
+	events, err := d.store.ClaimUndeliveredEvents(ctx, d.cfg.Owner, d.cfg.LeaseTTL, d.cfg.BatchSize, d.cfg.MaxAttempts)
 	if err != nil {
 		return 0, 0, err
 	}

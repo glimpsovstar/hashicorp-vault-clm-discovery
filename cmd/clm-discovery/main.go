@@ -77,6 +77,14 @@ func main() {
 		}()
 	}
 
+	// M4 durable scan queue: Postgres SKIP LOCKED claims (no in-memory channel).
+	logger.Info("starting scan worker", "slots", cfg.ScanWorkerSlots, "interval", cfg.ScanClaimInterval)
+	dispWG.Add(1)
+	go func() {
+		defer dispWG.Done()
+		srv.StartScanWorker(dispCtx)
+	}()
+
 	// M2 lifecycle worker: poll durable AAP jobs and verify wire state. Runs
 	// whenever Postgres is available; AAP launch/poll is inert without AAP URL.
 	var aapClient *aap.Client
@@ -112,7 +120,7 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 
-	dispCancel() // stop event dispatcher + lifecycle worker before draining HTTP
+	dispCancel() // stop event dispatcher + scan worker + lifecycle worker before draining HTTP
 	dispWG.Wait()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

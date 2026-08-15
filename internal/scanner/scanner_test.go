@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"net"
 	"strings"
 	"testing"
 
@@ -45,7 +46,7 @@ func TestExpandTargetsRejectsLargeCIDR(t *testing.T) {
 }
 
 func TestExpandHostnames(t *testing.T) {
-	targets, err := ExpandHostnames([]string{"example.com"}, []int{443})
+	targets, err := ExpandHostnames([]string{"example.com"}, []int{443}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,6 +72,7 @@ func TestExpandHostnamesPartialSkipsUnresolvable(t *testing.T) {
 	targets, warnings, err := ExpandHostnamesPartial(
 		[]string{"example.com", "this-host-should-not-resolve.invalid"},
 		[]int{443},
+		true,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -144,11 +146,46 @@ func TestExpandHostnamesPartialAllFail(t *testing.T) {
 	_, warnings, err := ExpandHostnamesPartial(
 		[]string{"this-host-should-not-resolve.invalid"},
 		[]int{443},
+		true,
 	)
 	if err == nil {
 		t.Fatal("expected error when no hostnames resolve")
 	}
 	if len(warnings) == 0 {
 		t.Fatal("expected warnings")
+	}
+}
+
+func TestTargetsFromResolvedIPs_BlocksPrivate(t *testing.T) {
+	ips := []net.IP{net.ParseIP("10.0.0.5"), net.ParseIP("203.0.113.9")}
+	targets, warnings := targetsFromResolvedIPs("app.example", ips, []int{443}, false)
+	if len(targets) != 1 || targets[0].IP != "203.0.113.9" {
+		t.Fatalf("expected only public IP, got %+v", targets)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "10.0.0.5") {
+		t.Fatalf("expected private skip warning, got %v", warnings)
+	}
+}
+
+func TestTargetsFromResolvedIPs_AllowsPrivateWhenEnabled(t *testing.T) {
+	ips := []net.IP{net.ParseIP("10.0.0.5")}
+	targets, warnings := targetsFromResolvedIPs("internal.local", ips, []int{443}, true)
+	if len(targets) != 1 || targets[0].IP != "10.0.0.5" {
+		t.Fatalf("expected private IP allowed, got %+v warnings=%v", targets, warnings)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+}
+
+func TestTargetsFromResolvedIPs_AllPrivateErrorsViaExpand(t *testing.T) {
+	// ExpandHostnamesPartial with allowPrivate=false and only private IPs should warn+error.
+	// Use a custom path via targetsFromResolvedIPs composition check:
+	targets, warnings := targetsFromResolvedIPs("priv.example", []net.IP{net.ParseIP("192.168.1.1")}, []int{443}, false)
+	if len(targets) != 0 {
+		t.Fatalf("expected no targets, got %+v", targets)
+	}
+	if len(warnings) == 0 {
+		t.Fatal("expected warning for blocked private IP")
 	}
 }

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -23,7 +22,6 @@ import (
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/renewal"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/revocation"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanner"
-	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanrunner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/vault"
 )
@@ -139,7 +137,7 @@ type Server struct {
 // scanCreator is the POST /scans persist seam. Production uses *store.Store;
 // RBAC tests inject a stub so consent/RBAC can be asserted without Postgres.
 type scanCreator interface {
-	CreateScan(ctx context.Context, cidrs, hostnames []string, ports []int, concurrency int) (store.Scan, error)
+	CreateScan(ctx context.Context, cidrs, hostnames []string, ports []int, concurrency, maxPending int) (store.Scan, error)
 }
 
 func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slog.Logger) *Server {
@@ -191,6 +189,14 @@ func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slo
 		s.auditor = &storeAuditor{st: st}
 	}
 	return s
+}
+
+// StartScanWorker runs the durable scan queue poller until ctx is cancelled.
+func (s *Server) StartScanWorker(ctx context.Context) {
+	if s == nil || s.worker == nil {
+		return
+	}
+	s.worker.Run(ctx)
 }
 
 func (s *Server) Router() http.Handler {
@@ -300,13 +306,20 @@ func (s *Server) handleCreateScan(w http.ResponseWriter, r *http.Request) {
 	if create == nil {
 		create = s.store
 	}
-	scan, err := create.CreateScan(r.Context(), req.CIDRs, req.Hostnames, req.Ports, req.Concurrency)
+	maxPending := s.cfg.ScanQueueMaxPending
+	if maxPending <= 0 {
+		maxPending = 32
+	}
+	scan, err := create.CreateScan(r.Context(), req.CIDRs, req.Hostnames, req.Ports, req.Concurrency, maxPending)
 	if err != nil {
+		if errors.Is(err, store.ErrScanQueueFull) {
+			writeError(w, r, http.StatusServiceUnavailable, "scan queue full; retry later")
+			return
+		}
 		s.writeServerError(w, r, err, "failed to create scan")
 		return
 	}
 
-	s.worker.Enqueue(scan.ID, req.CIDRs, req.Hostnames, req.Ports, req.Concurrency)
 	s.auditAllow(r, "create_scan", "scan", scan.ID.String(), map[string]any{
 		"cidrs": req.CIDRs, "hostnames": req.Hostnames, "ports": req.Ports,
 	})
@@ -1191,49 +1204,4 @@ func pagination(r *http.Request) (int, int) {
 		offset = 0
 	}
 	return limit, offset
-}
-
-type scanJob struct {
-	ID          uuid.UUID
-	CIDRs       []string
-	Hostnames   []string
-	Ports       []int
-	Concurrency int
-}
-
-type ScanWorker struct {
-	srv  *Server
-	jobs chan scanJob
-	once sync.Once
-}
-
-func NewScanWorker(srv *Server) *ScanWorker {
-	w := &ScanWorker{srv: srv, jobs: make(chan scanJob, 32)}
-	w.once.Do(func() { go w.run() })
-	return w
-}
-
-func (w *ScanWorker) Enqueue(id uuid.UUID, cidrs, hostnames []string, ports []int, concurrency int) {
-	w.jobs <- scanJob{ID: id, CIDRs: cidrs, Hostnames: hostnames, Ports: ports, Concurrency: concurrency}
-}
-
-func (w *ScanWorker) run() {
-	for job := range w.jobs {
-		w.execute(job)
-	}
-}
-
-func (w *ScanWorker) execute(job scanJob) {
-	ctx := context.Background()
-	runner := scanrunner.New(w.srv.store, w.srv.scanner, w.srv.log, w.srv.cfg.LogLevel, w.srv.cfg.AllowPrivateRanges)
-	err := runner.Run(ctx, scanrunner.Job{
-		ScanID:      job.ID,
-		CIDRs:       job.CIDRs,
-		Hostnames:   job.Hostnames,
-		Ports:       job.Ports,
-		Concurrency: job.Concurrency,
-	})
-	if err == nil {
-		w.srv.maybeReconcileAfterScan(ctx, job.ID)
-	}
 }

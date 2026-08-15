@@ -150,7 +150,9 @@ Only scan networks you own or have explicit permission to test. The API and CLI 
 
 **Consent is not authorization.** RBAC runs first: an unauthenticated or under-privileged caller with `consent:true` gets **401/403**, not 400. After the caller is authorized, `consent:false` (or missing) on a consent-gated mutation still returns **400**. Checking the dashboard consent box does not grant a role.
 
-Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVATE_RANGES=true`.
+Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVATE_RANGES=true` (applies to CIDR targets and to IPs resolved from hostnames).
+
+`POST /api/v1/scans` enqueues a durable `pending` row and returns **202** immediately. A background poller claims work with Postgres `FOR UPDATE SKIP LOCKED` (safe across API replicas; Compose still runs **one** API replica by default). Too many pending scans → **503**.
 
 ## Environment variables
 
@@ -160,9 +162,14 @@ Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVA
 | `ADDR` | `:8080` | API listen address |
 | `LOG_LEVEL` | `info` | Structured log verbosity: `info`, `debug`, `trace`, `warn`, `error` |
 | `CORS_ORIGINS` | `http://localhost:3000` | Allowed CORS origins (comma-separated) |
-| `ALLOW_PRIVATE_RANGES` | `false` | Allow scanning RFC1918/loopback ranges |
+| `ALLOW_PRIVATE_RANGES` | `false` | Allow scanning RFC1918/loopback/link-local ranges (CIDRs **and** hostname-resolved IPs) |
 | `SCAN_TIMEOUT` | `5s` | Per-target TLS probe timeout |
-| `DEFAULT_CONCURRENCY` | `50` | Default scan worker concurrency |
+| `DEFAULT_CONCURRENCY` | `50` | Default per-scan probe concurrency |
+| `SCAN_QUEUE_MAX_PENDING` | `32` | Max pending scan rows; further `POST /scans` → 503 |
+| `SCAN_WORKER_SLOTS` | `2` | Concurrent claimed scans per API process |
+| `SCAN_CLAIM_INTERVAL` | `2s` | How often the poller looks for claimable scans |
+| `SCAN_LEASE_TTL` | `30s` | Stale `claimed_at` older than this is reclaimable |
+| `SCAN_WORKER_ID` | (hostname+id) | Claim owner identity for this process |
 | `EXPIRING_SOON_DAYS` | `30` | Days before expiry for `expiring_soon` status (also the default `renew-expiring` window) |
 | **Vault (reconcile / import)** | | |
 | `VAULT_ADDR` | (empty) | HashiCorp Vault API address; empty disables Vault integration |

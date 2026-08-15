@@ -68,14 +68,16 @@ func ExpandTargets(cidrs []string, ports []int, allowPrivate bool) ([]Target, er
 	return targets, nil
 }
 
-func ExpandHostnames(hostnames []string, ports []int) ([]Target, error) {
-	targets, _, err := ExpandHostnamesPartial(hostnames, ports)
+func ExpandHostnames(hostnames []string, ports []int, allowPrivate bool) ([]Target, error) {
+	targets, _, err := ExpandHostnamesPartial(hostnames, ports, allowPrivate)
 	return targets, err
 }
 
 // ExpandHostnamesPartial resolves hostnames to scan targets. Unresolvable names
 // are skipped and returned as warnings so other hostnames can still be scanned.
-func ExpandHostnamesPartial(hostnames []string, ports []int) ([]Target, []string, error) {
+// Resolved IPs in private/loopback/link-local ranges are skipped (with a warning)
+// unless allowPrivate is true — matching CIDR private-range policy.
+func ExpandHostnamesPartial(hostnames []string, ports []int, allowPrivate bool) ([]Target, []string, error) {
 	var targets []Target
 	var warnings []string
 	for _, host := range hostnames {
@@ -92,18 +94,10 @@ func ExpandHostnamesPartial(hostnames []string, ports []int) ([]Target, []string
 			warnings = append(warnings, fmt.Sprintf("skipped %q: no addresses", host))
 			continue
 		}
-		added := false
-		for _, ip := range ips {
-			ip4 := ip.To4()
-			if ip4 == nil {
-				continue
-			}
-			added = true
-			for _, port := range ports {
-				targets = append(targets, Target{IP: ip4.String(), Port: port, Hostname: host})
-			}
-		}
-		if !added {
+		hostTargets, hostWarnings := targetsFromResolvedIPs(host, ips, ports, allowPrivate)
+		warnings = append(warnings, hostWarnings...)
+		targets = append(targets, hostTargets...)
+		if len(hostTargets) == 0 && len(hostWarnings) == 0 {
 			warnings = append(warnings, fmt.Sprintf("skipped %q: no IPv4 addresses", host))
 		}
 	}
@@ -114,6 +108,36 @@ func ExpandHostnamesPartial(hostnames []string, ports []int) ([]Target, []string
 		return nil, warnings, fmt.Errorf("no targets from hostnames")
 	}
 	return targets, warnings, nil
+}
+
+// targetsFromResolvedIPs maps DNS answers to scan targets, applying the same
+// private-range policy used for CIDR expansion (IPv4 only in v1 core).
+func targetsFromResolvedIPs(host string, ips []net.IP, ports []int, allowPrivate bool) ([]Target, []string) {
+	var targets []Target
+	var warnings []string
+	added := false
+	for _, ip := range ips {
+		ip4 := ip.To4()
+		if ip4 == nil {
+			continue
+		}
+		addr, ok := netip.AddrFromSlice(ip4)
+		if !ok {
+			continue
+		}
+		if !allowPrivate && isPrivateAddr(addr) {
+			warnings = append(warnings, fmt.Sprintf("skipped %q → %s: private range blocked; set ALLOW_PRIVATE_RANGES=true", host, ip4.String()))
+			continue
+		}
+		added = true
+		for _, port := range ports {
+			targets = append(targets, Target{IP: ip4.String(), Port: port, Hostname: host})
+		}
+	}
+	if !added && len(warnings) == 0 {
+		warnings = append(warnings, fmt.Sprintf("skipped %q: no IPv4 addresses", host))
+	}
+	return targets, warnings
 }
 
 func ExpandScanTargets(cidrs, hostnames []string, ports []int, allowPrivate bool) ([]Target, []string, error) {
@@ -127,7 +151,7 @@ func ExpandScanTargets(cidrs, hostnames []string, ports []int, allowPrivate bool
 		targets = append(targets, fromCIDR...)
 	}
 	if len(hostnames) > 0 {
-		fromHost, hostWarnings, err := ExpandHostnamesPartial(hostnames, ports)
+		fromHost, hostWarnings, err := ExpandHostnamesPartial(hostnames, ports, allowPrivate)
 		warnings = append(warnings, hostWarnings...)
 		if err != nil && len(fromHost) == 0 && len(targets) == 0 {
 			return nil, warnings, err
@@ -141,7 +165,10 @@ func ExpandScanTargets(cidrs, hostnames []string, ports []int, allowPrivate bool
 }
 
 func isPrivatePrefix(p netip.Prefix) bool {
-	addr := p.Addr()
+	return isPrivateAddr(p.Addr())
+}
+
+func isPrivateAddr(addr netip.Addr) bool {
 	return addr.IsPrivate() || addr.IsLoopback() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast()
 }
 

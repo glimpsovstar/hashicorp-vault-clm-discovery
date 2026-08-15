@@ -79,13 +79,17 @@ type revokeLauncher interface {
 	Revoke(ctx context.Context, extraVars map[string]any) (RenewRef, error)
 }
 
-// lifecycleJobsStore persists durable renew jobs (M2). Injectable for handler tests.
+// lifecycleJobsStore persists durable renew/migrate jobs (M2 + #87). Injectable for handler tests.
 type lifecycleJobsStore interface {
 	PersistRenewLaunch(ctx context.Context, certID uuid.UUID, cfg store.RenewalConfig, fingerprint string, aapJobID int, workflow bool, expected json.RawMessage) (store.LifecycleJob, error)
+	PersistMigrateLaunch(ctx context.Context, certID uuid.UUID, cfg store.RenewalConfig, fingerprint string, aapJobID int, workflow bool, expected json.RawMessage, timeout time.Duration, nextVerifyAt time.Time) (store.LifecycleJob, error)
 	InsertLifecycleJobPending(ctx context.Context, certID uuid.UUID, fingerprint string, expected json.RawMessage) (store.LifecycleJob, error)
+	InsertMigrateJobPending(ctx context.Context, certID uuid.UUID, fingerprint string, expected json.RawMessage, timeout time.Duration, nextVerifyAt time.Time) (store.LifecycleJob, error)
 	GetLifecycleJob(ctx context.Context, id uuid.UUID) (store.LifecycleJob, error)
 	ListLifecycleJobsByCert(ctx context.Context, certID uuid.UUID, limit int) ([]store.LifecycleJob, error)
 	GetLifecycleJobByIdempotency(ctx context.Context, key string) (store.LifecycleJob, error)
+	ClaimByIdempotency(ctx context.Context, key string, aapJobID int) (store.LifecycleJob, error)
+	AppendRenewalOutboxEvent(ctx context.Context, eventType string, certID *uuid.UUID, payload json.RawMessage) error
 }
 
 // aapRenewer is the production renewLauncher backed by an AAP Controller client.
@@ -272,6 +276,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/certificates/{id}/renewal-kit", s.handleRenewalKit)
 		r.Post("/certificates/{id}/revocation-check", s.handleRevocationCheck)
 		r.Post("/certificates/{id}/renew", s.handleRenewCertificate)
+		r.Post("/certificates/{id}/migrate", s.handleMigrateCertificate)
 		r.Post("/certificates/{id}/revoke", s.handleRevokeCertificate)
 		r.Patch("/certificates/{id}", s.handlePatchCertificate)
 		r.Post("/certificates/{id}/catalog-import", s.handleCatalogImport)
@@ -284,11 +289,13 @@ func (s *Server) Router() http.Handler {
 
 		r.Post("/reconcile", s.handleReconcile)
 		r.Post("/renew-expiring", s.handleRenewExpiring)
+		r.Post("/migrate-eligible", s.handleMigrateEligible)
 		r.Get("/inventory", s.handleInventory)
 		r.Get("/inventory/pqc", s.handlePQCInventory)
 		r.Get("/events", s.handleListEvents)
 		r.Get("/lifecycle-jobs/{id}", s.handleGetLifecycleJob)
 		r.Get("/certificates/{id}/lifecycle-jobs", s.handleListCertLifecycleJobs)
+		r.Post("/lifecycle-jobs/claim", s.handleClaimLifecycleJob)
 
 		r.Get("/blindspot", s.handleGetBlindSpot)
 		r.Get("/compliance/summary", s.handleGetComplianceSummary)
@@ -757,6 +764,283 @@ func (s *Server) handleRenewCertificate(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// handleMigrateCertificate launches Mode C migrate (Vault issues a new cert via
+// AAP). Never accepts a leaf PEM. Persist-before-202; no WaitForJob on the request.
+func (s *Server) handleMigrateCertificate(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid certificate id")
+		return
+	}
+	if s.renewer == nil {
+		writeError(w, r, http.StatusServiceUnavailable, "AAP not configured")
+		return
+	}
+	if s.lifecycle == nil {
+		writeError(w, r, http.StatusServiceUnavailable, "lifecycle jobs store not configured")
+		return
+	}
+
+	var body struct {
+		Consent     bool   `json:"consent"`
+		Mount       string `json:"mount"`
+		Role        string `json:"role"`
+		Service     string `json:"service"`
+		TargetHosts string `json:"target_hosts"`
+		TTL         string `json:"ttl"`
+		AltNames    string `json:"alt_names"`
+		PEM         string `json:"pem"` // rejected — CLM never uploads leaf PEMs
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if strings.TrimSpace(body.PEM) != "" {
+		writeError(w, r, http.StatusBadRequest, "leaf PEM upload is not supported; Migrate to Vault issues a new certificate via AAP")
+		return
+	}
+	if !body.Consent {
+		writeError(w, r, http.StatusBadRequest, "consent required to migrate to Vault")
+		return
+	}
+
+	cert, err := s.resources.GetCertificate(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrCertificateNotFound) {
+			writeError(w, r, http.StatusNotFound, "certificate not found")
+			return
+		}
+		s.writeServerError(w, r, err, "failed to load certificate")
+		return
+	}
+
+	hasObs := cert.ObservationCount > 0
+	if !hasObs && s.store != nil {
+		if obs, oerr := s.store.GetCertificateObservations(r.Context(), id); oerr == nil && len(obs) > 0 {
+			hasObs = true
+		}
+	}
+	openMigrate := false
+	if existing, gerr := s.lifecycle.GetLifecycleJobByIdempotency(r.Context(), store.MigrateIdempotencyKey(id, cert.FingerprintSHA256)); gerr == nil {
+		if hasOpenMigrateStatus(existing.Status) {
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"status":           existing.Status,
+				"user_status":      store.UserStatus(existing.Status),
+				"lifecycle_job_id": existing.ID,
+				"timeout_at":       existing.TimeoutAt,
+				"next_verify_at":   existing.NextVerifyAt,
+				"idempotent":       true,
+			})
+			return
+		}
+	} else if !errors.Is(gerr, store.ErrLifecycleJobNotFound) && gerr != nil {
+		// unknown key is fine; other errors fail below when persisting
+		_ = openMigrate
+	}
+	if err := migrateEligible(cert, hasObs, openMigrate); err != nil {
+		switch {
+		case errors.Is(err, errMigrateCA):
+			writeError(w, r, http.StatusConflict, err.Error())
+		case errors.Is(err, errMigrateManaged):
+			writeError(w, r, http.StatusConflict, err.Error())
+		default:
+			writeError(w, r, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
+
+	cn := strings.TrimSpace(*cert.SubjectCN)
+	mount := strings.TrimSpace(body.Mount)
+	if mount == "" {
+		mount = s.cfg.AAPDefaultMount
+	}
+	cfg := store.RenewalConfig{
+		Role:        strings.TrimSpace(body.Role),
+		Mount:       mount,
+		Service:     strings.TrimSpace(body.Service),
+		TargetHosts: strings.TrimSpace(body.TargetHosts),
+		TTL:         strings.TrimSpace(body.TTL),
+		AltNames:    strings.TrimSpace(body.AltNames),
+	}
+	if err := validateRenewalLaunch(cn, cfg); err != nil {
+		writeError(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	ref, err := s.launchRenewal(r.Context(), cn, cfg)
+	if err != nil {
+		s.log.Warn("aap migrate launch failed", "action", "migrate", "certificate_id", id.String(), "err", err)
+		writeError(w, r, http.StatusBadGateway, "failed to launch AAP migrate")
+		return
+	}
+
+	expected, _ := json.Marshal(map[string]any{
+		"common_name":             cn,
+		"predecessor_fingerprint": cert.FingerprintSHA256,
+		"predecessor_not_after":   cert.NotAfter.UTC().Format(time.RFC3339),
+		"target_hosts":            cfg.TargetHosts,
+	})
+	timeout := s.cfg.LifecycleVerifyTimeout
+	if timeout <= 0 {
+		timeout = 24 * time.Hour
+	}
+	next := time.Now().UTC().Add(10 * time.Second)
+	job, perr := s.lifecycle.PersistMigrateLaunch(r.Context(), id, cfg, cert.FingerprintSHA256, ref.JobID, ref.Workflow, expected, timeout, next)
+	if perr != nil {
+		if errors.Is(perr, store.ErrLifecycleIdempotencyConflict) {
+			existing, gerr := s.lifecycle.GetLifecycleJobByIdempotency(r.Context(), store.MigrateIdempotencyKey(id, cert.FingerprintSHA256))
+			if gerr == nil {
+				writeJSON(w, http.StatusAccepted, map[string]any{
+					"status":           existing.Status,
+					"user_status":      store.UserStatus(existing.Status),
+					"lifecycle_job_id": existing.ID,
+					"timeout_at":       existing.TimeoutAt,
+					"next_verify_at":   existing.NextVerifyAt,
+					"idempotent":       true,
+				})
+				return
+			}
+		}
+		s.log.Warn("persist migrate job failed", "action", "migrate", "certificate_id", id.String(), "aap_job_id", ref.JobID, "err", perr)
+		writeError(w, r, http.StatusInternalServerError, "failed to persist lifecycle job")
+		return
+	}
+
+	s.log.Info("aap migrate launched", "action", "migrate", "certificate_id", id.String(), "job_id", ref.JobID, "lifecycle_job_id", job.ID.String())
+	s.auditAllow(r, "migrate", "certificate", id.String(), map[string]any{
+		"mount": mount, "role": cfg.Role, "job_id": ref.JobID, "lifecycle_job_id": job.ID.String(),
+	})
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"status":           job.Status,
+		"user_status":      store.UserStatus(job.Status),
+		"lifecycle_job_id": job.ID,
+		"timeout_at":       job.TimeoutAt,
+		"next_verify_at":   job.NextVerifyAt,
+		"job":              ref,
+		"common_name":      cn,
+		"mount":            mount,
+		"role":             cfg.Role,
+	})
+}
+
+// handleMigrateEligible enqueues migrate jobs for eligible leaves without calling AAP.
+func (s *Server) handleMigrateEligible(w http.ResponseWriter, r *http.Request) {
+	if s.lifecycle == nil {
+		writeError(w, r, http.StatusServiceUnavailable, "lifecycle jobs store not configured")
+		return
+	}
+	if s.renewer == nil && strings.TrimSpace(s.cfg.EDAWebhookURL) == "" {
+		writeError(w, r, http.StatusServiceUnavailable, "AAP and EDA webhook both unset")
+		return
+	}
+
+	var body struct {
+		Consent bool `json:"consent"`
+		Limit   int  `json:"limit"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if !body.Consent {
+		writeError(w, r, http.StatusBadRequest, "consent required")
+		return
+	}
+	limit := body.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	certs, _, err := s.resources.ListCertificates(r.Context(), store.CertificateFilter{Limit: limit * 4})
+	if err != nil {
+		s.writeServerError(w, r, err, "failed to list certificates")
+		return
+	}
+
+	timeout := s.cfg.LifecycleVerifyTimeout
+	if timeout <= 0 {
+		timeout = 24 * time.Hour
+	}
+	next := time.Now().UTC().Add(10 * time.Second)
+	enqueued := 0
+	for _, c := range certs {
+		if enqueued >= limit {
+			break
+		}
+		hasObs := c.ObservationCount > 0
+		open := false
+		if existing, gerr := s.lifecycle.GetLifecycleJobByIdempotency(r.Context(), store.MigrateIdempotencyKey(c.ID, c.FingerprintSHA256)); gerr == nil {
+			open = hasOpenMigrateStatus(existing.Status)
+		}
+		if err := migrateEligible(c, hasObs, open); err != nil {
+			continue
+		}
+		cn := ""
+		if c.SubjectCN != nil {
+			cn = *c.SubjectCN
+		}
+		expected, _ := json.Marshal(map[string]any{
+			"common_name":             cn,
+			"predecessor_fingerprint": c.FingerprintSHA256,
+			"predecessor_not_after":   c.NotAfter.UTC().Format(time.RFC3339),
+		})
+		if _, jerr := s.lifecycle.InsertMigrateJobPending(r.Context(), c.ID, c.FingerprintSHA256, expected, timeout, next); jerr != nil {
+			if errors.Is(jerr, store.ErrLifecycleIdempotencyConflict) {
+				continue
+			}
+			s.log.Warn("migrate-eligible enqueue failed", "certificate_id", c.ID.String(), "err", jerr)
+			continue
+		}
+		enqueued++
+	}
+	s.auditAllow(r, "migrate_eligible", "certificates", "", map[string]any{"enqueued": enqueued})
+	writeJSON(w, http.StatusAccepted, map[string]any{"enqueued": enqueued})
+}
+
+// handleClaimLifecycleJob attaches an AAP job id from EDA (policy/batch path).
+func (s *Server) handleClaimLifecycleJob(w http.ResponseWriter, r *http.Request) {
+	if s.lifecycle == nil {
+		writeError(w, r, http.StatusServiceUnavailable, "lifecycle jobs store not configured")
+		return
+	}
+	var body struct {
+		IdempotencyKey string `json:"idempotency_key"`
+		AAPJobID       int    `json:"aap_job_id"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if strings.TrimSpace(body.IdempotencyKey) == "" || body.AAPJobID <= 0 {
+		writeError(w, r, http.StatusBadRequest, "idempotency_key and aap_job_id required")
+		return
+	}
+	before, berr := s.lifecycle.GetLifecycleJobByIdempotency(r.Context(), body.IdempotencyKey)
+	job, err := s.lifecycle.ClaimByIdempotency(r.Context(), body.IdempotencyKey, body.AAPJobID)
+	if err != nil {
+		if errors.Is(err, store.ErrLifecycleAAPRefConflict) {
+			writeError(w, r, http.StatusConflict, "aap_job_id conflict")
+			return
+		}
+		if errors.Is(err, store.ErrLifecycleJobNotFound) {
+			writeError(w, r, http.StatusNotFound, "lifecycle job not found")
+			return
+		}
+		s.writeServerError(w, r, err, "failed to claim lifecycle job")
+		return
+	}
+	first := berr == nil && before.AAPJobID == nil
+	if first {
+		payload, _ := json.Marshal(map[string]any{"aap_job_id": body.AAPJobID, "idempotency_key": body.IdempotencyKey})
+		_ = s.lifecycle.AppendRenewalOutboxEvent(r.Context(), "renewal.launched", job.PredecessorCertID, payload)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":          job.ID,
+		"status":      job.Status,
+		"user_status": store.UserStatus(job.Status),
+		"aap_job_id":  job.AAPJobID,
+	})
+}
+
 // validateRenewalLaunch validates a CN + renewal config before it flows to AAP.
 // The CN is from the scanned cert (attacker-shaped); mount/role/service/
 // target_hosts/ttl/alt_names all become AAP extra_vars, which Ansible
@@ -1006,7 +1290,26 @@ func (s *Server) handleGetLifecycleJob(w http.ResponseWriter, r *http.Request) {
 		s.writeServerError(w, r, err, "failed to load lifecycle job")
 		return
 	}
-	writeJSON(w, http.StatusOK, job)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":                job.ID,
+		"kind":              job.Kind,
+		"job_kind":          job.Kind,
+		"status":            job.Status,
+		"user_status":       store.UserStatus(job.Status),
+		"predecessor_cert_id": job.PredecessorCertID,
+		"successor_cert_id": job.SuccessorCertID,
+		"aap_job_id":        job.AAPJobID,
+		"aap_workflow":      job.AAPWorkflow,
+		"idempotency_key":   job.IdempotencyKey,
+		"expected":          job.Expected,
+		"observed":          job.Observed,
+		"failure_reason":    job.FailureReason,
+		"next_verify_at":    job.NextVerifyAt,
+		"timeout_at":        job.TimeoutAt,
+		"verify_attempt":    job.VerifyAttempt,
+		"created_at":        job.CreatedAt,
+		"updated_at":        job.UpdatedAt,
+	})
 }
 
 func (s *Server) handleListCertLifecycleJobs(w http.ResponseWriter, r *http.Request) {

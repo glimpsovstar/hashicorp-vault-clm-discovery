@@ -9,6 +9,7 @@ import {
   type FindingSeverity,
 } from "@/lib/findings";
 import CatalogImportButton from "@/components/catalog-import-button";
+import MigrateToVaultButton from "@/components/migrate-to-vault-button";
 import ImportCAButton from "@/components/import-ca-button";
 
 const SEVERITY_ORDER: FindingSeverity[] = ["critical", "high", "medium", "low", "info"];
@@ -228,6 +229,7 @@ function FindingRow({ f }: { f: Finding }) {
               </div>
               <div className="finding-detail-actions">
                 {f.cert && <CatalogImportButton cert={f.cert} />}
+                {f.cert && <MigrateToVaultButton cert={f.cert} compact />}
                 {f.issuer && <ImportCAButton issuer={f.issuer} />}
                 {f.cert && (
                   <Link className="button button-secondary" href={`/certificates/${f.cert.id}`}>

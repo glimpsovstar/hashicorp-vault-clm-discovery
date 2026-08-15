@@ -62,13 +62,16 @@ flowchart TB
 - `risk_score = max(non-waived)` with `risk_reasons[]`; waivers suppress score/count, not hide
 - Recompute on scan complete and enrichment PATCH
 
-### Lifecycle job worker (`internal/lifecyclejobs`, M2)
+### Lifecycle job worker (`internal/lifecyclejobs`, M2 + #87)
 
-- Persists `lifecycle_jobs` before renew **202** (on-demand includes `aap_job_id`; batch enqueues `launching`)
+- Persists `lifecycle_jobs` before renew/migrate **202** (on-demand includes `aap_job_id`; batch migrate emits `renewal.requested` only)
 - Claims expired leases (`FOR UPDATE SKIP LOCKED`); polls with existing `aap.WaitForJob` — **never** on `r.Context()`
 - Maps `aap.Status*` → CLM status; does not double-launch when `aap_job_id` is set
-- Wire verify: same CN, **new** fingerprint, later `not_after`; `renewal.completed` only after **verified**
+- After AAP success (or on migrate kickoff): **`pending_verify`** with backoff (`next_verify_at`); user badge **Pending**
+- Wire verify: same CN, **new** fingerprint, later `not_after`; emit **`renewal.verified`** (not `renewal.completed` for migrate). Timeout → **`renewal.timed_out`**
+- **EDA does not rescan** — CLM owns the verify loop
 - Stopgap observe via inventory lookup / `ListCertificates` until M4 durable scan claims
+
 ### Store (`internal/store`)
 
 - PostgreSQL persistence with upsert-by-fingerprint

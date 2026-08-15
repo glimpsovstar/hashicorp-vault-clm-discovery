@@ -23,6 +23,8 @@ var configEnvKeys = []string{
 	"SCAN_CLAIM_INTERVAL",
 	"SCAN_LEASE_TTL",
 	"SCAN_WORKER_ID",
+	"LIFECYCLE_VERIFY_TIMEOUT",
+	"LIFECYCLE_VERIFY_POLL_INTERVAL",
 	"CLM_CONNECTIONS_KEY",
 	"CLM_INSECURE_NO_AUTH",
 	"CLM_AUTH_MODE",
@@ -94,6 +96,12 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	}
 	if cfg.LogLevel != "info" {
 		t.Fatalf("LogLevel = %q, want info", cfg.LogLevel)
+	}
+	if cfg.LifecycleVerifyTimeout != 24*time.Hour {
+		t.Fatalf("LifecycleVerifyTimeout = %v, want 24h", cfg.LifecycleVerifyTimeout)
+	}
+	if cfg.LifecycleVerifyPoll != 5*time.Second {
+		t.Fatalf("LifecycleVerifyPoll = %v, want 5s", cfg.LifecycleVerifyPoll)
 	}
 	if cfg.ConnectionsKey != "" {
 		t.Fatalf("ConnectionsKey = %q, want empty", cfg.ConnectionsKey)

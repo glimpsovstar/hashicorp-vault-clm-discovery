@@ -150,7 +150,7 @@ Durable Mode C renew/migrate tracking (M2 + #87). Handlers stay **202**; a backg
 | `successor_cert_id` | uuid | New cert after verify (nullable) |
 | `aap_job_id` | int | Controller job id (set before 202 on on-demand renew) |
 | `aap_workflow` | bool | Workflow vs job template |
-| `idempotency_key` | text unique | `renew:<cert_id>:<fingerprint>` (migrate uses its own prefix when added) |
+| `idempotency_key` | text unique | `renew:<cert_id>:<fingerprint>` or `migrate:<cert_id>:<fingerprint>` |
 | `expected` / `observed` | jsonb | Wire verify inputs/outputs |
 | `lease_owner` / `lease_expires_at` | text / timestamptz | Worker claim (SKIP LOCKED) |
 | `next_verify_at` | timestamptz | When `pending_verify` is due for the next backoff check |
@@ -161,7 +161,7 @@ Related: `lifecycle_job_events` (append-only timeline), `lifecycle_approvals` (a
 
 Operator badge via `UserStatus`: Pending / Verified / Timed out / Failed.
 
-`renewal.launched` / `renewal.completed` / `renewal.failed` also go to the EDA outbox; **completed only after verified** (migrate will use `renewal.verified` / `renewal.timed_out`).
+`renewal.requested` / `renewal.launched` / `renewal.verified` / `renewal.timed_out` / `renewal.failed` go to the EDA outbox. **Verified only after the wire predicate**; migrate does **not** emit `renewal.completed`.
 
 ### EDA outbox catalogue (`events`, migration `000006`)
 
@@ -173,10 +173,12 @@ Transactional outbox delivered to Ansible EDA. `GET /api/v1/events?event_type=` 
 | `cert.expiring` | Status becomes `expiring_soon` | same |
 | `cert.revoked` | Signature-verified revoke / Vault reconcile | includes `source` |
 | `blind_spot.detected` | First upsert (default unmanaged) | same as discovered |
-| `renewal.requested` | Batch enqueue | renew job metadata |
-| `renewal.launched` | AAP job id persisted | renew job metadata |
-| `renewal.completed` | Wire verify succeeded | renew job metadata |
-| `renewal.failed` | AAP or verify failure | renew job metadata |
+| `renewal.requested` | Batch enqueue / migrate-eligible | renew/migrate job metadata |
+| `renewal.launched` | AAP job id persisted | renew/migrate job metadata |
+| `renewal.verified` | Wire verify succeeded (migrate / pending_verify path) | job metadata + observed |
+| `renewal.timed_out` | `timeout_at` reached without wire match | job metadata |
+| `renewal.completed` | Legacy M2 alias path (prefer `renewal.verified`) | renew job metadata |
+| `renewal.failed` | AAP terminal failure | renew job metadata |
 
 ### Scan run metadata (`scans`)
 

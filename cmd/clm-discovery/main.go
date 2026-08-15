@@ -102,7 +102,10 @@ func main() {
 		}
 	}
 	renewer, poller := newLifecycleWorkerDeps(aapClient, cfg.AAPRenewTemplate, cfg.AAPRenewWorkflow)
-	lifeWorker := lifecyclejobs.New(lifecyclejobs.Config{}, st, renewer, poller, logger)
+	lifeWorker := lifecyclejobs.New(lifecyclejobs.Config{
+		Interval:  cfg.LifecycleVerifyPoll,
+		PollEvery: cfg.LifecycleVerifyPoll,
+	}, st, renewer, poller, logger)
 	dispWG.Add(1)
 	go func() {
 		defer dispWG.Done()

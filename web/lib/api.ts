@@ -23,6 +23,7 @@ export type Certificate = {
   hostname_matches_san: boolean;
   managed_status: string;
   cert_scope: string;
+  is_ca?: boolean;
   vault_pki_mount?: string | null;
   vault_issuer_ref?: string | null;
   revocation_status?: string | null;
@@ -341,6 +342,48 @@ export function catalogImport(id: string) {
     method: "POST",
     body: JSON.stringify({ consent: true }),
   });
+}
+
+export type LifecycleJob = {
+  id: string;
+  kind?: string;
+  job_kind?: "migrate" | "renew" | string;
+  status: string;
+  user_status: "Pending" | "Verified" | "Timed out" | "Failed" | string;
+  aap_job_id?: number | null;
+  next_verify_at?: string | null;
+  timeout_at: string;
+  verify_attempt: number;
+};
+
+export type MigrateLaunchResponse = {
+  status: string;
+  user_status?: string;
+  lifecycle_job_id: string;
+  timeout_at?: string;
+  next_verify_at?: string | null;
+};
+
+export function migrateToVault(
+  id: string,
+  body: {
+    consent: true;
+    mount: string;
+    role: string;
+    service?: string;
+    target_hosts?: string;
+    ttl?: string;
+    alt_names?: string;
+  }
+) {
+  return fetchJSON<MigrateLaunchResponse>(`/api/v1/certificates/${id}/migrate`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function getLifecycleJob(id: string) {
+  return fetchJSON<LifecycleJob>(`/api/v1/lifecycle-jobs/${id}`);
 }
 
 export function listIssuers() {

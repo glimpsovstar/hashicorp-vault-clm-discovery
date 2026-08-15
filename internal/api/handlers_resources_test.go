@@ -585,6 +585,7 @@ func TestCertificateRoutes_Registered(t *testing.T) {
 		// renewer is nil on the resource-only server, so the route resolving to
 		// 503 (not 404/405) proves it is registered.
 		{http.MethodPost, "/api/v1/certificates/" + id + "/renew", `{"consent":true,"role":"web"}`, http.StatusServiceUnavailable},
+		{http.MethodPost, "/api/v1/certificates/" + id + "/migrate", `{"consent":true,"role":"web"}`, http.StatusServiceUnavailable},
 		{http.MethodPost, "/api/v1/certificates/" + id + "/revoke", `{"consent":true,"reason":"compromised"}`, http.StatusServiceUnavailable},
 		{http.MethodDelete, "/api/v1/certificates/" + id, "", http.StatusNoContent},
 		{http.MethodDelete, "/api/v1/issuers/" + id, "", http.StatusNoContent},
@@ -593,6 +594,8 @@ func TestCertificateRoutes_Registered(t *testing.T) {
 		{http.MethodPost, "/api/v1/issuers/" + id + "/import", `{"consent":true,"mount":"pki"}`, http.StatusServiceUnavailable},
 		// renewer is nil on the resource-only server -> 503 proves registration.
 		{http.MethodPost, "/api/v1/renew-expiring", `{"consent":true}`, http.StatusServiceUnavailable},
+		{http.MethodPost, "/api/v1/migrate-eligible", `{"consent":true}`, http.StatusServiceUnavailable},
+		{http.MethodPost, "/api/v1/lifecycle-jobs/claim", `{"idempotency_key":"migrate:x","aap_job_id":1}`, http.StatusOK},
 		// inventory is read-only and needs no AAP -> 200 proves registration.
 		{http.MethodGet, "/api/v1/inventory", "", http.StatusOK},
 		{http.MethodGet, "/api/v1/events", "", http.StatusOK},

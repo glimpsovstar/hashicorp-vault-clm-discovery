@@ -56,13 +56,14 @@ It complements Vault PKI and HCP Certificates Inventory. It is **not** a Vault p
 
 - **Renewal kit generator** — renders vault-agent HCL / an AAP playbook to reissue+deploy a cert (`GET /certificates/{id}/renewal-kit`)
 - **On-demand renew** — `POST /certificates/{id}/renew` launches AAP, persists a `lifecycle_jobs` row + `renewal.launched` **before** 202 (`lifecycle_job_id` in the body), and stores `renewal_config`
+- **Migrate to Vault** — `POST /certificates/{id}/migrate` for unmanaged/imported **leaves** (never Upload / leaf PEM). Same AAP renew client; `job_kind=migrate`; 202 with `pending_verify`. Batch: `POST /migrate-eligible` (EDA launches; no Controller call). Claim: `POST /lifecycle-jobs/claim`
 - **Revoke via AAP** — `POST /certificates/{id}/revoke` (consent-gated) launches a named revoke template with `clm_action=clm_revoke`; CLM never calls Vault `pki/revoke`. Confirm with `POST .../revocation-check` after AAP success
 - **Batch auto-renewal** — `POST /renew-expiring` enqueues one durable job per eligible cert (worker launches AAP); defaults to `EXPIRING_SOON_DAYS`
-- **Durable lifecycle worker** — claims jobs, polls with `WaitForJob` (never on the HTTP request context), maps AAP status → CLM status, and marks **verified** only after wire check (same CN, new fingerprint, later `not_after`). AAP success alone is not completed
-- **Read API** — `GET /lifecycle-jobs/{id}`, `GET /certificates/{id}/lifecycle-jobs`
+- **Durable lifecycle worker** — claims jobs, polls with `WaitForJob` (never on the HTTP request context), maps AAP status → CLM status, enters **`pending_verify`**, and marks **verified** only after wire check (same CN, new fingerprint, later `not_after`). Misses backoff (10s…6h); default timeout **24h** → `timed_out`. AAP success alone is not verified. EDA does not rescan
+- **Read API** — `GET /lifecycle-jobs/{id}` (includes `user_status`, `next_verify_at`, `timeout_at`, `verify_attempt`), `GET /certificates/{id}/lifecycle-jobs`
 - **Per-cert renewal config** persisted (`renewal_config` JSONB), survives rescans, feeds the dynamic inventory
 - **AAP dynamic inventory** — `GET /inventory` renders Ansible `--list` JSON (host = CN, issue-role hostvars + `clm_*` metadata, `clm_renewable`/`svc_*` groups)
-- Closed-loop verification = rescan + reconcile
+- Closed-loop verification = CLM-owned targeted verify + reconcile
 
 ### Events (transactional outbox → Ansible EDA)
 
@@ -193,6 +194,8 @@ Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVA
 | `AAP_REVOKE_WORKFLOW` | `false` | When true, resolve `AAP_REVOKE_TEMPLATE` as a workflow job template |
 | `AAP_SKIP_TLS_VERIFY` | `false` | Skip TLS verification to the AAP Controller (lab use only) |
 | `AAP_DEFAULT_MOUNT` | `pki` | Default **Vault PKI mount path** for Mode C renew/revoke when the cert/request has no mount. Not an AAP id. Settings label: **Default Vault PKI mount** |
+| `LIFECYCLE_VERIFY_TIMEOUT` | `24h` | Pending-verify deadline from job create; past ⇒ `timed_out` + `renewal.timed_out` |
+| `LIFECYCLE_VERIFY_POLL_INTERVAL` | `5s` | Lifecycle worker tick / AAP poll interval |
 | **Events (EDA dispatcher)** | | |
 | `EDA_WEBHOOK_URL` | (empty) | Ansible EDA webhook URL; empty ⇒ EDA delivery skipped (ITSM-only still runs if set) |
 | `EDA_WEBHOOK_TOKEN` | (empty) | Bearer token for the EDA webhook (never logged) |
@@ -274,16 +277,19 @@ See [docs/data-model.md](docs/data-model.md).
 | POST | `/api/v1/certificates/{id}/revocation-check` | CRL/OCSP revocation check |
 | POST | `/api/v1/certificates/{id}/catalog-import` | Track cert in CLM (Modes A/D, consent-gated) |
 | POST | `/api/v1/certificates/{id}/renew` | On-demand renew via Vault + AAP (consent-gated); 202 includes `lifecycle_job_id` |
+| POST | `/api/v1/certificates/{id}/migrate` | Migrate leaf to Vault (Mode C); consent-gated; no PEM; 202 `pending_verify` |
 | POST | `/api/v1/certificates/{id}/revoke` | Revoke via AAP (`clm_revoke` extra_vars; consent-gated); 503 if AAP unset; does not call Vault revoke |
 | PATCH | `/api/v1/certificates/{id}` | Update governance fields |
 | DELETE | `/api/v1/certificates/{id}` | Delete certificate |
 | GET | `/api/v1/certificates/{id}/lifecycle-jobs` | List durable lifecycle jobs for a certificate |
-| GET | `/api/v1/lifecycle-jobs/{id}` | Lifecycle job status, AAP id, expected/observed |
+| GET | `/api/v1/lifecycle-jobs/{id}` | Lifecycle job status, `user_status`, backoff fields |
+| POST | `/api/v1/lifecycle-jobs/claim` | EDA/callback: attach `aap_job_id` by idempotency key |
 | GET | `/api/v1/issuers` | List issuers/CAs |
 | POST | `/api/v1/issuers/{id}/import` | Import CA bundle into Vault (Mode B, consent-gated) |
 | DELETE | `/api/v1/issuers/{id}` | Delete issuer |
 | POST | `/api/v1/reconcile` | Reconcile inventory against Vault PKI |
 | POST | `/api/v1/renew-expiring` | Enqueue durable renew jobs for expiring certs (consent-gated; worker launches AAP) |
+| POST | `/api/v1/migrate-eligible` | Enqueue migrate jobs (consent-gated; `renewal.requested` only) |
 | GET | `/api/v1/inventory` | Ansible dynamic inventory (`--list` JSON, `?within_days=N`). AAP service role only — not a dashboard page |
 | GET | `/api/v1/inventory/pqc` | PQC tag inventory counts (`classic` / `hybrid` / `pqc` / `unknown`) |
 | GET | `/api/v1/events` | List outbox events (`?event_type=` filters catalogue types) |

@@ -89,9 +89,11 @@ Guardrails:
 ### 3. Event-driven automation via a transactional outbox, phased transport
 
 CLM emits lifecycle events (`cert.discovered`, `cert.expiring`, `cert.revoked`,
-`renewal.launched`, `renewal.completed`, `renewal.failed`, `blind_spot.detected`,
-`renewal.requested`). Discovery / shadow / expiry fire on certificate upsert;
-revoke and renewal.* fire from their state machines. Payload fields for
+`renewal.requested`, `renewal.launched`, `renewal.verified`, `renewal.timed_out`,
+`renewal.failed`, `blind_spot.detected`; legacy `renewal.completed` may still appear
+on older renew verify paths). Discovery / shadow / expiry fire on certificate upsert;
+revoke and renewal.* fire from their state machines. Migrate Mode C does **not**
+emit `renewal.completed` — success is `renewal.verified`. Payload fields for
 discovery-family events: `certificate_id`, `fingerprint_sha256`, `subject_cn`,
 `status`, `days_until_expiry`, `managed_status`, `cert_scope`. List with
 `GET /api/v1/events?event_type=`.

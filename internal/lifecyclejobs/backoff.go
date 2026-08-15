@@ -25,3 +25,18 @@ func NextVerifyDelay(attempt int) time.Duration {
 	}
 	return VerifyBackoff[attempt-1]
 }
+
+// VerifyDelay is the plan alias for NextVerifyDelay (1-based attempt).
+func VerifyDelay(attempt int) time.Duration {
+	return NextVerifyDelay(attempt)
+}
+
+// NextVerifyAt returns when the next probe should run. If the delay would land
+// at or past timeoutAt, next is timeoutAt and last is true (final attempt).
+func NextVerifyAt(now time.Time, attempt int, timeoutAt time.Time) (time.Time, bool) {
+	next := now.Add(VerifyDelay(attempt))
+	if !next.Before(timeoutAt) {
+		return timeoutAt, true
+	}
+	return next, false
+}

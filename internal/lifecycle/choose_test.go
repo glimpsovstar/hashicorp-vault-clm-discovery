@@ -14,10 +14,11 @@ func TestChooseRecommendation(t *testing.T) {
 		{"incomplete chain", ChooseInput{CertScope: "internal", ManagedStatus: "unmanaged", ChainStatus: "incomplete"}, "fix_chain"},
 		{"untrusted root", ChooseInput{CertScope: "external", ManagedStatus: "unmanaged", ChainStatus: "untrusted_root"}, "fix_chain"},
 		{"unmanaged CA", ChooseInput{CertScope: "internal", ManagedStatus: "unmanaged", ChainStatus: "complete", IsCA: true}, "import_ca"},
-		{"external leaf", ChooseInput{CertScope: "external", ManagedStatus: "unmanaged", ChainStatus: "complete"}, "monitor_external"},
-		{"internal leaf", ChooseInput{CertScope: "internal", ManagedStatus: "unmanaged", ChainStatus: "complete"}, "reconcile_vault"},
-		{"imported", ChooseInput{CertScope: "internal", ManagedStatus: "imported", ChainStatus: "complete"}, "catalog_tracked"},
-		{"unknown scope default", ChooseInput{CertScope: "", ManagedStatus: "unmanaged", ChainStatus: "complete"}, "monitor_external"},
+		{"external leaf", ChooseInput{CertScope: "external", ManagedStatus: "unmanaged", ChainStatus: "complete"}, "migrate_vault"},
+		{"internal leaf", ChooseInput{CertScope: "internal", ManagedStatus: "unmanaged", ChainStatus: "complete"}, "migrate_vault"},
+		{"imported", ChooseInput{CertScope: "internal", ManagedStatus: "imported", ChainStatus: "complete"}, "migrate_vault"},
+		{"self_signed leaf", ChooseInput{CertScope: "internal", ManagedStatus: "unmanaged", ChainStatus: "self_signed"}, "migrate_vault"},
+		{"unknown scope leaf", ChooseInput{CertScope: "", ManagedStatus: "unmanaged", ChainStatus: "complete"}, "migrate_vault"},
 	}
 
 	for _, tt := range tests {
@@ -28,6 +29,9 @@ func TestChooseRecommendation(t *testing.T) {
 			}
 			if got.Title == "" || got.Rationale == "" {
 				t.Fatalf("title/rationale must be populated: %+v", got)
+			}
+			if tt.want == "migrate_vault" && got.CTA != "Migrate to Vault" {
+				t.Fatalf("CTA = %q", got.CTA)
 			}
 		})
 	}

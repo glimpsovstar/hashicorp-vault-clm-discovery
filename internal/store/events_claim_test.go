@@ -15,8 +15,9 @@ func TestClaimUndeliveredEvents_ConcurrentExclusive(t *testing.T) {
 	st := openTestStore(t)
 	ctx := context.Background()
 
-	certID := uuid.New()
-	// Insert a bare outbox row without needing a real certificate FK when nullable.
+	// Isolate from leftover undelivered rows in shared local/CI databases.
+	_, _ = st.pool.Exec(ctx, `UPDATE events SET delivered_at = NOW() WHERE delivered_at IS NULL`)
+
 	evID, err := insertTestEvent(ctx, st, "test.claim", nil, json.RawMessage(`{"n":1}`))
 	if err != nil {
 		t.Fatalf("insert event: %v", err)
@@ -24,7 +25,6 @@ func TestClaimUndeliveredEvents_ConcurrentExclusive(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = st.pool.Exec(context.Background(), `DELETE FROM events WHERE id = $1`, evID)
 	})
-	_ = certID
 
 	const workers = 8
 	var mu sync.Mutex

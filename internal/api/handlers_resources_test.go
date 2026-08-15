@@ -89,11 +89,20 @@ func (f *fakeResourceStore) ListRenewable(_ context.Context, withinDays int) ([]
 	return f.renewable, nil
 }
 
-func (f *fakeResourceStore) ListEvents(_ context.Context, _ int) ([]store.Event, error) {
+func (f *fakeResourceStore) ListEvents(_ context.Context, filter store.EventFilter) ([]store.Event, error) {
 	if f.eventsErr != nil {
 		return nil, f.eventsErr
 	}
-	return f.events, nil
+	if filter.EventType == "" {
+		return f.events, nil
+	}
+	var out []store.Event
+	for _, e := range f.events {
+		if e.EventType == filter.EventType {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeResourceStore) SetManagedStatus(_ context.Context, _ uuid.UUID, status string) (store.Certificate, error) {

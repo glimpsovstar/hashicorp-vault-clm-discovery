@@ -25,8 +25,8 @@
 
 ### Task 1: Event catalogue
 
-- [ ] Emit `cert.discovered`, `cert.expiring`, remaining `renewal.*` if needed, `blind_spot.detected`.
-- [ ] `GET /events?event_type=`; document payloads.
+- [x] Emit `cert.discovered`, `cert.expiring`, remaining `renewal.*` if needed, `blind_spot.detected`.
+- [x] `GET /events?event_type=`; document payloads.
 
 ### Task 2: Freeze AAP contract + revoke via AAP
 

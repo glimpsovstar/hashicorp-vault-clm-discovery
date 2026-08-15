@@ -89,7 +89,12 @@ Guardrails:
 ### 3. Event-driven automation via a transactional outbox, phased transport
 
 CLM emits lifecycle events (`cert.discovered`, `cert.expiring`, `cert.revoked`,
-`renewal.launched`, `renewal.completed`, `renewal.failed`, `blind_spot.detected`).
+`renewal.launched`, `renewal.completed`, `renewal.failed`, `blind_spot.detected`,
+`renewal.requested`). Discovery / shadow / expiry fire on certificate upsert;
+revoke and renewal.* fire from their state machines. Payload fields for
+discovery-family events: `certificate_id`, `fingerprint_sha256`, `subject_cn`,
+`status`, `days_until_expiry`, `managed_status`, `cert_scope`. List with
+`GET /api/v1/events?event_type=`.
 
 - **Transactional outbox:** when CLM changes state it writes an `events` row in
   the *same* database transaction. A dispatcher polls the outbox and delivers.

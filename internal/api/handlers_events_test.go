@@ -43,6 +43,28 @@ func TestHandleListEvents(t *testing.T) {
 	}
 }
 
+func TestHandleListEvents_FilterEventType(t *testing.T) {
+	t.Parallel()
+	res := &fakeResourceStore{events: []store.Event{
+		{ID: uuid.New(), EventType: "cert.revoked"},
+		{ID: uuid.New(), EventType: "cert.discovered"},
+	}}
+	srv := newResourceServer(res)
+	req := httptest.NewRequest(http.MethodGet, "/events?event_type=cert.discovered", nil)
+	rec := httptest.NewRecorder()
+	srv.handleListEvents(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var resp struct {
+		Items []store.Event `json:"items"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if len(resp.Items) != 1 || resp.Items[0].EventType != "cert.discovered" {
+		t.Fatalf("items=%s", rec.Body.String())
+	}
+}
+
 func TestHandleListEvents_Error(t *testing.T) {
 	t.Parallel()
 

@@ -158,6 +158,21 @@ Related: `lifecycle_job_events` (append-only timeline), `lifecycle_approvals` (a
 
 `renewal.launched` / `renewal.completed` / `renewal.failed` also go to the EDA outbox; **completed only after verified**.
 
+### EDA outbox catalogue (`events`, migration `000006`)
+
+Transactional outbox delivered to Ansible EDA. `GET /api/v1/events?event_type=` filters by type.
+
+| `event_type` | When emitted | Payload (JSON) |
+|--------------|--------------|----------------|
+| `cert.discovered` | First fingerprint upsert | `certificate_id`, `fingerprint_sha256`, `subject_cn`, `status`, `days_until_expiry`, `managed_status`, `cert_scope` |
+| `cert.expiring` | Status becomes `expiring_soon` | same |
+| `cert.revoked` | Signature-verified revoke / Vault reconcile | includes `source` |
+| `blind_spot.detected` | First upsert (default unmanaged) | same as discovered |
+| `renewal.requested` | Batch enqueue | renew job metadata |
+| `renewal.launched` | AAP job id persisted | renew job metadata |
+| `renewal.completed` | Wire verify succeeded | renew job metadata |
+| `renewal.failed` | AAP or verify failure | renew job metadata |
+
 ### Scan run metadata (`scans`)
 
 | Field | Type | Description |

@@ -79,11 +79,11 @@ It complements Vault PKI and HCP Certificates Inventory. It is **not** a Vault p
 - Dropdowns for PKI mounts and AAP templates are filled from read-only options APIs (resolved connection, same auth as Settings GET). Empty list or peer error → free-text input so operators can still type a path/name. Options never return secrets and never launch AAP jobs
 - Secrets never reach the browser (masked `*_set` flags only). Persist them only with `CLM_CONNECTIONS_KEY` (AES-256-GCM)
 - **Test connection** is server-side and uses the resolved overlay (DB else env): Vault `GET /v1/sys/mounts` (AppRole logs in first); AAP `GET /api/v2/me` then template-by-name (**does not launch a job**); EDA signed ping (`Authorization: Bearer` when a token is set, body `clm.connection.test`, **no outbox write**)
-- Control-plane AuthN is default-deny except `GET /api/v1/health`. The dashboard BFF attaches `CLM_API_TOKEN`; the browser never sees Bearer tokens. Roles come from `CLM_STATIC_TOKENS`. `CLM_INSECURE_NO_AUTH=true` is a UAT/integration hatch only.
+- Control-plane AuthN is default-deny except `GET /api/v1/health`. The dashboard BFF requires an authenticated **session** (demo password or optional OIDC) before attaching `CLM_API_TOKEN`; the browser never sees Bearer tokens. Roles come from `CLM_STATIC_TOKENS`. `CLM_INSECURE_NO_AUTH=true` is a UAT/integration hatch for the Go API only; `CLM_BFF_INSECURE_NO_SESSION=true` is the parallel hatch for the BFF.
 
-### Residual risk: dashboard BFF
+### Dashboard BFF session
 
-M1 default-deny applies to the **Go API** (`:8080`). The Next.js BFF (`/api/v1/...`) holds ambient `CLM_API_TOKEN` authority (demo compose: `platform_admin`) until OIDC/session lands. Anyone who can reach the Next origin can perform the API mutations M1 closed on `:8080`. The control plane is **not** closed to unauthenticated mutation at the deployment edge. Follow-up: [authenticate the dashboard BFF (OIDC/session)](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/89).
+Browser callers to the Next origin must sign in (`/login` or OIDC) before the BFF proxies `/api/v1/...` or Settings. Unauthenticated BFF requests return **401** and do not forward to `:8080`. Demo compose: password `clm-demo` (`CLM_BFF_DEMO_PASSWORD`) with `CLM_BFF_SESSION_SECRET` set. Server-side React rendering may still call the Go API directly with `CLM_API_TOKEN` (trusted server→server).
 
 ## Quick start
 
@@ -96,7 +96,7 @@ docker compose -f deploy/docker-compose.yml up --build
 - Dashboard: http://localhost:3000
 - API: http://localhost:8080/api/v1/health
 
-In Docker, the web container calls the API at `http://api:8080` during server rendering (`API_INTERNAL_URL` + `CLM_API_TOKEN`). Browser mutations go through the same-origin BFF (`/api/v1/...`); do not put tokens in `NEXT_PUBLIC_*`.
+In Docker, the web container calls the API at `http://api:8080` during server rendering (`API_INTERNAL_URL` + `CLM_API_TOKEN`). Browser mutations go through the same-origin BFF (`/api/v1/...`) **after** BFF session login; do not put tokens in `NEXT_PUBLIC_*`.
 
 Start a scan from the **Scans** page using **hostnames** (recommended for HTTPS sites) or CIDR ranges.
 
@@ -132,8 +132,10 @@ export LOG_LEVEL=info   # info (default), debug, trace, warn, error
 export CLM_STATIC_TOKENS=platform_admin:clm-demo-platform-admin
 go run ./cmd/clm-discovery
 
-# Dashboard (BFF uses CLM_API_TOKEN; match a role in CLM_STATIC_TOKENS)
+# Dashboard (BFF uses CLM_API_TOKEN only after session login; match a role in CLM_STATIC_TOKENS)
 export CLM_API_TOKEN=clm-demo-platform-admin
+export CLM_BFF_SESSION_SECRET=clm-demo-bff-session-secret
+export CLM_BFF_DEMO_PASSWORD=clm-demo
 cd web && npm ci && npm run dev
 ```
 
@@ -209,7 +211,11 @@ Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVA
 | **Control plane (AuthN / RBAC)** | | |
 | `CLM_AUTH_MODE` | `static_token` | AuthN mode. Only `static_token` in M1 (empty is treated as `static_token`) |
 | `CLM_STATIC_TOKENS` | (empty) | Comma-separated `role:token` (or `role:sha256:<64 hex>`). Roles: `viewer`, `scanner_operator`, `remediator`, `vault_import_admin`, `approver`, `platform_admin`, `inventory`. DELETE requires `platform_admin`. `GET /inventory` is the AAP inventory role only — not a dashboard page |
-| `CLM_API_TOKEN` | (empty) | **Dashboard/BFF only** (Next.js server). Bearer sent to the Go API. Must match a `CLM_STATIC_TOKENS` value (typically `platform_admin` so demo Deletes succeed). Never `NEXT_PUBLIC_*` |
+| `CLM_API_TOKEN` | (empty) | **Dashboard/BFF only** (Next.js server). Bearer sent to the Go API **after** a valid BFF session (or `CLM_BFF_INSECURE_NO_SESSION`). Must match a `CLM_STATIC_TOKENS` value (typically `platform_admin` so demo Deletes succeed). Never `NEXT_PUBLIC_*` |
+| `CLM_BFF_SESSION_SECRET` | (empty) | HMAC secret (≥16 chars) for signed `clm_bff_session` cookie. Required for demo/OIDC login |
+| `CLM_BFF_DEMO_PASSWORD` | (empty) | Demo operator password for `POST /api/auth/login` (compose: `clm-demo`) |
+| `CLM_BFF_INSECURE_NO_SESSION` | `false` | UAT hatch: restore ambient BFF token attach without a session cookie |
+| `CLM_BFF_OIDC_ISSUER` / `CLM_BFF_OIDC_CLIENT_ID` / `CLM_BFF_OIDC_CLIENT_SECRET` | (empty) | Optional OIDC (Authorization Code + PKCE); callback at `/api/auth/oidc/callback` |
 | `CLM_INSECURE_NO_AUTH` | `false` | UAT/integration hatch: skip Bearer and treat the caller as `platform_admin` on **all** `/api/v1` routes except health (already public). Not a production auth substitute. Prefer this on existing UAT scripts; or send `Authorization: Bearer` |
 
 Both `clm-discovery` and `clm-scan` emit JSON logs to stdout. Set `LOG_LEVEL=debug` to see target expansion summaries; `trace` adds per-target probe outcomes. Vault/AAP/EDA tokens and URLs are read from the environment and never logged.
@@ -227,7 +233,7 @@ The web app mirrors HashiCorp Vault’s **AppFrame** layout (sidebar nav, page h
 - [docs/superpowers/specs/2026-06-14-vault-ui-design.md](docs/superpowers/specs/2026-06-14-vault-ui-design.md)
 - [docs/superpowers/plans/2026-06-14-vault-ui-dashboard.md](docs/superpowers/plans/2026-06-14-vault-ui-dashboard.md)
 
-**Settings → Connections** (`/settings/connections`) uses the existing Helios CSS (panels, form fields, badges) — not shadcn/ui. Compact **Deployment** radios (Self-managed / HCP Dedicated); AAP **Renew with** radios (Job template / Workflow); **Template name** and **Default Vault PKI mount** as `<select>` when options APIs return items, otherwise free-text. The Next.js BFF proxies `/api/settings/connections` **and** `/api/v1/*` (except AAP `/inventory`) to the Go API with `CLM_API_TOKEN`. The browser never calls Vault/AAP or `:8080` with tokens. Delete buttons stay in the UI; they succeed only when the BFF token is `platform_admin`.
+**Settings → Connections** (`/settings/connections`) uses the existing Helios CSS (panels, form fields, badges) — not shadcn/ui. Compact **Deployment** radios (Self-managed / HCP Dedicated); AAP **Renew with** radios (Job template / Workflow); **Template name** and **Default Vault PKI mount** as `<select>` when options APIs return items, otherwise free-text. The Next.js BFF proxies `/api/settings/connections` **and** `/api/v1/*` (except AAP `/inventory`) to the Go API with `CLM_API_TOKEN` **only when a BFF session is present**. The browser never calls Vault/AAP or `:8080` with tokens. Delete buttons stay in the UI; they succeed only when the BFF token is `platform_admin` (after Sign in).
 
 Official Vault logo: `@hashicorp/flight-icons` **vault-color-24** (gold chevron), matching [Vault’s app header](https://github.com/hashicorp/vault/blob/main/ui/lib/core/addon/components/sidebar/frame.hbs).
 

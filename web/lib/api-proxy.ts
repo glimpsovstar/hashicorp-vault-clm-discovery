@@ -1,3 +1,5 @@
+import { insecureNoSession, sessionFromRequest } from "@/lib/bff-session";
+
 function goApiBaseUrl(): string {
   return process.env.API_INTERNAL_URL || "http://localhost:8080";
 }
@@ -29,11 +31,18 @@ type ProxyToAPIOptions = {
 };
 
 // proxyToAPI forwards a same-origin BFF request to the Go API using server-only
-// env (API_INTERNAL_URL, CLM_API_TOKEN). AAP GET /inventory is not proxied —
-// that endpoint is a service identity, not a dashboard page.
+// env (API_INTERNAL_URL, CLM_API_TOKEN). Requires a valid BFF session (or
+// CLM_BFF_INSECURE_NO_SESSION) before attaching ambient token authority.
+// AAP GET /inventory is not proxied — that endpoint is a service identity.
 export async function proxyToAPI(request: Request, opts: ProxyToAPIOptions): Promise<Response> {
   if (isAAPInventory(opts.apiPath)) {
     return Response.json({ error: "not found" }, { status: 404 });
+  }
+
+  const hatch = insecureNoSession();
+  const session = hatch ? null : await sessionFromRequest(request);
+  if (!hatch && !session) {
+    return Response.json({ error: "authentication required" }, { status: 401 });
   }
 
   const url = `${goApiBaseUrl()}${opts.apiPath}`;

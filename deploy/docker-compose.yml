@@ -53,6 +53,9 @@ services:
     environment:
       API_INTERNAL_URL: http://api:8080
       CLM_API_TOKEN: clm-demo-platform-admin
+      # BFF session — demo password login; browser callers need /login before mutations.
+      CLM_BFF_SESSION_SECRET: clm-demo-bff-session-secret
+      CLM_BFF_DEMO_PASSWORD: clm-demo
     ports:
       - "3000:3000"
     depends_on:

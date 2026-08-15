@@ -10,6 +10,7 @@ describe("settings BFF proxy", () => {
   it("forwards to API_INTERNAL_URL with server-only Authorization", async () => {
     vi.stubEnv("API_INTERNAL_URL", "http://api:8080");
     vi.stubEnv("CLM_API_TOKEN", "server-only-token");
+    vi.stubEnv("CLM_BFF_INSECURE_NO_SESSION", "true");
     vi.stubEnv("NEXT_PUBLIC_VAULT_TOKEN", "browser-leaked-token");
     vi.stubEnv("NEXT_PUBLIC_AAP_TOKEN", "browser-aap-token");
 
@@ -36,6 +37,7 @@ describe("settings BFF proxy", () => {
 
   it("POSTs the test body through unchanged to /test", async () => {
     vi.stubEnv("API_INTERNAL_URL", "http://api:8080");
+    vi.stubEnv("CLM_BFF_INSECURE_NO_SESSION", "true");
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ ok: true, target: "eda", detail: "webhook 2xx" }), {
         status: 200,

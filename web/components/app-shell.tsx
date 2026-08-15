@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import AuthStatus from "./auth-status";
 import SidebarNav from "./sidebar-nav";
 import VaultLogo from "./vault-logo";
 
@@ -16,6 +17,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           </Link>
         </div>
         <div className="app-header-end">
+          <AuthStatus />
           <a
             className="app-header-link"
             href="https://developer.hashicorp.com/vault/docs"

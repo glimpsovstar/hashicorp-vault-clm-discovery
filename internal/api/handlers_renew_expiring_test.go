@@ -48,10 +48,10 @@ func TestHandleRenewExpiring(t *testing.T) {
 		{"bad json", &fakeRenewer{}, &fakeResourceStore{}, `{`, http.StatusBadRequest, 0, 0},
 		{"list error", &fakeRenewer{}, &fakeResourceStore{renewableErr: context.Canceled}, `{"consent":true}`, http.StatusInternalServerError, 0, 0},
 		{"empty eligible", &fakeRenewer{}, &fakeResourceStore{}, `{"consent":true}`, http.StatusAccepted, 0, 0},
-		{"launches eligible", &fakeRenewer{ref: RenewRef{JobID: 1}}, &fakeResourceStore{renewable: []store.Certificate{valid}}, `{"consent":true,"within_days":30}`, http.StatusAccepted, 1, 0},
+		{"enqueues eligible", &fakeRenewer{ref: RenewRef{JobID: 1}}, &fakeResourceStore{renewable: []store.Certificate{valid}}, `{"consent":true,"within_days":30}`, http.StatusAccepted, 1, 0},
 		{"invalid config captured", &fakeRenewer{ref: RenewRef{JobID: 1}}, &fakeResourceStore{renewable: []store.Certificate{badCfg}}, `{"consent":true}`, http.StatusAccepted, 0, 1},
 		{"ssti ttl captured", &fakeRenewer{ref: RenewRef{JobID: 1}}, &fakeResourceStore{renewable: []store.Certificate{renewableCertWithTTL("x.example.com", "web", "{{ lookup('pipe','id') }}")}}, `{"consent":true}`, http.StatusAccepted, 0, 1},
-		{"launch failure captured", &fakeRenewer{err: context.DeadlineExceeded}, &fakeResourceStore{renewable: []store.Certificate{valid}}, `{"consent":true}`, http.StatusAccepted, 0, 1},
+		{"enqueue failure captured", &fakeRenewer{ref: RenewRef{JobID: 1}}, &fakeResourceStore{renewable: []store.Certificate{valid}}, `{"consent":true}`, http.StatusAccepted, 0, 1},
 	}
 
 	for _, tt := range tests {
@@ -61,6 +61,9 @@ func TestHandleRenewExpiring(t *testing.T) {
 			srv.cfg.AAPDefaultMount = "pki"
 			srv.cfg.ExpiringSoonDays = 30
 			srv.renewer = tt.renewer
+			if tt.name == "enqueue failure captured" {
+				srv.lifecycle = &fakeLifecycleStore{pendingErr: context.DeadlineExceeded}
+			}
 
 			req := httptest.NewRequest(http.MethodPost, "/renew-expiring", strings.NewReader(tt.body))
 			rec := httptest.NewRecorder()
@@ -84,6 +87,11 @@ func TestHandleRenewExpiring(t *testing.T) {
 				}
 				if len(resp.Failed) != tt.wantFailed {
 					t.Fatalf("failed = %d, want %d (%s)", len(resp.Failed), tt.wantFailed, rec.Body.String())
+				}
+				if tt.wantLaunched > 0 && tt.renewer != nil {
+					if fr, ok := tt.renewer.(*fakeRenewer); ok && fr.calls != 0 {
+						t.Fatalf("batch must not launch AAP in handler; renewer.calls = %d", fr.calls)
+					}
 				}
 			}
 		})

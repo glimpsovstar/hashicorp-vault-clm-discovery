@@ -30,28 +30,28 @@
 
 ### Task 1: Schema + store (TDD)
 
-- [ ] Tables: jobs, job_events, approvals; indexes on status/lease, unique idempotency.
-- [ ] `InsertJob`, `ClaimExpiredLeases`, `SetAAPRef`, `UpdateStatus`, `AppendJobEvent`.
+- [x] Tables: jobs, job_events, approvals; indexes on status/lease, unique idempotency.
+- [x] `InsertJob`, `ClaimExpiredLeases`, `SetAAPRef`, `UpdateStatus`, `AppendJobEvent`.
 
 ### Task 2: Persist before 202
 
-- [ ] Insert job + `renewal.launched` before 202; persist `SetRenewalConfig` on `/renew`.
-- [ ] Batch `/renew-expiring` inserts N jobs; worker launches.
-- [ ] Tests: 202 includes `lifecycle_job_id`; kill-after-ack still has row.
+- [x] Insert job + `renewal.launched` before 202; persist `SetRenewalConfig` on `/renew`.
+- [x] Batch `/renew-expiring` inserts N jobs; worker launches.
+- [x] Tests: 202 includes `lifecycle_job_id`; kill-after-ack still has row.
 
 ### Task 3: Worker + WaitForJob
 
-- [ ] Claim loop; call existing `WaitForJob` / `JobStatus`.
-- [ ] Map `aap.Status*` → CLM status; restart does not double-launch if `aap_job_id` set.
+- [x] Claim loop; call existing `WaitForJob` / `JobStatus`.
+- [x] Map `aap.Status*` → CLM status; restart does not double-launch if `aap_job_id` set.
 
 ### Task 4: Verify
 
-- [ ] After `aap_successful`, targeted scan; same CN, new fingerprint, later `not_after`.
-- [ ] `renewal.completed` only on verified; else `renewal.failed` with reason.
+- [x] After `aap_successful`, targeted observation; same CN, new fingerprint, later `not_after`.
+- [x] `renewal.completed` only on verified; else `renewal.failed` with reason.
 
 ### Task 5: Read API + docs
 
-- [ ] `GET /lifecycle-jobs/{id}` and list-by-cert.
-- [ ] Thin approvals (auto vs human).
-- [ ] Recovery tests (new worker, empty memory, same AAP id).
-- [ ] Docs replace “closed-loop = later rescan”.
+- [x] `GET /lifecycle-jobs/{id}` and list-by-cert.
+- [x] Thin approvals (auto vs human).
+- [x] Recovery tests (new worker, empty memory, same AAP id).
+- [x] Docs replace “closed-loop = later rescan”.

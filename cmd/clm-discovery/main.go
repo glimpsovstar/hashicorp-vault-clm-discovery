@@ -12,8 +12,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/api"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/aap"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/config"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/eventbus"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/lifecyclejobs"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/logging"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanner"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
@@ -75,6 +77,29 @@ func main() {
 		}()
 	}
 
+	// M2 lifecycle worker: poll durable AAP jobs and verify wire state. Runs
+	// whenever Postgres is available; AAP launch/poll is inert without AAP URL.
+	var aapClient *aap.Client
+	if cfg.AAPURL != "" {
+		if ac, err := aap.NewClient(aap.Config{
+			BaseURL:       cfg.AAPURL,
+			Token:         cfg.AAPToken,
+			SkipTLSVerify: cfg.AAPSkipTLSVerify,
+		}); err == nil {
+			aapClient = ac
+		} else {
+			logger.Warn("aap client init failed for lifecycle worker", "err", err)
+		}
+	}
+	renewer, poller := newLifecycleWorkerDeps(aapClient, cfg.AAPRenewTemplate, cfg.AAPRenewWorkflow)
+	lifeWorker := lifecyclejobs.New(lifecyclejobs.Config{}, st, renewer, poller, logger)
+	dispWG.Add(1)
+	go func() {
+		defer dispWG.Done()
+		logger.Info("starting lifecycle job worker")
+		lifeWorker.Run(dispCtx)
+	}()
+
 	go func() {
 		logger.Info("starting server", "addr", cfg.Addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -87,7 +112,7 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 
-	dispCancel() // stop the event dispatcher before draining HTTP
+	dispCancel() // stop event dispatcher + lifecycle worker before draining HTTP
 	dispWG.Wait()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

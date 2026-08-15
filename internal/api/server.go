@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -73,6 +74,15 @@ type renewLauncher interface {
 	Renew(ctx context.Context, extraVars map[string]any) (RenewRef, error)
 }
 
+// lifecycleJobsStore persists durable renew jobs (M2). Injectable for handler tests.
+type lifecycleJobsStore interface {
+	PersistRenewLaunch(ctx context.Context, certID uuid.UUID, cfg store.RenewalConfig, fingerprint string, aapJobID int, workflow bool, expected json.RawMessage) (store.LifecycleJob, error)
+	InsertLifecycleJobPending(ctx context.Context, certID uuid.UUID, fingerprint string, expected json.RawMessage) (store.LifecycleJob, error)
+	GetLifecycleJob(ctx context.Context, id uuid.UUID) (store.LifecycleJob, error)
+	ListLifecycleJobsByCert(ctx context.Context, certID uuid.UUID, limit int) ([]store.LifecycleJob, error)
+	GetLifecycleJobByIdempotency(ctx context.Context, key string) (store.LifecycleJob, error)
+}
+
 // aapRenewer is the production renewLauncher backed by an AAP Controller client.
 type aapRenewer struct {
 	client       *aap.Client
@@ -119,6 +129,7 @@ type Server struct {
 	importer    issuerImporter
 	revCheck    revChecker
 	renewer     renewLauncher
+	lifecycle   lifecycleJobsStore
 	connections connectionsStore
 	actor       string // test helper; production uses context or InsecureNoAuth
 	auditor     auditor
@@ -132,7 +143,7 @@ type scanCreator interface {
 }
 
 func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, store: st, scanner: sc, log: log, blindSpot: st, compliance: st, report: st, resources: st, connections: st, scans: st}
+	s := &Server{cfg: cfg, store: st, scanner: sc, log: log, blindSpot: st, compliance: st, report: st, resources: st, connections: st, scans: st, lifecycle: st}
 	s.revCheck = func(ctx context.Context, in revocation.CheckInput) (revocation.Result, error) {
 		return revocation.Check(ctx, revocation.NewFetchClient(), in)
 	}
@@ -230,6 +241,8 @@ func (s *Server) Router() http.Handler {
 		r.Post("/renew-expiring", s.handleRenewExpiring)
 		r.Get("/inventory", s.handleInventory)
 		r.Get("/events", s.handleListEvents)
+		r.Get("/lifecycle-jobs/{id}", s.handleGetLifecycleJob)
+		r.Get("/certificates/{id}/lifecycle-jobs", s.handleListCertLifecycleJobs)
 
 		r.Get("/blindspot", s.handleGetBlindSpot)
 		r.Get("/compliance/summary", s.handleGetComplianceSummary)
@@ -553,8 +566,8 @@ func (s *Server) handleRenewalKit(w http.ResponseWriter, r *http.Request) {
 // full automation). CLM resolves the configured AAP template by name and
 // launches it with extra_vars derived from the cert (CN) and the requested Vault
 // PKI coordinates; AAP issues from Vault and deploys. Consent-gated. Returns 503
-// when AAP is not configured. CLM confirms the outcome via a later rescan +
-// reconcile (closed loop, PR 3).
+// when AAP is not configured. Persist lifecycle_jobs + renewal.launched before
+// 202; a background worker polls AAP and marks verified only after wire check.
 func (s *Server) handleRenewCertificate(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -563,6 +576,10 @@ func (s *Server) handleRenewCertificate(w http.ResponseWriter, r *http.Request) 
 	}
 	if s.renewer == nil {
 		writeError(w, r, http.StatusServiceUnavailable, "AAP not configured")
+		return
+	}
+	if s.lifecycle == nil {
+		writeError(w, r, http.StatusServiceUnavailable, "lifecycle jobs store not configured")
 		return
 	}
 
@@ -624,16 +641,46 @@ func (s *Server) handleRenewCertificate(w http.ResponseWriter, r *http.Request) 
 		writeError(w, r, http.StatusBadGateway, "failed to launch AAP renewal")
 		return
 	}
-	s.log.Info("aap renewal launched", "action", "renew", "certificate_id", id.String(), "job_id", ref.JobID, "workflow", ref.Workflow)
+
+	expected, _ := json.Marshal(map[string]any{
+		"common_name":             cn,
+		"predecessor_fingerprint": cert.FingerprintSHA256,
+		"predecessor_not_after":   cert.NotAfter.UTC().Format(time.RFC3339),
+		"target_hosts":            cfg.TargetHosts,
+	})
+	job, perr := s.lifecycle.PersistRenewLaunch(r.Context(), id, cfg, cert.FingerprintSHA256, ref.JobID, ref.Workflow, expected)
+	if perr != nil {
+		if errors.Is(perr, store.ErrLifecycleIdempotencyConflict) {
+			existing, gerr := s.lifecycle.GetLifecycleJobByIdempotency(r.Context(), store.RenewIdempotencyKey(id, cert.FingerprintSHA256))
+			if gerr == nil {
+				writeJSON(w, http.StatusAccepted, map[string]any{
+					"status":           "launched",
+					"job":              ref,
+					"lifecycle_job_id": existing.ID,
+					"common_name":      cn,
+					"mount":            mount,
+					"role":             cfg.Role,
+					"idempotent":       true,
+				})
+				return
+			}
+		}
+		s.log.Warn("persist lifecycle job failed", "action", "renew", "certificate_id", id.String(), "aap_job_id", ref.JobID, "err", perr)
+		writeError(w, r, http.StatusInternalServerError, "failed to persist lifecycle job")
+		return
+	}
+
+	s.log.Info("aap renewal launched", "action", "renew", "certificate_id", id.String(), "job_id", ref.JobID, "lifecycle_job_id", job.ID.String(), "workflow", ref.Workflow)
 	s.auditAllow(r, "renew", "certificate", id.String(), map[string]any{
-		"mount": mount, "role": cfg.Role, "job_id": ref.JobID,
+		"mount": mount, "role": cfg.Role, "job_id": ref.JobID, "lifecycle_job_id": job.ID.String(),
 	})
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"status":      "launched",
-		"job":         ref,
-		"common_name": cn,
-		"mount":       mount,
-		"role":        cfg.Role,
+		"status":           "launched",
+		"job":              ref,
+		"lifecycle_job_id": job.ID,
+		"common_name":      cn,
+		"mount":            mount,
+		"role":             cfg.Role,
 	})
 }
 
@@ -690,14 +737,17 @@ func (s *Server) launchRenewal(ctx context.Context, cn string, cfg store.Renewal
 	return s.renewer.Renew(ctx, renewExtraVars(cn, cfg))
 }
 
-// handleRenewExpiring is the expiry-threshold auto-policy: it launches a Vault+AAP
-// renewal for every tracked cert whose stored renewal config is set and that
-// expires within N days (defaults to EXPIRING_SOON_DAYS). Explicit, consent-gated
-// trigger (like /reconcile); no background scheduler. Verification is the existing
-// rescan + reconcile monitor cycle.
+// handleRenewExpiring is the expiry-threshold auto-policy: it enqueues a durable
+// lifecycle job for every tracked cert whose stored renewal config is set and that
+// expires within N days (defaults to EXPIRING_SOON_DAYS). The worker launches AAP.
+// Explicit, consent-gated trigger (like /reconcile); no background scheduler.
 func (s *Server) handleRenewExpiring(w http.ResponseWriter, r *http.Request) {
 	if s.renewer == nil {
 		writeError(w, r, http.StatusServiceUnavailable, "AAP not configured")
+		return
+	}
+	if s.lifecycle == nil {
+		writeError(w, r, http.StatusServiceUnavailable, "lifecycle jobs store not configured")
 		return
 	}
 	var body struct {
@@ -723,7 +773,7 @@ func (s *Server) handleRenewExpiring(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	launched := make([]map[string]any, 0, len(certs))
+	enqueued := make([]map[string]any, 0, len(certs))
 	failed := make([]map[string]any, 0)
 	for _, c := range certs {
 		if c.RenewalConfig == nil { // defensive; the query already filters this out
@@ -738,24 +788,82 @@ func (s *Server) handleRenewExpiring(w http.ResponseWriter, r *http.Request) {
 			failed = append(failed, map[string]any{"certificate_id": c.ID, "common_name": cn, "error": verr.Error()})
 			continue
 		}
-		ref, lerr := s.launchRenewal(r.Context(), cn, cfg)
-		if lerr != nil {
-			s.log.Warn("aap renewal launch failed", "action", "renew_expiring", "certificate_id", c.ID.String(), "err", lerr)
-			failed = append(failed, map[string]any{"certificate_id": c.ID, "common_name": cn, "error": "failed to launch AAP renewal"})
+		expected, _ := json.Marshal(map[string]any{
+			"common_name":             cn,
+			"predecessor_fingerprint": c.FingerprintSHA256,
+			"predecessor_not_after":   c.NotAfter.UTC().Format(time.RFC3339),
+			"target_hosts":            cfg.TargetHosts,
+		})
+		job, jerr := s.lifecycle.InsertLifecycleJobPending(r.Context(), c.ID, c.FingerprintSHA256, expected)
+		if jerr != nil {
+			if errors.Is(jerr, store.ErrLifecycleIdempotencyConflict) {
+				existing, gerr := s.lifecycle.GetLifecycleJobByIdempotency(r.Context(), store.RenewIdempotencyKey(c.ID, c.FingerprintSHA256))
+				if gerr == nil {
+					enqueued = append(enqueued, map[string]any{
+						"certificate_id": c.ID, "common_name": cn, "lifecycle_job_id": existing.ID, "idempotent": true,
+					})
+					continue
+				}
+			}
+			s.log.Warn("enqueue lifecycle job failed", "action", "renew_expiring", "certificate_id", c.ID.String(), "err", jerr)
+			failed = append(failed, map[string]any{"certificate_id": c.ID, "common_name": cn, "error": "failed to enqueue lifecycle job"})
 			continue
 		}
-		launched = append(launched, map[string]any{"certificate_id": c.ID, "common_name": cn, "job": ref})
+		enqueued = append(enqueued, map[string]any{
+			"certificate_id": c.ID, "common_name": cn, "lifecycle_job_id": job.ID,
+		})
 	}
-	s.log.Info("renew-expiring batch", "action", "renew_expiring", "within_days", within, "eligible", len(certs), "launched", len(launched), "failed", len(failed))
+	s.log.Info("renew-expiring batch", "action", "renew_expiring", "within_days", within, "eligible", len(certs), "enqueued", len(enqueued), "failed", len(failed))
 	s.auditAllow(r, "renew", "", "", map[string]any{
-		"within_days": within, "eligible": len(certs), "launched": len(launched), "failed": len(failed),
+		"within_days": within, "eligible": len(certs), "enqueued": len(enqueued), "failed": len(failed),
 	})
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"within_days": within,
 		"eligible":    len(certs),
-		"launched":    launched,
+		"enqueued":    enqueued,
+		"launched":    enqueued, // back-compat alias; worker performs AAP launch
 		"failed":      failed,
 	})
+}
+
+func (s *Server) handleGetLifecycleJob(w http.ResponseWriter, r *http.Request) {
+	if s.lifecycle == nil {
+		writeError(w, r, http.StatusServiceUnavailable, "lifecycle jobs store not configured")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid lifecycle job id")
+		return
+	}
+	job, err := s.lifecycle.GetLifecycleJob(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrLifecycleJobNotFound) {
+			writeError(w, r, http.StatusNotFound, "lifecycle job not found")
+			return
+		}
+		s.writeServerError(w, r, err, "failed to load lifecycle job")
+		return
+	}
+	writeJSON(w, http.StatusOK, job)
+}
+
+func (s *Server) handleListCertLifecycleJobs(w http.ResponseWriter, r *http.Request) {
+	if s.lifecycle == nil {
+		writeError(w, r, http.StatusServiceUnavailable, "lifecycle jobs store not configured")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid certificate id")
+		return
+	}
+	jobs, err := s.lifecycle.ListLifecycleJobsByCert(r.Context(), id, 50)
+	if err != nil {
+		s.writeServerError(w, r, err, "failed to list lifecycle jobs")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": jobs})
 }
 
 // handleInventory serves an Ansible dynamic inventory of renewable certificates

@@ -151,6 +151,7 @@ func (f *fakeResourceStore) DeleteIssuer(context.Context, uuid.UUID) error { ret
 func newResourceServer(res resourceStore) *Server {
 	srv := NewServer(openTestConfig(config.Config{}), &store.Store{}, scanner.New(scanner.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv.resources = res
+	srv.lifecycle = &fakeLifecycleStore{}
 	return srv
 }
 

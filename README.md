@@ -55,8 +55,10 @@ It complements Vault PKI and HCP Certificates Inventory. It is **not** a Vault p
 ### Renewal automation (Mode C — CLM orchestrates, Vault issues, AAP deploys)
 
 - **Renewal kit generator** — renders vault-agent HCL / an AAP playbook to reissue+deploy a cert (`GET /certificates/{id}/renewal-kit`)
-- **On-demand renew** — `POST /certificates/{id}/renew` resolves the AAP job template by name and launches it with validated extra_vars
-- **Batch auto-renewal** — `POST /renew-expiring` renews everything within the expiry window (defaults to `EXPIRING_SOON_DAYS`)
+- **On-demand renew** — `POST /certificates/{id}/renew` launches AAP, persists a `lifecycle_jobs` row + `renewal.launched` **before** 202 (`lifecycle_job_id` in the body), and stores `renewal_config`
+- **Batch auto-renewal** — `POST /renew-expiring` enqueues one durable job per eligible cert (worker launches AAP); defaults to `EXPIRING_SOON_DAYS`
+- **Durable lifecycle worker** — claims jobs, polls with `WaitForJob` (never on the HTTP request context), maps AAP status → CLM status, and marks **verified** only after wire check (same CN, new fingerprint, later `not_after`). AAP success alone is not completed
+- **Read API** — `GET /lifecycle-jobs/{id}`, `GET /certificates/{id}/lifecycle-jobs`
 - **Per-cert renewal config** persisted (`renewal_config` JSONB), survives rescans, feeds the dynamic inventory
 - **AAP dynamic inventory** — `GET /inventory` renders Ansible `--list` JSON (host = CN, issue-role hostvars + `clm_*` metadata, `clm_renewable`/`svc_*` groups)
 - Closed-loop verification = rescan + reconcile
@@ -253,14 +255,16 @@ See [docs/data-model.md](docs/data-model.md).
 | GET | `/api/v1/certificates/{id}/renewal-kit` | Generate vault-agent / AAP renewal kit (`?target=`, `?mount=`, `?role=`, ...) |
 | POST | `/api/v1/certificates/{id}/revocation-check` | CRL/OCSP revocation check |
 | POST | `/api/v1/certificates/{id}/catalog-import` | Track cert in CLM (Modes A/D, consent-gated) |
-| POST | `/api/v1/certificates/{id}/renew` | On-demand renew via Vault + AAP (consent-gated) |
+| POST | `/api/v1/certificates/{id}/renew` | On-demand renew via Vault + AAP (consent-gated); 202 includes `lifecycle_job_id` |
 | PATCH | `/api/v1/certificates/{id}` | Update governance fields |
 | DELETE | `/api/v1/certificates/{id}` | Delete certificate |
+| GET | `/api/v1/certificates/{id}/lifecycle-jobs` | List durable lifecycle jobs for a certificate |
+| GET | `/api/v1/lifecycle-jobs/{id}` | Lifecycle job status, AAP id, expected/observed |
 | GET | `/api/v1/issuers` | List issuers/CAs |
 | POST | `/api/v1/issuers/{id}/import` | Import CA bundle into Vault (Mode B, consent-gated) |
 | DELETE | `/api/v1/issuers/{id}` | Delete issuer |
 | POST | `/api/v1/reconcile` | Reconcile inventory against Vault PKI |
-| POST | `/api/v1/renew-expiring` | Batch auto-renew expiring certs (consent-gated) |
+| POST | `/api/v1/renew-expiring` | Enqueue durable renew jobs for expiring certs (consent-gated; worker launches AAP) |
 | GET | `/api/v1/inventory` | Ansible dynamic inventory (`--list` JSON, `?within_days=N`). AAP service role only — not a dashboard page |
 | GET | `/api/v1/events` | List outbox events |
 | GET | `/api/v1/blindspot` | Global blind-spot (shadow certs) |

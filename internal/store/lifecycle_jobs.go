@@ -20,10 +20,21 @@ const (
 	LifecycleAAPRunning      = "aap_running"
 	LifecycleAAPSuccessful   = "aap_successful"
 	LifecycleVerifying       = "verifying"
+	LifecyclePendingVerify   = "pending_verify"
 	LifecycleVerified        = "verified"
 	LifecycleVerifyFailed    = "verify_failed"
+	LifecycleTimedOut        = "timed_out"
 	LifecycleFailed          = "failed"
 )
+
+// Job kinds on lifecycle_jobs.kind.
+const (
+	JobKindRenew   = "renew"
+	JobKindMigrate = "migrate"
+)
+
+// ErrLifecycleAAPRefConflict is returned when ClaimByIdempotency sees a different aap_job_id.
+var ErrLifecycleAAPRefConflict = errors.New("lifecycle job aap_job_id conflict")
 
 // ErrLifecycleJobNotFound is returned when a lifecycle job id is unknown.
 var ErrLifecycleJobNotFound = errors.New("lifecycle job not found")
@@ -31,23 +42,43 @@ var ErrLifecycleJobNotFound = errors.New("lifecycle job not found")
 // ErrLifecycleIdempotencyConflict is returned when InsertJob hits a duplicate key.
 var ErrLifecycleIdempotencyConflict = errors.New("lifecycle job idempotency conflict")
 
-// LifecycleJob is a durable renewal (or similar) job tracked across restarts.
+// LifecycleJob is a durable renewal/migrate job tracked across restarts.
 type LifecycleJob struct {
-	ID                 uuid.UUID       `json:"id"`
-	Kind               string          `json:"kind"`
-	Status             string          `json:"status"`
-	PredecessorCertID  *uuid.UUID      `json:"predecessor_cert_id,omitempty"`
-	SuccessorCertID    *uuid.UUID      `json:"successor_cert_id,omitempty"`
-	AAPJobID           *int            `json:"aap_job_id,omitempty"`
-	AAPWorkflow        bool            `json:"aap_workflow"`
-	IdempotencyKey     string          `json:"idempotency_key"`
-	Expected           json.RawMessage `json:"expected"`
-	Observed           json.RawMessage `json:"observed"`
-	FailureReason      *string         `json:"failure_reason,omitempty"`
-	LeaseOwner         *string         `json:"lease_owner,omitempty"`
-	LeaseExpiresAt     *time.Time      `json:"lease_expires_at,omitempty"`
-	CreatedAt          time.Time       `json:"created_at"`
-	UpdatedAt          time.Time       `json:"updated_at"`
+	ID                uuid.UUID       `json:"id"`
+	Kind              string          `json:"kind"`
+	Status            string          `json:"status"`
+	PredecessorCertID *uuid.UUID      `json:"predecessor_cert_id,omitempty"`
+	SuccessorCertID   *uuid.UUID      `json:"successor_cert_id,omitempty"`
+	AAPJobID          *int            `json:"aap_job_id,omitempty"`
+	AAPWorkflow       bool            `json:"aap_workflow"`
+	IdempotencyKey    string          `json:"idempotency_key"`
+	Expected          json.RawMessage `json:"expected"`
+	Observed          json.RawMessage `json:"observed"`
+	FailureReason     *string         `json:"failure_reason,omitempty"`
+	LeaseOwner        *string         `json:"lease_owner,omitempty"`
+	LeaseExpiresAt    *time.Time      `json:"lease_expires_at,omitempty"`
+	NextVerifyAt      *time.Time      `json:"next_verify_at,omitempty"`
+	TimeoutAt         time.Time       `json:"timeout_at"`
+	VerifyAttempt     int             `json:"verify_attempt"`
+	CreatedAt         time.Time       `json:"created_at"`
+	UpdatedAt         time.Time       `json:"updated_at"`
+}
+
+// UserStatus maps durable job statuses to operator-facing badges.
+func UserStatus(status string) string {
+	switch status {
+	case LifecycleVerified:
+		return "Verified"
+	case LifecycleTimedOut:
+		return "Timed out"
+	case LifecycleFailed, LifecycleVerifyFailed:
+		return "Failed"
+	case LifecycleLaunching, LifecycleAAPPending, LifecycleAAPRunning, LifecycleAAPSuccessful,
+		LifecycleVerifying, LifecyclePendingVerify, LifecyclePendingApproval:
+		return "Pending"
+	default:
+		return "Pending"
+	}
 }
 
 // LifecycleJobEvent is an append-only timeline entry for a lifecycle job.
@@ -95,12 +126,14 @@ func (s *Store) InsertLifecycleJob(ctx context.Context, p InsertLifecycleJobPara
 		) VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, kind, status, predecessor_cert_id, successor_cert_id,
 			aap_job_id, aap_workflow, idempotency_key, expected, observed,
-			failure_reason, lease_owner, lease_expires_at, created_at, updated_at
+			failure_reason, lease_owner, lease_expires_at,
+			next_verify_at, timeout_at, verify_attempt, created_at, updated_at
 	`, p.Kind, p.Status, p.PredecessorCertID, p.IdempotencyKey, p.Expected,
 		p.AAPJobID, p.AAPWorkflow).Scan(
 		&job.ID, &job.Kind, &job.Status, &job.PredecessorCertID, &job.SuccessorCertID,
 		&job.AAPJobID, &job.AAPWorkflow, &job.IdempotencyKey, &job.Expected, &job.Observed,
-		&job.FailureReason, &job.LeaseOwner, &job.LeaseExpiresAt, &job.CreatedAt, &job.UpdatedAt,
+		&job.FailureReason, &job.LeaseOwner, &job.LeaseExpiresAt,
+		&job.NextVerifyAt, &job.TimeoutAt, &job.VerifyAttempt, &job.CreatedAt, &job.UpdatedAt,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -250,7 +283,7 @@ func (s *Store) ClaimLifecycleJobs(ctx context.Context, owner string, leaseTTL t
 	rows, err := tx.Query(ctx, `
 		SELECT id FROM lifecycle_jobs
 		WHERE status IN (
-			'launching', 'aap_pending', 'aap_running', 'aap_successful', 'verifying'
+			'launching', 'aap_pending', 'aap_running', 'aap_successful', 'verifying', 'pending_verify'
 		)
 		AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
 		ORDER BY created_at
@@ -337,11 +370,13 @@ func (s *Store) PersistRenewLaunch(ctx context.Context, certID uuid.UUID, cfg Re
 		) VALUES ('renew', $1, $2, $3, $4, $5, $6)
 		RETURNING id, kind, status, predecessor_cert_id, successor_cert_id,
 			aap_job_id, aap_workflow, idempotency_key, expected, observed,
-			failure_reason, lease_owner, lease_expires_at, created_at, updated_at
+			failure_reason, lease_owner, lease_expires_at,
+			next_verify_at, timeout_at, verify_attempt, created_at, updated_at
 	`, LifecycleAAPPending, certID, key, expected, aapJobID, workflow).Scan(
 		&job.ID, &job.Kind, &job.Status, &job.PredecessorCertID, &job.SuccessorCertID,
 		&job.AAPJobID, &job.AAPWorkflow, &job.IdempotencyKey, &job.Expected, &job.Observed,
-		&job.FailureReason, &job.LeaseOwner, &job.LeaseExpiresAt, &job.CreatedAt, &job.UpdatedAt,
+		&job.FailureReason, &job.LeaseOwner, &job.LeaseExpiresAt,
+		&job.NextVerifyAt, &job.TimeoutAt, &job.VerifyAttempt, &job.CreatedAt, &job.UpdatedAt,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -409,7 +444,8 @@ func appendEventStandalone(ctx context.Context, s *Store, eventType string, cert
 const lifecycleJobSelect = `
 	SELECT id, kind, status, predecessor_cert_id, successor_cert_id,
 		aap_job_id, aap_workflow, idempotency_key, expected, observed,
-		failure_reason, lease_owner, lease_expires_at, created_at, updated_at
+		failure_reason, lease_owner, lease_expires_at,
+		next_verify_at, timeout_at, verify_attempt, created_at, updated_at
 	FROM lifecycle_jobs
 `
 
@@ -430,9 +466,121 @@ func scanLifecycleJobRow(row scannable) (LifecycleJob, error) {
 	err := row.Scan(
 		&job.ID, &job.Kind, &job.Status, &job.PredecessorCertID, &job.SuccessorCertID,
 		&job.AAPJobID, &job.AAPWorkflow, &job.IdempotencyKey, &job.Expected, &job.Observed,
-		&job.FailureReason, &job.LeaseOwner, &job.LeaseExpiresAt, &job.CreatedAt, &job.UpdatedAt,
+		&job.FailureReason, &job.LeaseOwner, &job.LeaseExpiresAt,
+		&job.NextVerifyAt, &job.TimeoutAt, &job.VerifyAttempt, &job.CreatedAt, &job.UpdatedAt,
 	)
 	return job, err
+}
+
+// ClaimDueVerifyJobs claims pending_verify jobs whose next_verify_at is due.
+func (s *Store) ClaimDueVerifyJobs(ctx context.Context, now time.Time, limit int, leaseTTL time.Duration) ([]LifecycleJob, error) {
+	if leaseTTL <= 0 {
+		leaseTTL = 2 * time.Minute
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	expires := now.Add(leaseTTL)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, `
+		SELECT id FROM lifecycle_jobs
+		WHERE status = 'pending_verify'
+		  AND next_verify_at IS NOT NULL
+		  AND next_verify_at <= $1
+		  AND (lease_expires_at IS NULL OR lease_expires_at < $1)
+		ORDER BY next_verify_at
+		FOR UPDATE SKIP LOCKED
+		LIMIT $2
+	`, now, limit)
+	if err != nil {
+		return nil, err
+	}
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return []LifecycleJob{}, tx.Commit(ctx)
+	}
+	_, err = tx.Exec(ctx, `
+		UPDATE lifecycle_jobs SET
+			lease_owner = 'verify-worker',
+			lease_expires_at = $2,
+			updated_at = NOW()
+		WHERE id = ANY($1)
+	`, ids, expires)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	out := make([]LifecycleJob, 0, len(ids))
+	for _, id := range ids {
+		job, err := s.GetLifecycleJob(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, job)
+	}
+	return out, nil
+}
+
+// ScheduleNextVerify sets pending_verify with the next backoff attempt.
+func (s *Store) ScheduleNextVerify(ctx context.Context, id uuid.UUID, attempt int, next time.Time) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE lifecycle_jobs SET
+			status = $2,
+			verify_attempt = $3,
+			next_verify_at = $4,
+			lease_owner = NULL,
+			lease_expires_at = NULL,
+			updated_at = NOW()
+		WHERE id = $1
+	`, id, LifecyclePendingVerify, attempt, next.UTC())
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrLifecycleJobNotFound
+	}
+	return nil
+}
+
+// ClaimByIdempotency attaches an AAP job id to an existing outbox-driven job
+// (policy/batch path). Same aap_job_id is idempotent; a different id conflicts.
+func (s *Store) ClaimByIdempotency(ctx context.Context, key string, aapJobID int) (LifecycleJob, error) {
+	job, err := s.GetLifecycleJobByIdempotency(ctx, key)
+	if err != nil {
+		return LifecycleJob{}, err
+	}
+	if job.AAPJobID != nil {
+		if *job.AAPJobID == aapJobID {
+			return job, nil
+		}
+		return LifecycleJob{}, ErrLifecycleAAPRefConflict
+	}
+	if err := s.SetLifecycleAAPRef(ctx, job.ID, aapJobID, job.AAPWorkflow, LifecycleAAPPending); err != nil {
+		return LifecycleJob{}, err
+	}
+	return s.GetLifecycleJob(ctx, job.ID)
 }
 
 func nullJSON(b json.RawMessage) any {

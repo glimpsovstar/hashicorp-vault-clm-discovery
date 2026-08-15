@@ -137,26 +137,31 @@ Plaintext JSON sealed in `secrets_enc` (never logged, never returned on GET):
 | `aap` | `token` |
 | `eda` | `token` |
 
-### Lifecycle jobs (`lifecycle_jobs`, migration `000009`)
+### Lifecycle jobs (`lifecycle_jobs`, migrations `000009` + `000012`)
 
-Durable Mode C renew tracking (M2). Handlers stay **202**; a background worker owns AAP poll + wire verify. Distinct from the EDA `events` outbox and from `audit_events`.
+Durable Mode C renew/migrate tracking (M2 + #87). Handlers stay **202**; a background worker owns AAP poll + wire verify. Distinct from the EDA `events` outbox and from `audit_events`.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | uuid PK | Job id (`lifecycle_job_id` in renew responses) |
-| `kind` | text | e.g. `renew` |
-| `status` | text | `pending_approval` → `launching` → `aap_*` → `verifying` → `verified` / `verify_failed` / `failed` |
-| `predecessor_cert_id` | uuid | Cert being renewed |
+| `kind` | text | `renew` \| `migrate` |
+| `status` | text | includes `pending_verify`, `timed_out` (plus M2 `aap_*` / `verified` / `failed`) |
+| `predecessor_cert_id` | uuid | Cert being renewed/migrated |
 | `successor_cert_id` | uuid | New cert after verify (nullable) |
 | `aap_job_id` | int | Controller job id (set before 202 on on-demand renew) |
 | `aap_workflow` | bool | Workflow vs job template |
-| `idempotency_key` | text unique | `renew:<cert_id>:<fingerprint>` |
+| `idempotency_key` | text unique | `renew:<cert_id>:<fingerprint>` (migrate uses its own prefix when added) |
 | `expected` / `observed` | jsonb | Wire verify inputs/outputs |
 | `lease_owner` / `lease_expires_at` | text / timestamptz | Worker claim (SKIP LOCKED) |
+| `next_verify_at` | timestamptz | When `pending_verify` is due for the next backoff check |
+| `timeout_at` | timestamptz | Default now+24h; past ⇒ `timed_out` |
+| `verify_attempt` | int | Backoff step counter |
 
 Related: `lifecycle_job_events` (append-only timeline), `lifecycle_approvals` (auto/consent rows; SoD completeness is M1 actors).
 
-`renewal.launched` / `renewal.completed` / `renewal.failed` also go to the EDA outbox; **completed only after verified**.
+Operator badge via `UserStatus`: Pending / Verified / Timed out / Failed.
+
+`renewal.launched` / `renewal.completed` / `renewal.failed` also go to the EDA outbox; **completed only after verified** (migrate will use `renewal.verified` / `renewal.timed_out`).
 
 ### EDA outbox catalogue (`events`, migration `000006`)
 

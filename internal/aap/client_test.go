@@ -553,3 +553,27 @@ func TestStatusHelpers(t *testing.T) {
 		t.Fatal("running should not be terminal")
 	}
 }
+
+func TestJobStdout(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2/jobs/42/stdout/" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("format") != "json" {
+			t.Fatalf("format = %s", r.URL.Query().Get("format"))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"content": `{"certificates":[{"pem":"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----"}]}`,
+		})
+	}))
+	defer srv.Close()
+	c := newClient(t, srv)
+	out, err := c.JobStdout(context.Background(), 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "BEGIN CERTIFICATE") {
+		t.Fatalf("stdout = %s", out)
+	}
+}

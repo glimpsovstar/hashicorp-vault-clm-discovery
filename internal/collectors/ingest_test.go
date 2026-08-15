@@ -108,6 +108,19 @@ func TestIngestPublicPEMs_RejectsPrivateKey(t *testing.T) {
 	}
 }
 
+func TestIngestPublicPEMs_AcceptsADCSSource(t *testing.T) {
+	t.Parallel()
+	pemText, _ := mustLeafPEM(t)
+	up := &fakeUpsert{}
+	n, _, err := IngestPublicPEMs(context.Background(), up, uuid.New(), "adcs", []Item{{PEM: pemText}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("ingested=%d", n)
+	}
+}
+
 func TestIngestPublicPEMs_InvalidSource(t *testing.T) {
 	t.Parallel()
 	_, _, err := IngestPublicPEMs(context.Background(), &fakeUpsert{}, uuid.New(), "network", []Item{})
@@ -115,3 +128,4 @@ func TestIngestPublicPEMs_InvalidSource(t *testing.T) {
 		t.Fatal("expected invalid source")
 	}
 }
+

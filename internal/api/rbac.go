@@ -81,7 +81,8 @@ func isCreateScan(method, path string) bool {
 	if method != http.MethodPost {
 		return false
 	}
-	return path == "/api/v1/scans" || path == "/api/v1/scans/collect"
+	return path == "/api/v1/scans" || path == "/api/v1/scans/collect" ||
+		path == "/api/v1/scans/adcs" || path == "/api/v1/scans/akv"
 }
 
 func isRemediate(method, path string) bool {

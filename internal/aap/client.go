@@ -355,6 +355,44 @@ func (c *Client) WaitForJob(ctx context.Context, res LaunchResult, interval time
 	}
 }
 
+// JobStdout fetches Controller job stdout (capped at maxBody). Prefers
+// format=json (`content` field); falls back to plain text.
+func (c *Client) JobStdout(ctx context.Context, jobID int) ([]byte, error) {
+	if !c.Configured() {
+		return nil, fmt.Errorf("aap client is not configured")
+	}
+	if jobID <= 0 {
+		return nil, fmt.Errorf("aap job stdout: invalid job id %d", jobID)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url(fmt.Sprintf("/api/v2/jobs/%d/stdout/?format=json", jobID)), nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	if c.cfg.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.cfg.Token)
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("aap request stdout: %w", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	if err != nil {
+		return nil, fmt.Errorf("read stdout: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("aap stdout job %d: status %d: %s", jobID, resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+	var wrapped struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(data, &wrapped); err == nil && wrapped.Content != "" {
+		return []byte(wrapped.Content), nil
+	}
+	return data, nil
+}
+
 func (c *Client) get(ctx context.Context, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url(path), nil)
 	if err != nil {

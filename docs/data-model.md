@@ -47,7 +47,7 @@ Net-new; where/when the cert was seen.
 | `first_discovered` | timestamptz | First observation |
 | `last_seen` | timestamptz | Most recent observation |
 | `scan_id` | uuid (FK) | Per observation |
-| `scan_source` | text | `network` (default TLS scan); `cloud_akv` / `cloud_acm` / `cloud_gcp` for read-only cloud collectors (`POST /scans/collect`). ADCS/`akv` (non-cloud_*) land with [#86](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/86) |
+| `scan_source` | text | `network` (default TLS scan); `adcs` (AAP ADCS collect); `cloud_akv` / `cloud_acm` / `cloud_gcp` (read-only cloud collectors). AKV live collect uses `cloud_akv` (aligned with #99), not a bare `akv` token |
 | `hostname_matches_san` | bool | Misconfiguration flag |
 | `chain_status` | enum | `complete`, `self_signed`, `incomplete`, `untrusted_root` |
 

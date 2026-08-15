@@ -196,6 +196,9 @@ Private RFC1918, loopback, and link-local ranges are blocked unless `ALLOW_PRIVA
 | `AAP_REVOKE_WORKFLOW` | `false` | When true, resolve `AAP_REVOKE_TEMPLATE` as a workflow job template |
 | `AAP_SKIP_TLS_VERIFY` | `false` | Skip TLS verification to the AAP Controller (lab use only) |
 | `AAP_DEFAULT_MOUNT` | `pki` | Default **Vault PKI mount path** for Mode C renew/revoke when the cert/request has no mount. Not an AAP id. Settings label: **Default Vault PKI mount** |
+| `AAP_ADCS_TEMPLATE` | `CLM - Collect ADCS` | AAP job template name for `POST /scans/adcs` (find-by-name; extra_vars: `ca_host`, `clm_scan_id` only) |
+| `AZURE_KEY_VAULT_URI` | (empty) | Key Vault base URI for `POST /scans/akv` (public certs → `cloud_akv`) |
+| `AZURE_TENANT_ID` / `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` | (empty) | Optional SP for AKV; or set `AZURE_ACCESS_TOKEN` for lab/tests. Never logged |
 | `LIFECYCLE_VERIFY_TIMEOUT` | `24h` | Pending-verify deadline from job create; past ⇒ `timed_out` + `renewal.timed_out` |
 | `LIFECYCLE_VERIFY_POLL_INTERVAL` | `5s` | Lifecycle worker tick / AAP poll interval |
 | **Events (EDA dispatcher)** | | |
@@ -262,7 +265,9 @@ See [docs/data-model.md](docs/data-model.md).
 |--------|------|-------------|
 | GET | `/api/v1/health` | Health check |
 | POST | `/api/v1/scans` | Start scan (`consent: true` required) |
-| POST | `/api/v1/scans/collect` | Cloud collector ingest (`source`: `cloud_akv`\|`cloud_acm`\|`cloud_gcp`; public PEMs only; consent-gated) |
+| POST | `/api/v1/scans/collect` | Collector ingest (`source`: `adcs`\|`cloud_akv`\|`cloud_acm`\|`cloud_gcp`; public PEMs only; consent-gated) |
+| POST | `/api/v1/scans/adcs` | ADCS collect via AAP (`CLM - Collect ADCS`); `source=adcs`; consent-gated; 503 if AAP unset |
+| POST | `/api/v1/scans/akv` | Azure Key Vault public-cert collect → `source=cloud_akv`; consent-gated; 503 if URI unset |
 | GET | `/api/v1/scans` | List scans |
 | GET | `/api/v1/scans/{id}` | Scan detail (status, diagnostics, counts) |
 | GET | `/api/v1/scans/{id}/certificates` | Certificates discovered in a scan |

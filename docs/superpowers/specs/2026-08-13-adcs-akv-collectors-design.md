@@ -1,11 +1,22 @@
 # ADCS + Azure Key Vault collectors — design
 
-**Status:** Draft (do not implement before M1 if new privileged collect APIs ship)  
-**Date:** 2026-08-13  
+**Status:** Approved for implementation (#86)  
+**Date:** 2026-08-13 (updated 2026-08-15)  
 **Parent:** [M5 broader integrations](2026-08-13-m5-broader-integrations-design.md) ([#83](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/83))  
 **Plan:** [2026-08-13-adcs-akv-collectors.md](../plans/2026-08-13-adcs-akv-collectors.md)  
-**Issue:** [adcs-akv-collectors.md](../issues/adcs-akv-collectors.md)  
+**Issue:** [#86](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/86)  
 **Depends on:** M1 for RBAC on collect endpoints; Connections Settings (env vars until that spec exists)
+
+### Alignment with #99 `cloud_*`
+
+M5 remainder (#99) shipped shared ingest + `POST /scans/collect` with sources `cloud_akv` | `cloud_acm` | `cloud_gcp`. This slice **reuses** that pipeline:
+
+| Source | `scans.source` | How collected |
+|--------|----------------|---------------|
+| ADCS (AAP) | `adcs` | New AAP job path (this issue) |
+| Azure Key Vault | `cloud_akv` | Live list+get via `internal/collectors/cloud` + AKV REST (not a second `akv` token) |
+
+Do **not** invent bare `akv` as a scan source.
 
 ---
 
@@ -20,12 +31,12 @@ M5 #83 lists read-only ACM / AKV / GCP collectors as a later slice with `scan_so
 
 ## Goal
 
-Add **discovery-only** collectors for **ADCS first**, then **AKV** as the cloud-vendor example. Both upsert the **same** `certificates` inventory by `fingerprint_sha256`, set `scans.source` to `adcs` or `akv`, and feed the **existing** environment/scan report. No new report product. No import/migrate/Mode C in this spec.
+Add **discovery-only** collectors for **ADCS first**, then **AKV** as the cloud-vendor example. Both upsert the **same** `certificates` inventory by `fingerprint_sha256`. ADCS sets `scans.source=adcs`; AKV reuses M5 `cloud_akv` (see Alignment with #99). Feed the **existing** environment/scan report. No new report product. No import/migrate/Mode C in this spec.
 
 ## Locked decisions
 
 - **Order:** Microsoft ADCS (on-prem Windows CA / certsrv) first; Azure Key Vault certificates second. ACM and GCP Certificate Manager are **not** designed or implemented here — they remain M5 follow-ons using the AKV pattern.
-- **Inventory:** reuse `store.UpsertCertificate` / `UpsertIssuer`; dedup key remains `fingerprint_sha256`. New `scan_source` values: `adcs`, `akv` (not `cloud_*`).
+- **Inventory:** reuse `store.UpsertCertificate` / `UpsertIssuer`; dedup key remains `fingerprint_sha256`. Scan sources: `adcs` (new) and `cloud_akv` (existing from #99). Do not add bare `akv`.
 - **Report:** `GET /scans/{id}/report` (`internal/report.BuildForScan`) unchanged as a product; collector scans are just another completed scan.
 - **Discovery only.** Catalog track / CA import / reissue-and-deploy are [Vault import workflow](2026-07-06-vault-import-workflow-design.md) and [Mode C](2026-07-06-mode-c-renewal-kit-design.md). Cutover is [migrate + pending verify](2026-08-13-migrate-pending-verify-design.md) — do not design Mode C here.
 - **No private keys in CLM.** Collectors are read-only. No `certutil` PFX/key dump. No AKV key export / `azkeys` / policy that returns key material. Store public cert PEM only (same as network scan).

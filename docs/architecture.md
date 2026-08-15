@@ -89,6 +89,8 @@ flowchart TB
 - Append-only `audit_events` on privileged mutations and 401/403 (not the EDA `events` outbox)
 - Durable scan queue: `POST /scans` inserts `pending` and returns **202** immediately (never blocks on an in-memory channel). Over-cap pending → **503**
 - Cloud collectors: `POST /scans/collect` with `source=cloud_akv|cloud_acm|cloud_gcp` ingests public PEMs only (upsert by `fingerprint_sha256`; private keys rejected). No cloud root keys in CLM
+- ADCS collect: `POST /scans/adcs` launches AAP template `CLM - Collect ADCS` (find-by-name), ingests stdout public PEMs with `source=adcs`. No WinRM/SSH in CLM
+- AKV live collect: `POST /scans/akv` lists+gets public certs into `source=cloud_akv` (same token as #99 ingest)
 - Background scan poller claims rows with `FOR UPDATE SKIP LOCKED` (multi-replica safe); Compose stays **1** API replica by default
 - Consent gate on scan creation
 - `POST /api/v1/certificates/{id}/revoke` — consent-gated AAP launch (`clm_action=clm_revoke`); find-by-name template; **503** if AAP unset; CLM never calls Vault `pki/revoke`. Verify via existing `revocation-check` + reconcile

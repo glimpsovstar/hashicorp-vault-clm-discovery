@@ -1,6 +1,6 @@
 # HCP Vault Dedicated Certificate Inventory Integration
 
-**Status:** Draft — pending user review  
+**Status:** Approved (demo defaults — 2026-08-15; see lifecycle spec decisions)  
 **Date:** 2026-06-14  
 **Issue:** [#17](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/17)  
 **Repo:** [glimpsovstar/hashicorp-vault-clm-discovery](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery)  
@@ -411,15 +411,15 @@ Separate policy for `pki/issuers/import/bundle` (write) — import workflow only
 
 ## Open questions (for user)
 
-> **Consolidated list:** Lifecycle-specific questions (Choose/Import/Manage, vault-agent, AAP) plus the items below are merged in [CLM lifecycle workflow spec § Open questions](2026-06-14-clm-lifecycle-workflow-design.md#open-questions).
+> **Resolved 2026-08-15.** Authoritative answers: [lifecycle spec § Decisions (approved demo defaults)](2026-06-14-clm-lifecycle-workflow-design.md#decisions-approved-demo-defaults). Summary below.
 
-1. **Vault access:** Can CLM Discovery reach the `djoo-test-vault` Vault API from its deployment network (public endpoint vs private link)? Which auth method is preferred (AppRole vs AWS IAM)?
-2. **PKI mounts:** Which mount paths matter beyond `pki/`? Multi-mount clusters need allowlist vs auto-discover policy.
-3. **Reconcile trigger:** Run automatically after every scan, on a schedule, or manual button only?
-4. **Pre-reporting certs:** Certs issued before Apr 10, 2026 exist in Vault PKI but not in HCP Inventory — is Vault API reconciliation the authoritative path (recommended), or is HCP export comparison required for audit demos?
-5. **Namespace model:** Single admin namespace or child namespaces for PKI?
-6. **cert_scope override:** Should `managed_in_vault` leaf certs always set `cert_scope = internal`, or remain governed by `governance.ClassifyScope` heuristics?
-7. **Vault-only certs:** Should v1.1 show a separate "issued in Vault, not seen on network" list in CLM, or defer to HCP Portal for that gap?
+1. **Vault access:** AppRole preferred; dev token OK for local demo only.
+2. **PKI mounts:** Allowlist `pki/` only for demo.
+3. **Reconcile trigger:** After each successful scan (+ manual API).
+4. **Pre-reporting certs:** Vault PKI LIST/READ is authoritative for CLM.
+5. **Namespace model:** Single admin namespace for demo.
+6. **cert_scope override:** Keep `governance.ClassifyScope`; override deferred to v1.2.
+7. **Vault-only certs:** No CLM list in v1.1 — defer to HCP Portal.
 
 ---
 

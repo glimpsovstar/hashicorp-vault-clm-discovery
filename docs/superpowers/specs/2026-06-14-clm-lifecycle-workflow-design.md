@@ -1,11 +1,29 @@
 # CLM Lifecycle Workflow: Discover → Choose → Import → Manage
 
-**Status:** Draft — pending user review  
+**Status:** Approved (demo defaults — 2026-08-15)  
 **Date:** 2026-06-14  
 **Issue:** [#20](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/20) (lifecycle design; complements [#17](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/17))  
 **Repo:** [glimpsovstar/hashicorp-vault-clm-discovery](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery)  
 **Related specs:** [HCP Vault Dedicated cert inventory integration](2026-06-14-hcp-vault-cert-inventory-integration-design.md), [v1 product design](2026-06-14-vault-clm-discovery-v1-design.md), [scan report & Vault import workflow](2026-06-14-scan-report-and-vault-import-design.md)  
 **Related docs:** `docs/architecture.md`, `docs/data-model.md`, `docs/reporting-architecture.md`, `README.md`
+
+## Decisions (approved demo defaults)
+
+Recorded 2026-08-15 to unlock v1.1 (#23) and close open questions for the SDLC demo. Production deployments may tighten auth/network later.
+
+| # | Topic | Decision | Notes |
+|---|-------|----------|-------|
+| 1 | Vault access | **AppRole preferred**; dev token OK for local demo only | Reachability: public demo endpoint assumed for `djoo-test-vault` |
+| 2 | PKI scope | Allowlist **`pki/` only** for demo | Multi-mount auto-discover deferred |
+| 3 | Namespace | Single admin namespace for demo | Child namespaces deferred |
+| 4 | Root vs intermediate (2c) | Not automated in v1.x; operator Choose | Import layout deferred to v1.2+ |
+| 5 | Reconcile trigger | **After each successful scan** (`RECONCILE_ON_SCAN_COMPLETE`) | Manual `POST /api/v1/reconcile` also available |
+| 6 | Pre-reporting certs | **Vault PKI LIST/READ is authoritative** over HCP inventory window | HCP gap expected for pre-reporting issuances |
+| 7 | Vault-only gap | **No in v1.1** — leave to HCP Portal | Optional CLM Vault-only list deferred |
+| 8 | `cert_scope` override | **Deferred to v1.2**; keep auto `ClassifyScope` | Do not force `internal` on `managed_in_vault` |
+| 9 | Choose UX | Wizard deferred; report/dashboard for v1.2 | — |
+| 10 | Import approval | Single-operator consent sufficient for demo | Dual-control deferred |
+| 11–12 | vault-agent / AAP | **Out of scope until v1.2+** | Reference arch docs only until then |
 
 ## Problem statement & user value
 
@@ -337,33 +355,36 @@ Cross-reference: [HCP integration spec — Integration architecture](2026-06-14-
 
 ## Open questions
 
-Consolidates lifecycle questions and [HCP spec open questions](2026-06-14-hcp-vault-cert-inventory-integration-design.md#open-questions-for-user).
+**Resolved 2026-08-15** via [Decisions (approved demo defaults)](#decisions-approved-demo-defaults). Historical question list kept for traceability; do not re-litigate for demo work.
+
+Consolidated with [HCP spec open questions](2026-06-14-hcp-vault-cert-inventory-integration-design.md#open-questions-for-user).
 
 ### Vault access & topology
 
-1. **Vault API reachability:** Can CLM reach `djoo-test-vault` from its deployment (public endpoint vs private link)? Preferred auth: AppRole vs AWS IAM?
-2. **PKI mounts:** Beyond `pki/`, which mounts matter? Allowlist vs auto-discover?
-3. **Namespace model:** Single admin namespace or child namespaces for PKI?
-4. **Root vs intermediate (2c):** For Q2, does the org standardize Vault-as-root or subordinate intermediate only? Affects import and mount layout — not automated in v1.x.
+1. **Vault API reachability:** ~~Can CLM reach `djoo-test-vault`… Preferred auth?~~ → **AppRole preferred**; public demo endpoint; token OK local-only.
+2. **PKI mounts:** ~~Allowlist vs auto-discover?~~ → Allowlist **`pki/`** for demo.
+3. **Namespace model:** ~~Single vs child?~~ → Single admin namespace for demo.
+4. **Root vs intermediate (2c):** Not automated in v1.x (unchanged).
 
 ### Reconcile & reporting
 
-5. **Reconcile trigger:** After every scan, scheduled, or manual only?
-6. **Pre-reporting certs:** Certs issued before HCP reporting enablement exist in Vault PKI but not HCP Inventory — confirm Vault API reconcile as authoritative for CLM?
-7. **Vault-only certs:** Show "issued in Vault, not seen on network" list in CLM v1.1, or defer to HCP Portal?
+5. **Reconcile trigger:** ~~After scan / scheduled / manual?~~ → **After each successful scan** (+ manual API).
+6. **Pre-reporting certs:** ~~Vault vs HCP authoritative?~~ → **Vault PKI LIST/READ authoritative**.
+7. **Vault-only certs:** ~~CLM list in v1.1?~~ → **No** — HCP Portal.
 
 ### Classification & workflow
 
-8. **cert_scope override:** Should `managed_in_vault` leaves always set `internal`, or keep `governance.ClassifyScope` heuristics (e.g. public SAN → `external`)?
-9. **Choose UX:** Wizard in dashboard vs export/report for v1.2?
-10. **Import approval:** Single operator role or dual-control for CA import?
+8. **cert_scope override:** ~~Force `internal` on managed?~~ → **Keep `ClassifyScope`**; override deferred to v1.2.
+9. **Choose UX:** Wizard deferred; dashboard/report for v1.2.
+10. **Import approval:** Single-operator consent for demo.
 
 ### Manage integrations
 
-11. **vault-agent:** Which demo targets (e.g. `aap.david-joo.sbx.hashidemos.io`) should v1.2 link as reference architecture?
-12. **AAP:** Read-only inventory feed vs webhook on expiry — preferred integration point?
+11. **vault-agent:** Out of scope until v1.2+.
+12. **AAP:** Out of scope until v1.2+.
 
 ---
+
 
 ## Acceptance criteria (future implementation)
 

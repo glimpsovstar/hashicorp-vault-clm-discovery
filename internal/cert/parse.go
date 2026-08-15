@@ -17,6 +17,7 @@ func ParseCertificate(raw *x509.Certificate, chain []*x509.Certificate, hostname
 	sans := collectSANs(raw)
 	chainStatus := analyzeChain(raw, chain)
 	keyType, keyBits := publicKeyMeta(raw)
+	sigAlg := raw.SignatureAlgorithm.String()
 
 	return ParsedCertificate{
 		SerialNumber:          raw.SerialNumber.Text(16),
@@ -29,7 +30,7 @@ func ParseCertificate(raw *x509.Certificate, chain []*x509.Certificate, hostname
 		NotAfter:              raw.NotAfter.UTC(),
 		KeyType:               keyType,
 		KeyBits:               keyBits,
-		SignatureAlgorithm:    raw.SignatureAlgorithm.String(),
+		SignatureAlgorithm:    sigAlg,
 		IsCA:                  raw.IsCA,
 		KeyUsage:              keyUsageStrings(raw),
 		ExtKeyUsage:           extKeyUsageStrings(raw),
@@ -38,6 +39,7 @@ func ParseCertificate(raw *x509.Certificate, chain []*x509.Certificate, hostname
 		OCSPServers:           raw.OCSPServer,
 		ChainStatus:           chainStatus,
 		HostnameMatchesSAN:    hostnameMatchesSAN(raw, hostname, sni),
+		PQCTag:                ClassifyPQCTag(keyType, sigAlg, raw),
 	}
 }
 

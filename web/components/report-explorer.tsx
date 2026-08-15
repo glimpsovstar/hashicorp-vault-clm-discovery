@@ -17,6 +17,7 @@ const SEVERITY_LABEL: Record<FindingSeverity, string> = {
 };
 const KIND_TABS = [
   { id: "all", label: "All" },
+  { id: "persisted", label: "Findings" },
   { id: "shadow", label: "Shadow certs" },
   { id: "insight", label: "Insights" },
   { id: "issuer", label: "CA issuers" },

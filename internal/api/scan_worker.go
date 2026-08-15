@@ -168,6 +168,7 @@ func (w *ScanWorker) execute(parent context.Context, scan store.Scan) {
 		return
 	}
 	if err == nil {
+		w.srv.maybeRecomputePostureAfterScan(context.Background(), scan.ID)
 		w.srv.maybeReconcileAfterScan(context.Background(), scan.ID)
 	}
 }

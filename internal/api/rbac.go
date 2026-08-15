@@ -31,8 +31,10 @@ func roleAllows(role, method, path string) bool {
 	switch role {
 	case roleInventory:
 		return isInventoryGET(method, path)
-	case roleViewer, roleApprover:
+	case roleViewer:
 		return isViewerRead(method, path)
+	case roleApprover:
+		return isViewerRead(method, path) || isWaiverWrite(method, path)
 	case roleScannerOperator:
 		return isViewerRead(method, path) || isCreateScan(method, path)
 	case roleRemediator:
@@ -66,6 +68,7 @@ func isViewerRead(method, path string) bool {
 		"/api/v1/lifecycle-jobs",
 		"/api/v1/blindspot",
 		"/api/v1/compliance",
+		"/api/v1/waivers",
 	} {
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			return true
@@ -87,13 +90,23 @@ func isRemediate(method, path string) bool {
 		if strings.HasPrefix(path, "/api/v1/certificates/") {
 			return strings.HasSuffix(path, "/catalog-import") ||
 				strings.HasSuffix(path, "/renew") ||
-				strings.HasSuffix(path, "/revocation-check")
+				strings.HasSuffix(path, "/revocation-check") ||
+				strings.HasSuffix(path, "/waivers")
 		}
 	case http.MethodPatch:
 		rest := strings.TrimPrefix(path, "/api/v1/certificates/")
 		return rest != path && rest != "" && !strings.Contains(rest, "/")
+	case http.MethodDelete:
+		return isWaiverWrite(method, path)
 	}
 	return false
+}
+
+func isWaiverWrite(method, path string) bool {
+	if method == http.MethodPost && strings.HasPrefix(path, "/api/v1/certificates/") && strings.HasSuffix(path, "/waivers") {
+		return true
+	}
+	return method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/waivers/")
 }
 
 func isVaultImport(method, path string) bool {

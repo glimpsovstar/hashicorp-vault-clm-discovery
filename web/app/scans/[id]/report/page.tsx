@@ -2,7 +2,7 @@ import Link from "next/link";
 import PageHeader from "@/components/page-header";
 import ReportDownloadMenu from "@/components/report-download-menu";
 import ReportExplorer from "@/components/report-explorer";
-import { fetchReport, getScan, listScanCertificates, listIssuers } from "@/lib/api";
+import { fetchReport, getScan, listScanCertificates, listIssuers, listScanFindings } from "@/lib/api";
 import { buildFindings, coverageFromBlindSpot } from "@/lib/findings";
 
 export const dynamic = "force-dynamic";
@@ -36,17 +36,18 @@ export default async function ScanReportPage({
     );
   }
 
-  const [report, certsResp, issuersResp] = await Promise.all([
+  const [report, certsResp, issuersResp, findingsResp] = await Promise.all([
     fetchReport(id),
     listScanCertificates(id),
     listIssuers(),
+    listScanFindings(id).catch(() => ({ items: [] as Awaited<ReturnType<typeof listScanFindings>>["items"] })),
   ]);
   const certs = certsResp.items ?? [];
   const issuers = issuersResp.items ?? [];
+  const persisted = findingsResp.items ?? [];
 
-  // One unified findings model: insights + shadow certs + scan CA issuers, each
-  // tagged by kind. See lib/findings.ts (and lib/report.ts for the selection rules).
-  const findings = buildFindings(report, certs, issuers);
+  // Prefer persisted M3 findings when present; fall back to on-read insights.
+  const findings = buildFindings(report, certs, issuers, persisted);
   const coverage = coverageFromBlindSpot(report.blind_spot);
 
   // Defensive default: a version skew where the report omits recommendations

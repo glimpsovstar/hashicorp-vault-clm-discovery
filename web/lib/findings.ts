@@ -1,8 +1,8 @@
-import type { Certificate, Issuer, ReportInsight, BlindSpotSummary, ReportDocument } from "@/lib/api";
+import type { Certificate, Issuer, ReportInsight, BlindSpotSummary, ReportDocument, PersistedFinding } from "@/lib/api";
 import { selectShadowCerts, selectScanIssuers } from "@/lib/report";
 
 export type FindingSeverity = "critical" | "high" | "medium" | "low" | "info";
-export type FindingKind = "insight" | "shadow" | "issuer";
+export type FindingKind = "insight" | "shadow" | "issuer" | "persisted";
 
 export type Finding = {
   key: string;
@@ -17,6 +17,7 @@ export type Finding = {
   issuerDn?: string;
   fingerprint?: string;
   serial?: string;
+  waived?: boolean;
   cert?: Certificate;
   issuer?: Issuer;
 };
@@ -37,11 +38,6 @@ export function deriveIssuerSeverity(issuer: Issuer): FindingSeverity {
 
 const SEVERITY_WORDS = new Set(["critical", "high", "medium", "low", "warning", "info"]);
 
-// Turn a raw sc081.* / crypto.* insight type into a readable label for the Finding
-// column. Keeps the meaningful path segments (not just the leaf) and drops a
-// trailing severity qualifier, since the Severity column already shows that —
-// e.g. "sc081.expiry.critical" -> "SC-081 expiry", "crypto.key.ecdsa.weak" ->
-// "Crypto key ecdsa weak".
 function humanizeInsightType(type: string): string {
   const parts = type.split(".");
   if (parts.length > 1 && SEVERITY_WORDS.has(parts[parts.length - 1])) parts.pop();
@@ -106,11 +102,46 @@ function issuerToFinding(iss: Issuer): Finding {
   };
 }
 
+function persistedToFinding(f: PersistedFinding, certs: Certificate[]): Finding {
+  const cert = certs.find((c) => c.id === f.cert_id);
+  const sev = (["critical", "high", "medium", "low", "info"].includes(f.severity)
+    ? f.severity
+    : "info") as FindingSeverity;
+  return {
+    key: `persisted-${f.id}`,
+    kind: "persisted",
+    severity: sev,
+    typeLabel: humanizeInsightType(f.rule_id),
+    subject: cert?.subject_cn || cert?.serial_number || f.rule_id,
+    secondary: f.pack + (f.waived ? " · waived" : ""),
+    vault: cert
+      ? cert.managed_status === "managed_in_vault"
+        ? "managed"
+        : cert.managed_status === "imported"
+        ? "tracked"
+        : "shadow"
+      : "na",
+    days: cert?.days_until_expiry ?? null,
+    description: f.detail || f.title,
+    fingerprint: cert?.fingerprint_sha256,
+    serial: cert?.serial_number,
+    waived: f.waived,
+    cert,
+  };
+}
+
 export function buildFindings(
   report: ReportDocument,
   certs: Certificate[],
-  issuers: Issuer[]
+  issuers: Issuer[],
+  persisted?: PersistedFinding[]
 ): Finding[] {
+  // Prefer persisted pack+ops findings when the API returns them (M3).
+  if (persisted && persisted.length > 0) {
+    const rows = persisted.map((f) => persistedToFinding(f, certs));
+    // Keep CA-import issuer opportunities; shadow/insight are covered by ops+packs.
+    return [...rows, ...selectScanIssuers(certs, issuers).map(issuerToFinding)];
+  }
   return [
     ...(report.insights ?? []).map(insightToFinding),
     ...selectShadowCerts(certs).map(shadowToFinding),
@@ -120,7 +151,10 @@ export function buildFindings(
 
 export function severityCounts(findings: Finding[]): Record<FindingSeverity, number> {
   const counts: Record<FindingSeverity, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
-  for (const f of findings) counts[f.severity]++;
+  for (const f of findings) {
+    if (f.waived) continue;
+    counts[f.severity]++;
+  }
   return counts;
 }
 
@@ -133,4 +167,16 @@ export function coverageFromBlindSpot(bs: BlindSpotSummary): {
 
 export function findingSeverityBadgeClass(sev: FindingSeverity): string {
   return `finding-sev finding-sev-${sev}`;
+}
+
+export function sortCertificatesByRisk(certs: Certificate[], desc = true): Certificate[] {
+  return [...certs].sort((a, b) => {
+    const ra = a.risk_score ?? 0;
+    const rb = b.risk_score ?? 0;
+    return desc ? rb - ra : ra - rb;
+  });
+}
+
+export function filterCertificatesByMinRisk(certs: Certificate[], minRisk: number): Certificate[] {
+  return certs.filter((c) => (c.risk_score ?? 0) >= minRisk);
 }

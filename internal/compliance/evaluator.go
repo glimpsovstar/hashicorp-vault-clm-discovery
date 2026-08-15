@@ -18,8 +18,11 @@ type CertStore interface {
 
 var severityRank = map[string]int{
 	"critical": 0,
+	"high":     1,
 	"warning":  1,
-	"info":     2,
+	"medium":   2,
+	"low":      3,
+	"info":     4,
 }
 
 // EvaluateCert runs all compliance packs for a single certificate.

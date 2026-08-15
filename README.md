@@ -254,11 +254,16 @@ See [docs/data-model.md](docs/data-model.md).
 | GET | `/api/v1/scans/{id}/blindspot` | Blind-spot (shadow certs) for a scan |
 | GET | `/api/v1/scans/{id}/compliance` | Compliance summary for a scan |
 | GET | `/api/v1/scans/{id}/report` | Environment report (`?format=markdown\|json\|csv`) |
+| GET | `/api/v1/scans/{id}/findings` | Persisted posture findings for a scan |
 | DELETE | `/api/v1/scans/{id}` | Delete scan record |
-| GET | `/api/v1/certificates` | List certificates (`?scan_id=` filters by scan) |
-| GET | `/api/v1/certificates/{id}` | Certificate detail + observations |
+| GET | `/api/v1/certificates` | List certificates (`?scan_id=` / `?sort=risk_score` / `?min_risk=` / `?pqc_tag=`) |
+| GET | `/api/v1/certificates/{id}` | Certificate detail + observations (`risk_score`, `risk_reasons`, `pqc_tag`) |
 | GET | `/api/v1/certificates/{id}/pem` | Certificate PEM |
 | GET | `/api/v1/certificates/{id}/choose` | Recommended next lifecycle action |
+| GET | `/api/v1/certificates/{id}/findings` | Open findings for a certificate |
+| GET | `/api/v1/certificates/{id}/waivers` | Waivers for a certificate |
+| POST | `/api/v1/certificates/{id}/waivers` | Create waiver (expiry required; remediator/approver) |
+| DELETE | `/api/v1/waivers/{id}` | Revoke waiver |
 | GET | `/api/v1/certificates/{id}/renewal-kit` | Generate vault-agent / AAP renewal kit (`?target=`, `?mount=`, `?role=`, ...) |
 | POST | `/api/v1/certificates/{id}/revocation-check` | CRL/OCSP revocation check |
 | POST | `/api/v1/certificates/{id}/catalog-import` | Track cert in CLM (Modes A/D, consent-gated) |
@@ -273,6 +278,7 @@ See [docs/data-model.md](docs/data-model.md).
 | POST | `/api/v1/reconcile` | Reconcile inventory against Vault PKI |
 | POST | `/api/v1/renew-expiring` | Enqueue durable renew jobs for expiring certs (consent-gated; worker launches AAP) |
 | GET | `/api/v1/inventory` | Ansible dynamic inventory (`--list` JSON, `?within_days=N`). AAP service role only — not a dashboard page |
+| GET | `/api/v1/inventory/pqc` | PQC tag inventory counts (`classic` / `hybrid` / `pqc` / `unknown`) |
 | GET | `/api/v1/events` | List outbox events |
 | GET | `/api/v1/blindspot` | Global blind-spot (shadow certs) |
 | GET | `/api/v1/compliance/summary` | Global compliance summary |

@@ -53,6 +53,14 @@ flowchart TB
 - Extracts identity fields aligned with Vault PKI cert objects
 - Computes `chain_status` and `hostname_matches_san`
 - SHA-256 fingerprint as cross-scan dedup key
+- Cheap `pqc_tag` (`classic`/`hybrid`/`pqc`/`unknown`) at parse — inventory only, no PQ issuance
+
+### Posture (`internal/posture`, M3)
+
+- Evaluates SC-081 / PCI / crypto packs plus ops classifiers → upserts `findings`
+- Maps pack `warning` → 5-level severity at persist; UI never sees `warning`
+- `risk_score = max(non-waived)` with `risk_reasons[]`; waivers suppress score/count, not hide
+- Recompute on scan complete and enrichment PATCH
 
 ### Lifecycle job worker (`internal/lifecyclejobs`, M2)
 
@@ -73,7 +81,7 @@ flowchart TB
 
 - Chi HTTP router with CORS for dashboard
 - **Default-deny AuthN** except `GET /api/v1/health`. `CLM_AUTH_MODE=static_token` maps Bearer tokens (`CLM_STATIC_TOKENS`) to RBAC roles. `CLM_INSECURE_NO_AUTH=true` is a UAT/integration hatch (caller treated as `platform_admin`)
-- RBAC: `viewer` (GET), `scanner_operator` (+ scans), `remediator` (+ catalog/renew/PATCH/revoke), `vault_import_admin` (+ CA import/reconcile), `approver` (stub), `platform_admin` (DELETE + Settings mutate), `inventory` (`GET /inventory` only — AAP, not a dashboard page)
+- RBAC: `viewer` (GET), `scanner_operator` (+ scans), `remediator` (+ catalog/renew/PATCH/revoke/waivers), `vault_import_admin` (+ CA import/reconcile), `approver` (+ waivers), `platform_admin` (DELETE + Settings mutate), `inventory` (`GET /inventory` only — AAP, not a dashboard page)
 - Consent is **intent after RBAC**: unauthorized + `consent:true` → 401/403; authorized + `consent:false` → 400
 - Append-only `audit_events` on privileged mutations and 401/403 (not the EDA `events` outbox)
 - Durable scan queue: `POST /scans` inserts `pending` and returns **202** immediately (never blocks on an in-memory channel). Over-cap pending → **503**

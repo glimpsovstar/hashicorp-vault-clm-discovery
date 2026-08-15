@@ -63,7 +63,9 @@ Net-new; where/when the cert was seen.
 | `team` | text | null | Owning team |
 | `environment` | text | null | dev/staging/prod |
 | `tags` | text[] | `{}` | Free-form tags |
-| `risk_score` | int | 0 | Composite score (v1.1) |
+| `risk_score` | int | 0 | Max score of non-waived open findings (M3); bands critical≥80 / high≥60 |
+| `risk_reasons` | jsonb | `[]` | Explainable contributors (`rule_id`, severity, title, score, waived) |
+| `pqc_tag` | text | `unknown` | `classic` \| `hybrid` \| `pqc` \| `unknown` — inventory only, no PQ issuance |
 | `remediation_state` | enum | `none` | Workflow state |
 
 ## 5. Issuer/chain records
@@ -175,6 +177,18 @@ Related: `lifecycle_job_events` (append-only timeline), `lifecycle_approvals` (a
 | `error` | text | Fatal scan error only (status `failed`) |
 
 Expansion warnings are not stored in `error` on successful scans. The EDA `events` outbox also has `lease_owner` / `lease_expires_at` for multi-replica dispatch.
+
+### Explainable posture (migration `000011`)
+
+Persisted pack+ops findings with explainable `risk_score`. Compliance pack rule IDs and SC-081 UAT ceilings are unchanged; pack `warning` is mapped to 5-level severity **once at persist** (PCI hygiene → medium, else high).
+
+| Table | Purpose |
+|-------|---------|
+| `policy_versions` | Versioned ops windows (critical≤7d / high≤30d); pack logic stays in Go |
+| `findings` | Upsert on `(cert_id, rule_id)`; open/resolved; `waived` flag |
+| `waivers` | Suppress count/score with expiry; do not hide findings |
+
+Recompute runs on scan complete and certificate enrichment PATCH. Waiver CRUD: `POST /certificates/{id}/waivers`, `DELETE /waivers/{id}` (remediator/approver). `GET /inventory/pqc` returns tag counts.
 
 ### Dashboard column mapping (inventory)
 

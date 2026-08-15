@@ -238,6 +238,8 @@ func (s *Server) Router() http.Handler {
 		r.Put("/settings/connections", s.handlePutConnections)
 		r.Patch("/settings/connections", s.handlePatchConnections)
 		r.Post("/settings/connections/test", s.handleTestConnections)
+		r.Get("/settings/connections/options/vault-pki-mounts", s.handleOptionsVaultPKIMounts)
+		r.Get("/settings/connections/options/aap-templates", s.handleOptionsAAPTemplates)
 	})
 
 	return r

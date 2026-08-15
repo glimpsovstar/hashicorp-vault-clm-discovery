@@ -27,6 +27,10 @@ const httpTimeout = 30 * time.Second
 // hostile or misbehaving endpoint.
 const maxBody = 4 << 20 // 4 MiB
 
+// maxListTemplates caps how many job/workflow templates we collect for
+// Settings dropdowns so a large Controller inventory cannot unbounded-fill memory.
+const maxListTemplates = 200
+
 // Config holds the Controller connection settings. Values come from the
 // environment at runtime and are never logged.
 type Config struct {
@@ -93,6 +97,13 @@ func normalizeStatus(raw string) Status {
 	}
 }
 
+// Template is a Controller job or workflow job template (id + name only).
+// Numeric IDs are for display/debug; Settings stores the name.
+type Template struct {
+	ID   int
+	Name string
+}
+
 // LaunchResult identifies a job created by a launch call.
 type LaunchResult struct {
 	// JobID is the created job (job_templates) or workflow job
@@ -144,6 +155,69 @@ func (c *Client) FindJobTemplate(ctx context.Context, name string) (int, error) 
 // FindWorkflowJobTemplate resolves an exact workflow-template name to its id.
 func (c *Client) FindWorkflowJobTemplate(ctx context.Context, name string) (int, error) {
 	return c.findTemplate(ctx, "workflow_job_templates", name)
+}
+
+// ListJobTemplates returns job templates (id + name) from GET /api/v2/job_templates/,
+// following pagination up to maxListTemplates. It never calls launch endpoints.
+func (c *Client) ListJobTemplates(ctx context.Context) ([]Template, error) {
+	return c.listTemplates(ctx, "job_templates")
+}
+
+// ListWorkflowJobTemplates returns workflow job templates from
+// GET /api/v2/workflow_job_templates/, paginated and capped like ListJobTemplates.
+func (c *Client) ListWorkflowJobTemplates(ctx context.Context) ([]Template, error) {
+	return c.listTemplates(ctx, "workflow_job_templates")
+}
+
+func (c *Client) listTemplates(ctx context.Context, kind string) ([]Template, error) {
+	if !c.Configured() {
+		return nil, fmt.Errorf("aap client is not configured")
+	}
+	path := fmt.Sprintf("/api/v2/%s/", kind)
+	var out []Template
+	for path != "" && len(out) < maxListTemplates {
+		var page struct {
+			Next    *string `json:"next"`
+			Results []struct {
+				ID   int    `json:"id"`
+				Name string `json:"name"`
+			} `json:"results"`
+		}
+		if err := c.get(ctx, path, &page); err != nil {
+			return nil, err
+		}
+		for _, r := range page.Results {
+			out = append(out, Template{ID: r.ID, Name: r.Name})
+			if len(out) >= maxListTemplates {
+				break
+			}
+		}
+		if len(out) >= maxListTemplates || page.Next == nil || *page.Next == "" {
+			break
+		}
+		nextPath, err := c.relativeAPIPath(*page.Next)
+		if err != nil {
+			return nil, err
+		}
+		path = nextPath
+	}
+	return out, nil
+}
+
+// relativeAPIPath turns an absolute Controller "next" URL into a path (+ query)
+// suitable for Client.get, which prefixes BaseURL.
+func (c *Client) relativeAPIPath(next string) (string, error) {
+	u, err := url.Parse(next)
+	if err != nil {
+		return "", fmt.Errorf("parse next page url: %w", err)
+	}
+	if u.Path == "" {
+		return "", fmt.Errorf("empty next page path")
+	}
+	if u.RawQuery != "" {
+		return u.Path + "?" + u.RawQuery, nil
+	}
+	return u.Path, nil
 }
 
 func (c *Client) findTemplate(ctx context.Context, kind, name string) (int, error) {

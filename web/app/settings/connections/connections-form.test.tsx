@@ -1,8 +1,12 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
+  getAAPTemplateOptions,
   getConnections,
+  getVaultPKIMountOptions,
   patchConnections,
   testConnection,
   type ConnectionsView,
@@ -16,12 +20,16 @@ vi.mock("@/lib/api", async (importOriginal) => {
     getConnections: vi.fn(),
     patchConnections: vi.fn(),
     testConnection: vi.fn(),
+    getVaultPKIMountOptions: vi.fn(),
+    getAAPTemplateOptions: vi.fn(),
   };
 });
 
 const mockedGet = vi.mocked(getConnections);
 const mockedPatch = vi.mocked(patchConnections);
 const mockedTest = vi.mocked(testConnection);
+const mockedMounts = vi.mocked(getVaultPKIMountOptions);
+const mockedTemplates = vi.mocked(getAAPTemplateOptions);
 
 const emptyView: ConnectionsView = {
   vault: {
@@ -57,10 +65,22 @@ beforeEach(() => {
   mockedGet.mockReset();
   mockedPatch.mockReset();
   mockedTest.mockReset();
+  mockedMounts.mockReset();
+  mockedTemplates.mockReset();
   mockedGet.mockResolvedValue(emptyView);
+  mockedMounts.mockResolvedValue({ items: [] });
+  mockedTemplates.mockResolvedValue({ kind: "job", items: [] });
 });
 
 describe("ConnectionsForm", () => {
+  it("overrides radio inputs to compact size like checkboxes", () => {
+    const css = readFileSync(resolve(__dirname, "../../globals.css"), "utf8");
+    const radioRule = css.match(/input\[type=["']radio["']\]\s*\{[^}]+\}/);
+    expect(radioRule?.[0]).toMatch(/width:\s*auto/);
+    expect(radioRule?.[0]).toMatch(/min-height:\s*auto/);
+    expect(radioRule?.[0]).toMatch(/box-shadow:\s*none/);
+  });
+
   it("does not render secret values after save; shows token_set configured", async () => {
     const secret = "vault-token-should-never-appear";
     mockedPatch.mockResolvedValue({
@@ -143,5 +163,234 @@ describe("ConnectionsForm", () => {
     render(<ConnectionsForm />);
     expect(await screen.findByText(/http webhook only/i)).toBeInTheDocument();
     expect(screen.getByText(/no message bus/i)).toBeInTheDocument();
+  });
+
+  it("uses human labels for renew kind, template, and default Vault PKI mount", async () => {
+    render(<ConnectionsForm />);
+    expect(await screen.findByText(/^Renew with$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Template name$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Default Vault PKI mount$/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/AAP_RENEW_TEMPLATE/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/AAP_DEFAULT_MOUNT/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/AAP_RENEW_WORKFLOW/i)).not.toBeInTheDocument();
+  });
+
+  it("maps Job template / Workflow radios to renew_workflow on save", async () => {
+    mockedPatch.mockResolvedValue({
+      ...emptyView,
+      aap: { ...emptyView.aap, renew_workflow: true },
+    });
+
+    render(<ConnectionsForm />);
+    await userEvent.click(await screen.findByRole("radio", { name: /^Workflow$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /save aap/i }));
+
+    expect(mockedPatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aap: expect.objectContaining({ renew_workflow: true }),
+      })
+    );
+  });
+
+  it("shows template select when options items are non-empty", async () => {
+    mockedTemplates.mockResolvedValue({
+      kind: "job",
+      items: [
+        { id: 1, name: "CLM - Issue Certificate" },
+        { id: 2, name: "CLM - Renew" },
+      ],
+    });
+
+    render(<ConnectionsForm />);
+    expect(await screen.findByRole("combobox", { name: /^Template name$/i })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "CLM - Renew" })).toBeInTheDocument();
+  });
+
+  it("falls back to free-text template input when options list is empty", async () => {
+    mockedTemplates.mockResolvedValue({ kind: "job", items: [] });
+
+    render(<ConnectionsForm />);
+    const template = await screen.findByLabelText(/^Template name$/i);
+    expect(template.tagName).toBe("INPUT");
+  });
+
+  it("shows mount select when options exist and free-text when empty, with help text", async () => {
+    mockedMounts.mockResolvedValue({ items: ["pki/", "pki-int/"] });
+
+    render(<ConnectionsForm />);
+    expect(await screen.findByRole("combobox", { name: /^Default Vault PKI mount$/i })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "pki-int/" })).toBeInTheDocument();
+    expect(
+      screen.getByText(/Used when a certificate renew does not already set a mount/i)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/not an AAP resource id/i)).toBeInTheDocument();
+  });
+
+  it("falls back to free-text mount input when options list is empty", async () => {
+    mockedMounts.mockResolvedValue({ items: [] });
+
+    render(<ConnectionsForm />);
+    const mount = await screen.findByLabelText(/^Default Vault PKI mount$/i);
+    expect(mount.tagName).toBe("INPUT");
+  });
+
+  it("loads options on mount and reloads after successful AAP save", async () => {
+    mockedPatch.mockResolvedValue(emptyView);
+    mockedTemplates
+      .mockResolvedValueOnce({ kind: "job", items: [] })
+      .mockResolvedValueOnce({
+        kind: "job",
+        items: [{ id: 9, name: "After Save Template" }],
+      });
+    mockedMounts.mockResolvedValue({ items: [] });
+
+    render(<ConnectionsForm />);
+    await screen.findByLabelText(/^Template name$/i);
+
+    expect(mockedMounts).toHaveBeenCalled();
+    expect(mockedTemplates).toHaveBeenCalledWith("job");
+
+    const mountsBefore = mockedMounts.mock.calls.length;
+    const templatesBefore = mockedTemplates.mock.calls.length;
+
+    await userEvent.click(screen.getByRole("button", { name: /save aap/i }));
+    await waitFor(() => {
+      expect(mockedMounts.mock.calls.length).toBeGreaterThan(mountsBefore);
+      expect(mockedTemplates.mock.calls.length).toBeGreaterThan(templatesBefore);
+    });
+  });
+
+  it("refetches AAP templates with kind=workflow when Workflow is selected", async () => {
+    mockedTemplates
+      .mockResolvedValueOnce({ kind: "job", items: [] })
+      .mockResolvedValueOnce({
+        kind: "workflow",
+        items: [{ id: 4, name: "WF Renew" }],
+      });
+
+    render(<ConnectionsForm />);
+    await screen.findByRole("radio", { name: /^Job template$/i });
+    await userEvent.click(screen.getByRole("radio", { name: /^Workflow$/i }));
+
+    await waitFor(() => {
+      expect(mockedTemplates).toHaveBeenCalledWith("workflow");
+    });
+    expect(await screen.findByRole("option", { name: "WF Renew" })).toBeInTheDocument();
+  });
+
+  it("ignores stale options when Job/Workflow is toggled before a prior fetch settles", async () => {
+    let resolveWorkflow: (value: { kind: string; items: { id: number; name: string }[] }) => void;
+    const workflowPending = new Promise<{ kind: string; items: { id: number; name: string }[] }>(
+      (resolve) => {
+        resolveWorkflow = resolve;
+      }
+    );
+
+    mockedTemplates
+      .mockResolvedValueOnce({ kind: "job", items: [{ id: 1, name: "Initial Job" }] })
+      .mockImplementationOnce(() => workflowPending)
+      .mockResolvedValueOnce({
+        kind: "job",
+        items: [{ id: 2, name: "Latest Job" }],
+      });
+    mockedMounts.mockResolvedValue({ items: [] });
+
+    render(<ConnectionsForm />);
+    await screen.findByRole("option", { name: "Initial Job" });
+
+    await userEvent.click(screen.getByRole("radio", { name: /^Workflow$/i }));
+    await waitFor(() => {
+      expect(mockedTemplates).toHaveBeenCalledWith("workflow");
+    });
+
+    await userEvent.click(screen.getByRole("radio", { name: /^Job template$/i }));
+    expect(await screen.findByRole("option", { name: "Latest Job" })).toBeInTheDocument();
+
+    resolveWorkflow!({ kind: "workflow", items: [{ id: 99, name: "Stale Workflow" }] });
+    await waitFor(() => {
+      expect(screen.queryByRole("option", { name: "Stale Workflow" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("option", { name: "Latest Job" })).toBeInTheDocument();
+  });
+
+  it("shows optionsError and free-text fallback when options fetch rejects; clears on success", async () => {
+    mockedTemplates
+      .mockRejectedValueOnce(new Error("AAP templates unavailable"))
+      .mockResolvedValueOnce({
+        kind: "workflow",
+        items: [{ id: 4, name: "WF Renew" }],
+      });
+    mockedMounts
+      .mockRejectedValueOnce(new Error("Vault mounts unavailable"))
+      .mockResolvedValueOnce({ items: ["pki/"] });
+
+    render(<ConnectionsForm />);
+    const optionsErrors = await screen.findAllByText(/AAP templates unavailable|Vault mounts unavailable/);
+    expect(optionsErrors).toHaveLength(1);
+    expect(optionsErrors[0].textContent).not.toMatch(/vault-token|approle-secret|aap-token-value/i);
+
+    const template = screen.getByLabelText(/^Template name$/i);
+    const mount = screen.getByLabelText(/^Default Vault PKI mount$/i);
+    expect(template.tagName).toBe("INPUT");
+    expect(mount.tagName).toBe("INPUT");
+
+    await userEvent.click(screen.getByRole("radio", { name: /^Workflow$/i }));
+    await waitFor(() => {
+      expect(screen.queryByText(/AAP templates unavailable|Vault mounts unavailable/)).not.toBeInTheDocument();
+    });
+    expect(await screen.findByRole("option", { name: "WF Renew" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "pki/" })).toBeInTheDocument();
+  });
+
+  it("persists renew_template and default_mount from selects", async () => {
+    mockedTemplates.mockResolvedValue({
+      kind: "job",
+      items: [
+        { id: 1, name: "CLM - Issue Certificate" },
+        { id: 2, name: "CLM - Renew" },
+      ],
+    });
+    mockedMounts.mockResolvedValue({ items: ["pki/", "pki-int/"] });
+    mockedPatch.mockResolvedValue(emptyView);
+
+    render(<ConnectionsForm />);
+    await userEvent.selectOptions(
+      await screen.findByRole("combobox", { name: /^Template name$/i }),
+      "CLM - Renew"
+    );
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: /^Default Vault PKI mount$/i }),
+      "pki-int/"
+    );
+    await userEvent.click(screen.getByRole("button", { name: /save aap/i }));
+
+    expect(mockedPatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aap: expect.objectContaining({
+          renew_template: "CLM - Renew",
+          default_mount: "pki-int/",
+          renew_workflow: false,
+        }),
+      })
+    );
+  });
+
+  it("includes a blank select option when current template/mount is empty", async () => {
+    mockedGet.mockResolvedValue({
+      ...emptyView,
+      aap: { ...emptyView.aap, renew_template: "", default_mount: "" },
+    });
+    mockedTemplates.mockResolvedValue({
+      kind: "job",
+      items: [{ id: 1, name: "CLM - Issue Certificate" }],
+    });
+    mockedMounts.mockResolvedValue({ items: ["pki/"] });
+
+    render(<ConnectionsForm />);
+    const template = await screen.findByRole("combobox", { name: /^Template name$/i });
+    const mount = screen.getByRole("combobox", { name: /^Default Vault PKI mount$/i });
+    expect(template).toHaveValue("");
+    expect(mount).toHaveValue("");
+    expect(screen.getAllByRole("option", { name: "—" })).toHaveLength(2);
   });
 });

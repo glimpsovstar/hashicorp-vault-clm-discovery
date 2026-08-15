@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  getAAPTemplateOptions,
   getConnections,
+  getVaultPKIMountOptions,
   patchConnections,
   testConnection,
   type AAPConnectionPatch,
+  type AAPTemplateOption,
   type ConnectionTarget,
   type ConnectionTestResult,
   type ConnectionsView,
@@ -22,6 +25,16 @@ type CardStatus = {
 };
 
 const emptyStatus: CardStatus = { saving: false, testing: false };
+
+const MOUNT_HELP =
+  "Used when a certificate renew does not already set a mount. Passed to AAP as the Vault PKI path (not an AAP resource id).";
+
+function optionsFailureMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message.trim()) {
+    return err.message.trim();
+  }
+  return fallback;
+}
 
 export default function ConnectionsForm() {
   const [view, setView] = useState<ConnectionsView | null>(null);
@@ -42,6 +55,11 @@ export default function ConnectionsForm() {
   const [aapSkipTls, setAapSkipTls] = useState(false);
   const [aapMount, setAapMount] = useState("");
 
+  const [mountOptions, setMountOptions] = useState<string[]>([]);
+  const [templateOptions, setTemplateOptions] = useState<AAPTemplateOption[]>([]);
+  const [optionsError, setOptionsError] = useState("");
+  const optionsGeneration = useRef(0);
+
   const [edaUrl, setEdaUrl] = useState("");
   const [edaToken, setEdaToken] = useState("");
 
@@ -51,13 +69,46 @@ export default function ConnectionsForm() {
     eda: emptyStatus,
   });
 
+  const loadOptions = useCallback(async (renewWorkflow: boolean) => {
+    const generation = ++optionsGeneration.current;
+    const kind = renewWorkflow ? "workflow" : "job";
+    const [mountsResult, templatesResult] = await Promise.allSettled([
+      getVaultPKIMountOptions(),
+      getAAPTemplateOptions(kind),
+    ]);
+    if (generation !== optionsGeneration.current) {
+      return;
+    }
+    const mounts =
+      mountsResult.status === "fulfilled" && Array.isArray(mountsResult.value.items)
+        ? mountsResult.value.items
+        : [];
+    const templates =
+      templatesResult.status === "fulfilled" && Array.isArray(templatesResult.value.items)
+        ? templatesResult.value.items
+        : [];
+    setMountOptions(mounts);
+    setTemplateOptions(templates);
+
+    const errors: string[] = [];
+    if (mountsResult.status === "rejected") {
+      errors.push(optionsFailureMessage(mountsResult.reason, "Vault mount options unavailable"));
+    }
+    if (templatesResult.status === "rejected") {
+      errors.push(optionsFailureMessage(templatesResult.reason, "AAP template options unavailable"));
+    }
+    setOptionsError(errors.join(" · "));
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     getConnections()
-      .then((data) => {
-        if (!cancelled) {
-          applyView(data);
+      .then(async (data) => {
+        if (cancelled) {
+          return;
         }
+        applyView(data);
+        await loadOptions(Boolean(data.aap.renew_workflow));
       })
       .catch((err) => {
         if (!cancelled) {
@@ -66,8 +117,10 @@ export default function ConnectionsForm() {
       });
     return () => {
       cancelled = true;
+      // Invalidate in-flight loadOptions so it does not setState after unmount.
+      optionsGeneration.current += 1;
     };
-  }, []);
+  }, [loadOptions]);
 
   function applyView(data: ConnectionsView) {
     setView(data);
@@ -99,6 +152,11 @@ export default function ConnectionsForm() {
     }
   }
 
+  async function onRenewKind(workflow: boolean) {
+    setAapWorkflow(workflow);
+    await loadOptions(workflow);
+  }
+
   async function saveVault() {
     patchStatus("vault", { saving: true, saveError: undefined, saveMessage: undefined });
     const body: VaultConnectionPatch = {
@@ -119,7 +177,9 @@ export default function ConnectionsForm() {
       }
     }
     try {
-      applyView(await patchConnections({ vault: body }));
+      const saved = await patchConnections({ vault: body });
+      applyView(saved);
+      await loadOptions(Boolean(saved.aap.renew_workflow));
       patchStatus("vault", { saving: false, saveMessage: "Saved." });
     } catch (err) {
       patchStatus("vault", {
@@ -142,7 +202,9 @@ export default function ConnectionsForm() {
       body.token = aapToken;
     }
     try {
-      applyView(await patchConnections({ aap: body }));
+      const saved = await patchConnections({ aap: body });
+      applyView(saved);
+      await loadOptions(Boolean(saved.aap.renew_workflow));
       patchStatus("aap", { saving: false, saveMessage: "Saved." });
     } catch (err) {
       patchStatus("aap", {
@@ -188,6 +250,12 @@ export default function ConnectionsForm() {
   if (!view) {
     return <p className="muted">Loading connections…</p>;
   }
+
+  const templateNames = templateOptions.map((t) => t.name);
+  const showTemplateSelect = templateNames.length > 0;
+  const showMountSelect = mountOptions.length > 0;
+  const templateSelectValues = withCurrent(templateNames, aapTemplate);
+  const mountSelectValues = withCurrent(mountOptions, aapMount);
 
   return (
     <>
@@ -330,23 +398,60 @@ export default function ConnectionsForm() {
               configured={view.aap.token_set}
               configuredLabel="Token configured"
             />
+
+            <fieldset className="fieldset-plain">
+              <legend>Renew with</legend>
+              <div className="radio-row">
+                <label className="checkbox-row">
+                  <input
+                    type="radio"
+                    name="aap-renew-kind"
+                    value="job"
+                    checked={!aapWorkflow}
+                    onChange={() => void onRenewKind(false)}
+                  />
+                  Job template
+                </label>
+                <label className="checkbox-row">
+                  <input
+                    type="radio"
+                    name="aap-renew-kind"
+                    value="workflow"
+                    checked={aapWorkflow}
+                    onChange={() => void onRenewKind(true)}
+                  />
+                  Workflow
+                </label>
+              </div>
+            </fieldset>
+
+            {optionsError && <p className="error-text">{optionsError}</p>}
+
             <div className="form-field">
-              <label htmlFor="aap-template">AAP_RENEW_TEMPLATE</label>
-              <input
-                id="aap-template"
-                value={aapTemplate}
-                onChange={(e) => setAapTemplate(e.target.value)}
-                autoComplete="off"
-              />
+              <label htmlFor="aap-template">Template name</label>
+              {showTemplateSelect ? (
+                <select
+                  id="aap-template"
+                  value={aapTemplate}
+                  onChange={(e) => setAapTemplate(e.target.value)}
+                >
+                  <option value="">—</option>
+                  {templateSelectValues.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  id="aap-template"
+                  value={aapTemplate}
+                  onChange={(e) => setAapTemplate(e.target.value)}
+                  autoComplete="off"
+                />
+              )}
             </div>
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={aapWorkflow}
-                onChange={(e) => setAapWorkflow(e.target.checked)}
-              />
-              AAP_RENEW_WORKFLOW — use a workflow job template
-            </label>
+
             <label className="checkbox-row">
               <input
                 type="checkbox"
@@ -355,14 +460,31 @@ export default function ConnectionsForm() {
               />
               AAP_SKIP_TLS_VERIFY — skip TLS verify (lab only)
             </label>
+
             <div className="form-field">
-              <label htmlFor="aap-mount">AAP_DEFAULT_MOUNT</label>
-              <input
-                id="aap-mount"
-                value={aapMount}
-                onChange={(e) => setAapMount(e.target.value)}
-                autoComplete="off"
-              />
+              <label htmlFor="aap-mount">Default Vault PKI mount</label>
+              {showMountSelect ? (
+                <select
+                  id="aap-mount"
+                  value={aapMount}
+                  onChange={(e) => setAapMount(e.target.value)}
+                >
+                  <option value="">—</option>
+                  {mountSelectValues.map((path) => (
+                    <option key={path} value={path}>
+                      {path}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  id="aap-mount"
+                  value={aapMount}
+                  onChange={(e) => setAapMount(e.target.value)}
+                  autoComplete="off"
+                />
+              )}
+              <p className="help-text">{MOUNT_HELP}</p>
             </div>
           </div>
           <CardActions
@@ -411,6 +533,13 @@ export default function ConnectionsForm() {
       </section>
     </>
   );
+}
+
+function withCurrent(items: string[], current: string): string[] {
+  if (!current || items.includes(current)) {
+    return items;
+  }
+  return [current, ...items];
 }
 
 function ConnectionBadges({ configured, source }: { configured: boolean; source: string }) {

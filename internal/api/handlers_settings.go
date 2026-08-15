@@ -270,6 +270,98 @@ func (s *Server) handleTestConnections(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, connectionTestResponse{OK: ok, Target: target, Detail: redactSecrets(detail, resolved)})
 }
 
+type vaultPKIMountsResponse struct {
+	Items  []string `json:"items"`
+	Detail string   `json:"detail,omitempty"`
+}
+
+type aapTemplateItem struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+type aapTemplatesResponse struct {
+	Kind   string            `json:"kind"`
+	Items  []aapTemplateItem `json:"items"`
+	Detail string            `json:"detail,omitempty"`
+}
+
+// handleOptionsVaultPKIMounts lists PKI mount paths from the resolved Vault
+// connection (GET, settings-read). Unconfigured → empty items; peer fail → 502.
+func (s *Server) handleOptionsVaultPKIMounts(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireSettingsRead(w, r); !ok {
+		return
+	}
+	resolved, err := s.resolveConnections(r.Context())
+	if err != nil {
+		s.writeServerError(w, r, err, "failed to resolve connections")
+		return
+	}
+	if !resolved.View.Vault.Configured {
+		writeJSON(w, http.StatusOK, vaultPKIMountsResponse{Items: []string{}})
+		return
+	}
+	client, err := vault.NewClient(resolved.Vault)
+	if err != nil {
+		writeError(w, r, http.StatusBadGateway, redactSecrets("invalid vault address", resolved))
+		return
+	}
+	mounts, err := client.ListPKIMounts(r.Context())
+	if err != nil {
+		writeError(w, r, http.StatusBadGateway, redactSecrets(vaultProbeDetail(err), resolved))
+		return
+	}
+	if mounts == nil {
+		mounts = []string{}
+	}
+	writeJSON(w, http.StatusOK, vaultPKIMountsResponse{Items: mounts})
+}
+
+// handleOptionsAAPTemplates lists job or workflow templates from resolved AAP
+// (?kind=job|workflow). Unconfigured → empty items; peer fail → 502; bad kind → 400.
+// Never launches jobs.
+func (s *Server) handleOptionsAAPTemplates(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireSettingsRead(w, r); !ok {
+		return
+	}
+	kind := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("kind")))
+	switch kind {
+	case "job", "workflow":
+	default:
+		writeError(w, r, http.StatusBadRequest, "kind must be job or workflow")
+		return
+	}
+	resolved, err := s.resolveConnections(r.Context())
+	if err != nil {
+		s.writeServerError(w, r, err, "failed to resolve connections")
+		return
+	}
+	if !resolved.View.AAP.Configured {
+		writeJSON(w, http.StatusOK, aapTemplatesResponse{Kind: kind, Items: []aapTemplateItem{}})
+		return
+	}
+	client, err := aap.NewClient(resolved.AAP)
+	if err != nil {
+		writeError(w, r, http.StatusBadGateway, redactSecrets("invalid aap url", resolved))
+		return
+	}
+	var templates []aap.Template
+	if kind == "workflow" {
+		templates, err = client.ListWorkflowJobTemplates(r.Context())
+	} else {
+		templates, err = client.ListJobTemplates(r.Context())
+	}
+	if err != nil {
+		writeError(w, r, http.StatusBadGateway, redactSecrets("aap template list failed", resolved))
+		return
+	}
+	items := make([]aapTemplateItem, 0, len(templates))
+	for _, t := range templates {
+		items = append(items, aapTemplateItem{ID: t.ID, Name: t.Name})
+	}
+	writeJSON(w, http.StatusOK, aapTemplatesResponse{Kind: kind, Items: items})
+}
+
 func testVault(ctx context.Context, resolved settings.Resolved) (bool, string) {
 	client, err := vault.NewClient(resolved.Vault)
 	if err != nil {

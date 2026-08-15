@@ -87,12 +87,13 @@ func isCreateScan(method, path string) bool {
 func isRemediate(method, path string) bool {
 	switch method {
 	case http.MethodPost:
-		if path == "/api/v1/renew-expiring" {
+		if path == "/api/v1/renew-expiring" || path == "/api/v1/migrate-eligible" || path == "/api/v1/lifecycle-jobs/claim" {
 			return true
 		}
 		if strings.HasPrefix(path, "/api/v1/certificates/") {
 			return strings.HasSuffix(path, "/catalog-import") ||
 				strings.HasSuffix(path, "/renew") ||
+				strings.HasSuffix(path, "/migrate") ||
 				strings.HasSuffix(path, "/revoke") ||
 				strings.HasSuffix(path, "/revocation-check") ||
 				strings.HasSuffix(path, "/waivers")

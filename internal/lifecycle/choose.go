@@ -21,9 +21,7 @@ type ChooseResult struct {
 // ChooseRecommendation maps a certificate's signals to a single recommended
 // Choose-phase action, following the lifecycle decision tree. Order matters:
 // already-managed short-circuits, then trust (chain) problems, then CA import,
-// then the CLM-catalog (imported) state, then scope-based routing. A self_signed
-// chain is not treated as a trust problem here — an unmanaged self-signed
-// internal leaf is plausibly Vault-issued and routes to reconcile.
+// then migrate for unmanaged/imported leaves with a usable chain.
 func ChooseRecommendation(in ChooseInput) ChooseResult {
 	switch {
 	case in.ManagedStatus == "managed_in_vault":
@@ -47,19 +45,13 @@ func ChooseRecommendation(in ChooseInput) ChooseResult {
 			Rationale: "This CA is on the wire but not in Vault PKI. Import the bundle so Vault can manage issuance from it.",
 			CTA:       "Import CA to Vault",
 		}
-	case in.ManagedStatus == "imported":
+	case !in.IsCA && (in.ManagedStatus == "unmanaged" || in.ManagedStatus == "imported") &&
+		in.ChainStatus != "incomplete" && in.ChainStatus != "untrusted_root":
 		return ChooseResult{
-			Code:      "catalog_tracked",
-			Title:     "Tracked in CLM",
-			Rationale: "This certificate is tracked in the CLM catalog. Run Vault reconcile to confirm whether Vault also manages it.",
-			CTA:       "Reconcile with Vault",
-		}
-	case in.CertScope == "internal":
-		return ChooseResult{
-			Code:      "reconcile_vault",
-			Title:     "Reconcile with Vault",
-			Rationale: "An internal certificate that is not yet matched is likely Vault-issued. Run reconcile to confirm management.",
-			CTA:       "Reconcile with Vault",
+			Code:      "migrate_vault",
+			Title:     "Migrate to Vault",
+			Rationale: "This leaf is not Vault-issued. Vault will issue a new certificate via AAP; CLM cannot upload the scanned PEM (no private key). Status stays Pending until the new fingerprint is on the wire.",
+			CTA:       "Migrate to Vault",
 		}
 	default:
 		return ChooseResult{

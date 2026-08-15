@@ -1,10 +1,45 @@
 # Environment scan report & Vault import workflow
 
-**Status:** Draft — pending user review  
+**Status:** Approved (demo defaults — 2026-08-15)  
 **Date:** 2026-06-14  
 **Issues:** [#24](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/24) (scan report), [#25](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/25) (Vault import workflow); parent [#20](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/20)  
 **Related specs:** [CLM lifecycle workflow](2026-06-14-clm-lifecycle-workflow-design.md), [HCP integration](2026-06-14-hcp-vault-cert-inventory-integration-design.md), [reporting architecture](../../reporting-architecture.md)  
 **Related docs:** `docs/architecture.md`, `docs/data-model.md`, `docs/program-context.md`
+
+## Decisions (approved demo defaults)
+
+Recorded 2026-08-15. Closes open questions that gated report (#24) and import (#25) product choices for the SDLC demo.
+
+### Scan report
+
+| # | Topic | Decision | Notes |
+|---|-------|----------|-------|
+| 1 | Primary format | **Markdown + JSON** in v1.2 | CSV also shipped; PDF deferred |
+| 2 | Report scope | **Per-scan primary** | Environment-wide rollup deferred |
+| 3 | PEM in reports | **No PEM appendix in v1.2** | Fingerprint / summary only |
+| 4 | Insight severity | **Use proposed thresholds** in `docs/reporting-architecture.md` | e.g. `expiring_soon` → `medium` |
+| 5 | Generation model | **On-demand** (always fresh) | No stored snapshot required for demo |
+
+### Import semantics
+
+| # | Topic | Decision | Notes |
+|---|-------|----------|-------|
+| 6 | Default import mode | **A (catalog / Track in CLM) first**; then **D** mirror with reconcile; **B** CA bundle v1.2; **C** reissue v1.3+ | Matches recommended phasing below |
+| 7 | UI label | Prefer **"Track in CLM"** for catalog action | Avoid ambiguous bare “Import” |
+| 8 | Catalog `imported` | Keep `managed_status=imported` for catalog sense | Separate `tracked` enum deferred |
+| 9 | CA import approval | Single-operator consent for demo | Dual-control deferred |
+| 10 | Demo PKI mount | Fixed **`pki/`** | Operator-selectable mounts deferred |
+
+### Vault & HCP / workflow
+
+| # | Topic | Decision | Notes |
+|---|-------|----------|-------|
+| 11 | Mirror (D) | Cert detail / inventory alongside reconcile | Dedicated reconcile view optional |
+| 12 | HCP inventory link | Vault PKI path for self-managed demos; HCP Portal deep link when HCP-only | — |
+| 13 | Reissue (C) | **Explicitly defer to v1.3+** | Mode C docs / renewal-kit links only |
+| 14 | Choose wizard | Separate flows OK; combined wizard optional | Shipped Choose wizard may combine recommendations |
+| 15 | Bulk actions | Single-cert sufficient for v1.2 demo | Bulk track deferred |
+| 16 | Post-import reconcile | Auto-trigger reconcile after CA import (**B**) preferred | Aligns with post-scan reconcile |
 
 ## Problem statement
 
@@ -250,37 +285,38 @@ sequenceDiagram
 
 ## Open questions for user
 
-Please answer by number in a GitHub issue comment or reply — these gate v1.2 implementation plans.
+**Resolved 2026-08-15** via [Decisions (approved demo defaults)](#decisions-approved-demo-defaults). Historical list kept for traceability.
 
 ### Scan report
 
-1. **Primary format:** Is **Markdown download** sufficient for the demo, or do you need PDF/compliance archive in v1.2?
-2. **Report scope:** Per-scan only, or also **environment-wide** rollup (all scans in last N days)?
-3. **PEM in reports:** Should the appendix include full PEM, fingerprint only, or redacted cert summary?
-4. **Insight severity:** Are the proposed mappings in [reporting-architecture.md](../../reporting-architecture.md) acceptable, or should expiring_soon be `high` for external scope?
-5. **Generation model:** On-demand (always fresh) vs stored snapshot per scan — preference for demo vs production?
+1. **Primary format:** Markdown + JSON (CSV OK); PDF deferred.
+2. **Report scope:** Per-scan primary.
+3. **PEM in reports:** No PEM appendix in v1.2.
+4. **Insight severity:** Proposed mappings in [reporting-architecture.md](../../reporting-architecture.md) accepted.
+5. **Generation model:** On-demand.
 
 ### Import semantics
 
-6. **Default “Import” button:** Confirm **A (catalog)** as default with advanced actions for B/C?
-7. **Naming:** Should UI say **“Track in CLM”** vs **“Import”** to avoid Vault confusion?
-8. **Catalog `imported`:** Keep `managed_status=imported` for catalog sense, or add separate `tracked` / `remediation_state`?
-9. **CA import approval:** Single-operator consent sufficient for demo, or dual-control requirement?
-10. **Which PKI mount** for demo CA import — fixed `pki/` or operator-selectable?
+6. **Default “Import” button:** **A (catalog / Track in CLM)** first.
+7. **Naming:** Prefer **“Track in CLM”**.
+8. **Catalog `imported`:** Keep `managed_status=imported`.
+9. **CA import approval:** Single-operator for demo.
+10. **PKI mount:** Fixed `pki/` for demo.
 
 ### Vault & HCP integration
 
-11. **Mirror (D):** Side-by-side on cert detail page, scan report section, or dedicated reconcile view?
-12. **HCP inventory link:** Open HCP Portal deep link (HCP only) or Vault PKI path only for self-managed demos?
-13. **Reissue (C):** In scope for any v1.2 demo target, or explicitly defer to vault-agent sandbox hostnames?
+11. **Mirror (D):** Cert detail / inventory with reconcile.
+12. **HCP inventory link:** Vault path for self-managed; HCP Portal when applicable.
+13. **Reissue (C):** Defer to v1.3+.
 
 ### Workflow & UX
 
-14. **Choose wizard:** Single wizard combining report recommendations + import action, or separate flows?
-15. **Bulk actions:** Import/track all certs from a scan, or single-cert only in v1.2?
-16. **Post-import:** Auto-trigger reconcile after CA import (**B**), or manual only?
+14. **Choose wizard:** Separate or combined OK for demo.
+15. **Bulk actions:** Single-cert for v1.2 demo.
+16. **Post-import:** Auto-reconcile after CA import (**B**) preferred.
 
 ---
+
 
 ## Non-goals (both features)
 

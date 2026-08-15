@@ -14,10 +14,10 @@ import (
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/cert"
 )
 
-// Allowed cloud scan sources for M5 (read-only collectors). ADCS/akv sibling
-// issue #86 may add adcs|akv; those stay out of this package's validator until
-// that slice lands.
+// Allowed collector scan sources. Cloud vendors use cloud_* (#99); ADCS is
+// on-prem Windows CA collection via AAP (#86).
 var allowedSources = map[string]struct{}{
+	"adcs":      {},
 	"cloud_akv": {},
 	"cloud_acm": {},
 	"cloud_gcp": {},
@@ -40,7 +40,7 @@ type Upserter interface {
 	UpsertCertificate(ctx context.Context, scanID uuid.UUID, parsed cert.ParsedCertificate, obs cert.Observation) (uuid.UUID, error)
 }
 
-// ValidateSource reports whether source is an allowed cloud collector source.
+// ValidateSource reports whether source is an allowed collector scan source.
 func ValidateSource(source string) error {
 	if _, ok := allowedSources[source]; !ok {
 		return fmt.Errorf("%w: %q", ErrInvalidSource, source)

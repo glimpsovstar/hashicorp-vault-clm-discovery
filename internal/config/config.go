@@ -62,6 +62,14 @@ type Config struct {
 	AAPRevokeWorkflow bool   `envconfig:"AAP_REVOKE_WORKFLOW" default:"false"`
 	AAPSkipTLSVerify  bool   `envconfig:"AAP_SKIP_TLS_VERIFY" default:"false"`
 	AAPDefaultMount   string `envconfig:"AAP_DEFAULT_MOUNT" default:"pki"`
+	// AAPADCSTemplate is the find-by-name job template for ADCS collect (#86).
+	AAPADCSTemplate string `envconfig:"AAP_ADCS_TEMPLATE" default:"CLM - Collect ADCS"`
+	// Azure Key Vault (read-only public certs → cloud_akv). Token never logged.
+	AzureKeyVaultURI    string `envconfig:"AZURE_KEY_VAULT_URI" default:""`
+	AzureTenantID       string `envconfig:"AZURE_TENANT_ID" default:""`
+	AzureClientID       string `envconfig:"AZURE_CLIENT_ID" default:""`
+	AzureClientSecret   string `envconfig:"AZURE_CLIENT_SECRET" default:""`
+	AzureAccessToken    string `envconfig:"AZURE_ACCESS_TOKEN" default:""` // test/lab override
 	// Event dispatcher (ADR 0001, event Phase 1b). When EDAWebhookURL is empty the
 	// dispatcher does not start. Token/URL are read from the env and never logged.
 	EDAWebhookURL   string `envconfig:"EDA_WEBHOOK_URL" default:""`

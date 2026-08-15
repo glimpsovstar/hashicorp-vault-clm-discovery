@@ -162,6 +162,7 @@ type Server struct {
 	revCheck    revChecker
 	renewer     renewLauncher
 	revoker     revokeLauncher
+	aapClient   *aap.Client
 	lifecycle   lifecycleJobsStore
 	connections connectionsStore
 	actor       string // test helper; production uses context or InsecureNoAuth
@@ -214,6 +215,7 @@ func NewServer(cfg config.Config, st *store.Store, sc *scanner.Scanner, log *slo
 			Token:         cfg.AAPToken,
 			SkipTLSVerify: cfg.AAPSkipTLSVerify,
 		}); err == nil {
+			s.aapClient = ac
 			s.renewer = &aapRenewer{client: ac, templateName: cfg.AAPRenewTemplate, workflow: cfg.AAPRenewWorkflow}
 			s.revoker = &aapRevoker{client: ac, templateName: cfg.AAPRevokeTemplate, workflow: cfg.AAPRevokeWorkflow}
 		} else {
@@ -257,6 +259,8 @@ func (s *Server) Router() http.Handler {
 		r.Use(s.requirePermission)
 		r.Post("/scans", s.handleCreateScan)
 		r.Post("/scans/collect", s.handleCollectScan)
+		r.Post("/scans/adcs", s.handleCollectADCS)
+		r.Post("/scans/akv", s.handleCollectAKV)
 		r.Get("/scans", s.handleListScans)
 		r.Get("/scans/{id}", s.handleGetScan)
 		r.Get("/scans/{id}/blindspot", s.handleGetScanBlindSpot)

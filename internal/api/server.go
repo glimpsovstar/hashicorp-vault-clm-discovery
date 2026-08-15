@@ -35,7 +35,7 @@ type resourceStore interface {
 	GetCertificate(ctx context.Context, id uuid.UUID) (store.Certificate, error)
 	ListCertificates(ctx context.Context, f store.CertificateFilter) ([]store.Certificate, int, error)
 	ListRenewable(ctx context.Context, withinDays int) ([]store.Certificate, error)
-	ListEvents(ctx context.Context, limit int) ([]store.Event, error)
+	ListEvents(ctx context.Context, f store.EventFilter) ([]store.Event, error)
 	SetManagedStatus(ctx context.Context, id uuid.UUID, status string) (store.Certificate, error)
 	SetRenewalConfig(ctx context.Context, id uuid.UUID, cfg store.RenewalConfig) (store.Certificate, error)
 	GetIssuer(ctx context.Context, id uuid.UUID) (store.Issuer, error)
@@ -937,7 +937,11 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 	if limit > 500 {
 		limit = 500 // keep the echoed limit consistent with the store's cap
 	}
-	events, err := s.resources.ListEvents(r.Context(), limit)
+	filter := store.EventFilter{
+		Limit:     limit,
+		EventType: strings.TrimSpace(r.URL.Query().Get("event_type")),
+	}
+	events, err := s.resources.ListEvents(r.Context(), filter)
 	if err != nil {
 		s.writeServerError(w, r, err, "failed to list events")
 		return

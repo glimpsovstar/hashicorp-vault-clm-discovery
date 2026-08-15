@@ -490,6 +490,16 @@ func (s *Store) UpsertCertificate(ctx context.Context, scanID uuid.UUID, parsed 
 	}
 	certScope := governance.ClassifyScope(string(parsed.ChainStatus), parsed.IssuerDN, hostname, "")
 
+	var existingID uuid.UUID
+	var prevStatus string
+	err = s.pool.QueryRow(ctx, `
+		SELECT id, status::text FROM certificates WHERE fingerprint_sha256 = $1
+	`, parsed.FingerprintSHA256).Scan(&existingID, &prevStatus)
+	existed := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, err
+	}
+
 	var certID uuid.UUID
 	err = s.pool.QueryRow(ctx, `
 		INSERT INTO certificates (
@@ -532,8 +542,57 @@ func (s *Store) UpsertCertificate(ctx context.Context, scanID uuid.UUID, parsed 
 		ON CONFLICT (certificate_id, scan_id, ip, port, sni) DO UPDATE SET observed_at = EXCLUDED.observed_at
 	`, certID, scanID, obs.IP, obs.Port, nullStr(obs.Hostname), nullStr(obs.SNI),
 		nullStr(obs.TLSVersion), nullStr(obs.CipherSuite), obs.ObservedAt)
+	if err != nil {
+		return uuid.Nil, err
+	}
 
-	return certID, err
+	if err := s.emitDiscoveryCatalogueEvents(ctx, certID, parsed, string(status), days, certScope, !existed, prevStatus); err != nil {
+		return uuid.Nil, err
+	}
+	return certID, nil
+}
+
+func (s *Store) emitDiscoveryCatalogueEvents(
+	ctx context.Context,
+	certID uuid.UUID,
+	parsed cert.ParsedCertificate,
+	status string,
+	days int,
+	certScope string,
+	inserted bool,
+	prevStatus string,
+) error {
+	managed := "unmanaged"
+	payload, err := cataloguePayload(certID, parsed.FingerprintSHA256, parsed.SubjectCN, status, days, managed, certScope)
+	if err != nil {
+		return err
+	}
+	if inserted {
+		if err := appendEventStandalone(ctx, s, "cert.discovered", &certID, payload); err != nil {
+			return err
+		}
+		if err := appendEventStandalone(ctx, s, "blind_spot.detected", &certID, payload); err != nil {
+			return err
+		}
+	}
+	if status == string(lifecycle.StatusExpiringSoon) && (inserted || prevStatus != string(lifecycle.StatusExpiringSoon)) {
+		if err := appendEventStandalone(ctx, s, "cert.expiring", &certID, payload); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func cataloguePayload(certID uuid.UUID, fp, cn, status string, days int, managed, scope string) ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"certificate_id":      certID.String(),
+		"fingerprint_sha256":  fp,
+		"subject_cn":          cn,
+		"status":              status,
+		"days_until_expiry":   days,
+		"managed_status":      managed,
+		"cert_scope":          scope,
+	})
 }
 
 func (s *Store) UpsertIssuer(ctx context.Context, parsed cert.ParsedCertificate, caChain []string) error {
@@ -830,19 +889,43 @@ func appendEventTx(ctx context.Context, tx pgx.Tx, eventType string, certID *uui
 	return err
 }
 
+// EventFilter selects outbox events for operator listing.
+type EventFilter struct {
+	Limit         int
+	EventType     string
+	CertificateID *uuid.UUID
+}
+
 // ListEvents returns the most recent outbox events (newest first), capped by
-// limit (default 100, max 500).
-func (s *Store) ListEvents(ctx context.Context, limit int) ([]Event, error) {
+// limit (default 100, max 500). Optional EventType / CertificateID filters.
+func (s *Store) ListEvents(ctx context.Context, f EventFilter) ([]Event, error) {
+	limit := f.Limit
 	if limit <= 0 {
 		limit = 100
 	}
 	if limit > 500 {
 		limit = 500
 	}
-	rows, err := s.pool.Query(ctx, `
+	where := "WHERE 1=1"
+	args := []any{}
+	argN := 1
+	if f.EventType != "" {
+		where += fmt.Sprintf(" AND event_type = $%d", argN)
+		args = append(args, f.EventType)
+		argN++
+	}
+	if f.CertificateID != nil {
+		where += fmt.Sprintf(" AND certificate_id = $%d", argN)
+		args = append(args, *f.CertificateID)
+		argN++
+	}
+	query := fmt.Sprintf(`
 		SELECT id, event_type, certificate_id, payload, created_at, delivered_at, attempts, last_error
-		FROM events ORDER BY created_at DESC LIMIT $1
-	`, limit)
+		FROM events %s ORDER BY created_at DESC LIMIT $%d
+	`, where, argN)
+	args = append(args, limit)
+
+	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

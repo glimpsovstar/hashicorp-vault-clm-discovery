@@ -279,7 +279,7 @@ See [docs/data-model.md](docs/data-model.md).
 | POST | `/api/v1/renew-expiring` | Enqueue durable renew jobs for expiring certs (consent-gated; worker launches AAP) |
 | GET | `/api/v1/inventory` | Ansible dynamic inventory (`--list` JSON, `?within_days=N`). AAP service role only — not a dashboard page |
 | GET | `/api/v1/inventory/pqc` | PQC tag inventory counts (`classic` / `hybrid` / `pqc` / `unknown`) |
-| GET | `/api/v1/events` | List outbox events |
+| GET | `/api/v1/events` | List outbox events (`?event_type=` filters catalogue types) |
 | GET | `/api/v1/blindspot` | Global blind-spot (shadow certs) |
 | GET | `/api/v1/compliance/summary` | Global compliance summary |
 | GET | `/api/v1/settings/connections` | Masked Connections view (no secret values) |

@@ -22,10 +22,12 @@ Child milestones (do not implement this umbrella issue):
 
 ## Acceptance criteria
 
-- [ ] Specs/plans/tracker merged (this docs PR).
-- [ ] One GitHub issue per milestone, linked here.
-- [ ] No Vault CLM plugin, no CLM SSH/k8s deployers, no NATS before a second consumer.
-- [ ] Each milestone ships in its own implementation PR with `Fixes #<child>`.
+- [x] Specs/plans/tracker merged (this docs PR).
+- [x] One GitHub issue per milestone, linked here.
+- [x] No Vault CLM plugin, no CLM SSH/k8s deployers, no NATS before a second consumer.
+- [x] Each milestone ships in its own implementation PR with `Fixes #<child>`.
+
+**Status (2026-08-15):** M1–M5 and follow-ons (#85–#87) are closed. Roadmap design marked **Shipped**.
 
 ## Test plan
 

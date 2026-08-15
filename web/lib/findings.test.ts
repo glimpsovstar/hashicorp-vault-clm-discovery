@@ -7,6 +7,8 @@ import {
   coverageFromBlindSpot,
   findingSeverityBadgeClass,
   sortCertificatesByRisk,
+  resolveSeverityThresholds,
+  DEFAULT_SEVERITY_THRESHOLDS,
   type FindingSeverity,
 } from "./findings";
 import type { Certificate, Issuer, ReportDocument } from "./api";
@@ -59,6 +61,58 @@ describe("deriveIssuerSeverity", () => {
   });
   it("otherwise -> low", () => {
     expect(deriveIssuerSeverity(issuer({ days_until_expiry: 300 }))).toBe("low");
+  });
+});
+
+describe("resolveSeverityThresholds", () => {
+  it("defaults when env is empty", () => {
+    expect(resolveSeverityThresholds({})).toEqual(DEFAULT_SEVERITY_THRESHOLDS);
+  });
+
+  it("reads configured day cutoffs", () => {
+    expect(
+      resolveSeverityThresholds({
+        CLM_REPORT_SHADOW_CRITICAL_DAYS: "14",
+        CLM_REPORT_SHADOW_HIGH_DAYS: "60",
+        CLM_REPORT_ISSUER_HIGH_DAYS: "45",
+      })
+    ).toEqual({
+      shadowCriticalDays: 14,
+      shadowHighDays: 60,
+      issuerHighDays: 45,
+    });
+  });
+
+  it("falls back on invalid values and clamps critical above high", () => {
+    expect(
+      resolveSeverityThresholds({
+        CLM_REPORT_SHADOW_CRITICAL_DAYS: "90",
+        CLM_REPORT_SHADOW_HIGH_DAYS: "30",
+        CLM_REPORT_ISSUER_HIGH_DAYS: "nope",
+      })
+    ).toEqual({
+      shadowCriticalDays: 30,
+      shadowHighDays: 30,
+      issuerHighDays: DEFAULT_SEVERITY_THRESHOLDS.issuerHighDays,
+    });
+  });
+});
+
+describe("deriveShadowSeverity with thresholds", () => {
+  const tight = { shadowCriticalDays: 3, shadowHighDays: 10, issuerHighDays: 30 };
+
+  it("uses configured critical/high cutoffs", () => {
+    expect(deriveShadowSeverity(cert({ days_until_expiry: 5 }), tight)).toBe("high");
+    expect(deriveShadowSeverity(cert({ days_until_expiry: 2 }), tight)).toBe("critical");
+    expect(deriveShadowSeverity(cert({ days_until_expiry: 40 }), tight)).toBe("medium");
+  });
+});
+
+describe("deriveIssuerSeverity with thresholds", () => {
+  it("uses configured issuer high cutoff", () => {
+    const t = { ...DEFAULT_SEVERITY_THRESHOLDS, issuerHighDays: 10 };
+    expect(deriveIssuerSeverity(issuer({ days_until_expiry: 20 }), t)).toBe("low");
+    expect(deriveIssuerSeverity(issuer({ days_until_expiry: 5 }), t)).toBe("high");
   });
 });
 

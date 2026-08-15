@@ -19,19 +19,24 @@ flowchart TB
   subgraph service [CLM Discovery Service]
     API[Go REST API]
     Worker[Scan Worker Pool]
+    LifeWorker[Lifecycle Job Worker]
     Scanner[TLS Scanner]
   end
 
   DB[(PostgreSQL)]
   Network[Network Targets]
+  AAP[AAP Controller]
 
   Dashboard --> API
   CLI --> DB
   API --> Worker
+  API --> DB
   Worker --> Scanner
   Scanner --> Network
   Worker --> DB
-  API --> DB
+  LifeWorker --> DB
+  LifeWorker --> AAP
+  API --> AAP
 ```
 
 ## Components
@@ -49,6 +54,13 @@ flowchart TB
 - Computes `chain_status` and `hostname_matches_san`
 - SHA-256 fingerprint as cross-scan dedup key
 
+### Lifecycle job worker (`internal/lifecyclejobs`, M2)
+
+- Persists `lifecycle_jobs` before renew **202** (on-demand includes `aap_job_id`; batch enqueues `launching`)
+- Claims expired leases (`FOR UPDATE SKIP LOCKED`); polls with existing `aap.WaitForJob` — **never** on `r.Context()`
+- Maps `aap.Status*` → CLM status; does not double-launch when `aap_job_id` is set
+- Wire verify: same CN, **new** fingerprint, later `not_after`; `renewal.completed` only after **verified**
+- Stopgap observe via inventory lookup / `ListCertificates` until M4 durable scan claims
 ### Store (`internal/store`)
 
 - PostgreSQL persistence with upsert-by-fingerprint

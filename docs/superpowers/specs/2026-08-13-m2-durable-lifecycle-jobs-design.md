@@ -1,6 +1,6 @@
 # M2 — Durable lifecycle jobs and closed-loop renewal — design
 
-**Status:** Draft  
+**Status:** Approved  
 **Date:** 2026-08-13  
 **Parent:** [GCM closed-loop roadmap](2026-08-13-gcm-closed-loop-roadmap-design.md)  
 **Plan:** [2026-08-13-m2-durable-lifecycle-jobs.md](../plans/2026-08-13-m2-durable-lifecycle-jobs.md)  

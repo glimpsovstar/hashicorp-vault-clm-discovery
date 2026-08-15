@@ -14,6 +14,11 @@ North star and roadmap: `docs/program-context.md`.
 
 ## Done
 
+- **#80 M2 durable lifecycle jobs** — migration `000009` (`lifecycle_jobs` +
+  events/approvals), persist before renew 202, batch enqueue for
+  `renew-expiring`, background worker (`WaitForJob` + wire verify),
+  `GET /lifecycle-jobs/{id}` / list-by-cert. Docs: closed-loop is the state
+  machine, not “later rescan”.
 - **#68 report viewer + in-report actions** — view-first `/scans/{id}/report` page
   (summary, insights, recommendations) in the Vault UI, with a Download menu
   (md/csv/json) and inline import actions (Track in CLM per shadow cert, Import CA

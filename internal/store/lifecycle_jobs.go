@@ -1,0 +1,448 @@
+package store
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+)
+
+// Lifecycle job statuses (CLM-side). AAP statuses map into aap_* / failed.
+const (
+	LifecyclePendingApproval = "pending_approval"
+	LifecycleLaunching       = "launching"
+	LifecycleAAPPending      = "aap_pending"
+	LifecycleAAPRunning      = "aap_running"
+	LifecycleAAPSuccessful   = "aap_successful"
+	LifecycleVerifying       = "verifying"
+	LifecycleVerified        = "verified"
+	LifecycleVerifyFailed    = "verify_failed"
+	LifecycleFailed          = "failed"
+)
+
+// ErrLifecycleJobNotFound is returned when a lifecycle job id is unknown.
+var ErrLifecycleJobNotFound = errors.New("lifecycle job not found")
+
+// ErrLifecycleIdempotencyConflict is returned when InsertJob hits a duplicate key.
+var ErrLifecycleIdempotencyConflict = errors.New("lifecycle job idempotency conflict")
+
+// LifecycleJob is a durable renewal (or similar) job tracked across restarts.
+type LifecycleJob struct {
+	ID                 uuid.UUID       `json:"id"`
+	Kind               string          `json:"kind"`
+	Status             string          `json:"status"`
+	PredecessorCertID  *uuid.UUID      `json:"predecessor_cert_id,omitempty"`
+	SuccessorCertID    *uuid.UUID      `json:"successor_cert_id,omitempty"`
+	AAPJobID           *int            `json:"aap_job_id,omitempty"`
+	AAPWorkflow        bool            `json:"aap_workflow"`
+	IdempotencyKey     string          `json:"idempotency_key"`
+	Expected           json.RawMessage `json:"expected"`
+	Observed           json.RawMessage `json:"observed"`
+	FailureReason      *string         `json:"failure_reason,omitempty"`
+	LeaseOwner         *string         `json:"lease_owner,omitempty"`
+	LeaseExpiresAt     *time.Time      `json:"lease_expires_at,omitempty"`
+	CreatedAt          time.Time       `json:"created_at"`
+	UpdatedAt          time.Time       `json:"updated_at"`
+}
+
+// LifecycleJobEvent is an append-only timeline entry for a lifecycle job.
+type LifecycleJobEvent struct {
+	ID        uuid.UUID       `json:"id"`
+	JobID     uuid.UUID       `json:"job_id"`
+	EventType string          `json:"event_type"`
+	Payload   json.RawMessage `json:"payload"`
+	CreatedAt time.Time       `json:"created_at"`
+}
+
+// InsertLifecycleJobParams creates a new durable job row.
+type InsertLifecycleJobParams struct {
+	Kind              string
+	Status            string
+	PredecessorCertID *uuid.UUID
+	IdempotencyKey    string
+	Expected          json.RawMessage
+	AAPJobID          *int
+	AAPWorkflow       bool
+}
+
+// RenewIdempotencyKey builds a stable key so the same cert renew is not launched twice.
+func RenewIdempotencyKey(certID uuid.UUID, fingerprint string) string {
+	return fmt.Sprintf("renew:%s:%s", certID.String(), fingerprint)
+}
+
+// InsertLifecycleJob inserts a job row. On unique idempotency conflict it returns
+// ErrLifecycleIdempotencyConflict (caller may Get by key).
+func (s *Store) InsertLifecycleJob(ctx context.Context, p InsertLifecycleJobParams) (LifecycleJob, error) {
+	if p.Kind == "" {
+		p.Kind = "renew"
+	}
+	if p.Status == "" {
+		p.Status = LifecycleLaunching
+	}
+	if len(p.Expected) == 0 {
+		p.Expected = json.RawMessage(`{}`)
+	}
+	var job LifecycleJob
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO lifecycle_jobs (
+			kind, status, predecessor_cert_id, idempotency_key, expected,
+			aap_job_id, aap_workflow
+		) VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id, kind, status, predecessor_cert_id, successor_cert_id,
+			aap_job_id, aap_workflow, idempotency_key, expected, observed,
+			failure_reason, lease_owner, lease_expires_at, created_at, updated_at
+	`, p.Kind, p.Status, p.PredecessorCertID, p.IdempotencyKey, p.Expected,
+		p.AAPJobID, p.AAPWorkflow).Scan(
+		&job.ID, &job.Kind, &job.Status, &job.PredecessorCertID, &job.SuccessorCertID,
+		&job.AAPJobID, &job.AAPWorkflow, &job.IdempotencyKey, &job.Expected, &job.Observed,
+		&job.FailureReason, &job.LeaseOwner, &job.LeaseExpiresAt, &job.CreatedAt, &job.UpdatedAt,
+	)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return LifecycleJob{}, ErrLifecycleIdempotencyConflict
+		}
+		return LifecycleJob{}, err
+	}
+	return job, nil
+}
+
+// GetLifecycleJobByIdempotency returns the job for a key, or ErrLifecycleJobNotFound.
+func (s *Store) GetLifecycleJobByIdempotency(ctx context.Context, key string) (LifecycleJob, error) {
+	return s.scanLifecycleJob(s.pool.QueryRow(ctx, lifecycleJobSelect+` WHERE idempotency_key = $1`, key))
+}
+
+// GetLifecycleJob returns a job by id.
+func (s *Store) GetLifecycleJob(ctx context.Context, id uuid.UUID) (LifecycleJob, error) {
+	return s.scanLifecycleJob(s.pool.QueryRow(ctx, lifecycleJobSelect+` WHERE id = $1`, id))
+}
+
+// ListLifecycleJobsByCert returns jobs for a predecessor certificate (newest first).
+func (s *Store) ListLifecycleJobsByCert(ctx context.Context, certID uuid.UUID, limit int) ([]LifecycleJob, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	rows, err := s.pool.Query(ctx, lifecycleJobSelect+`
+		WHERE predecessor_cert_id = $1
+		ORDER BY created_at DESC LIMIT $2
+	`, certID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []LifecycleJob{}
+	for rows.Next() {
+		job, err := scanLifecycleJobRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, job)
+	}
+	return out, rows.Err()
+}
+
+// SetLifecycleAAPRef stores the Controller job id after a successful launch.
+func (s *Store) SetLifecycleAAPRef(ctx context.Context, id uuid.UUID, aapJobID int, workflow bool, status string) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE lifecycle_jobs SET
+			aap_job_id = $2,
+			aap_workflow = $3,
+			status = $4,
+			updated_at = NOW()
+		WHERE id = $1
+	`, id, aapJobID, workflow, status)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrLifecycleJobNotFound
+	}
+	return nil
+}
+
+// UpdateLifecycleStatus updates status and optional failure reason / JSON blobs.
+type UpdateLifecycleStatusParams struct {
+	Status          string
+	FailureReason   *string
+	Expected        json.RawMessage
+	Observed        json.RawMessage
+	SuccessorCertID *uuid.UUID
+	ClearLease      bool
+}
+
+// UpdateLifecycleStatus sets status fields on a job. Empty Status leaves the
+// current status unchanged (used to clear a lease after a partial step).
+func (s *Store) UpdateLifecycleStatus(ctx context.Context, id uuid.UUID, p UpdateLifecycleStatusParams) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE lifecycle_jobs SET
+			status = CASE WHEN $2 = '' THEN status ELSE $2 END,
+			failure_reason = COALESCE($3, failure_reason),
+			expected = COALESCE($4, expected),
+			observed = COALESCE($5, observed),
+			successor_cert_id = COALESCE($6, successor_cert_id),
+			lease_owner = CASE WHEN $7 THEN NULL ELSE lease_owner END,
+			lease_expires_at = CASE WHEN $7 THEN NULL ELSE lease_expires_at END,
+			updated_at = NOW()
+		WHERE id = $1
+	`, id, p.Status, p.FailureReason, nullJSON(p.Expected), nullJSON(p.Observed),
+		p.SuccessorCertID, p.ClearLease)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrLifecycleJobNotFound
+	}
+	return nil
+}
+
+// AppendRenewalOutboxEvent writes a renewal.* event to the EDA outbox.
+func (s *Store) AppendRenewalOutboxEvent(ctx context.Context, eventType string, certID *uuid.UUID, payload json.RawMessage) error {
+	if len(payload) == 0 {
+		payload = json.RawMessage(`{}`)
+	}
+	return appendEventStandalone(ctx, s, eventType, certID, payload)
+}
+
+// AppendLifecycleJobEvent appends a timeline row for the job.
+func (s *Store) AppendLifecycleJobEvent(ctx context.Context, jobID uuid.UUID, eventType string, payload json.RawMessage) error {
+	if len(payload) == 0 {
+		payload = json.RawMessage(`{}`)
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO lifecycle_job_events (job_id, event_type, payload)
+		VALUES ($1, $2, $3)
+	`, jobID, eventType, payload)
+	return err
+}
+
+// InsertLifecycleApproval records an approval decision for a job.
+func (s *Store) InsertLifecycleApproval(ctx context.Context, jobID uuid.UUID, actor, decision string) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO lifecycle_approvals (job_id, actor, decision)
+		VALUES ($1, $2, $3)
+	`, jobID, actor, decision)
+	return err
+}
+
+// ClaimLifecycleJobs claims up to limit jobs whose lease is expired or unset and
+// whose status is still in-flight. Uses FOR UPDATE SKIP LOCKED.
+func (s *Store) ClaimLifecycleJobs(ctx context.Context, owner string, leaseTTL time.Duration, limit int) ([]LifecycleJob, error) {
+	if leaseTTL <= 0 {
+		leaseTTL = 2 * time.Minute
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	expires := time.Now().UTC().Add(leaseTTL)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, `
+		SELECT id FROM lifecycle_jobs
+		WHERE status IN (
+			'launching', 'aap_pending', 'aap_running', 'aap_successful', 'verifying'
+		)
+		AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
+		ORDER BY created_at
+		FOR UPDATE SKIP LOCKED
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return []LifecycleJob{}, tx.Commit(ctx)
+	}
+
+	_, err = tx.Exec(ctx, `
+		UPDATE lifecycle_jobs SET
+			lease_owner = $2,
+			lease_expires_at = $3,
+			updated_at = NOW()
+		WHERE id = ANY($1)
+	`, ids, owner, expires)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	out := make([]LifecycleJob, 0, len(ids))
+	for _, id := range ids {
+		job, err := s.GetLifecycleJob(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, job)
+	}
+	return out, nil
+}
+
+// PersistRenewLaunch writes renewal config, inserts a lifecycle job with AAP ref,
+// appends job timeline + outbox renewal.launched in one transaction.
+func (s *Store) PersistRenewLaunch(ctx context.Context, certID uuid.UUID, cfg RenewalConfig, fingerprint string, aapJobID int, workflow bool, expected json.RawMessage) (LifecycleJob, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return LifecycleJob{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return LifecycleJob{}, err
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE certificates SET renewal_config = $2, updated_at = NOW() WHERE id = $1
+	`, certID, data)
+	if err != nil {
+		return LifecycleJob{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		return LifecycleJob{}, ErrCertificateNotFound
+	}
+
+	key := RenewIdempotencyKey(certID, fingerprint)
+	if len(expected) == 0 {
+		expected = json.RawMessage(`{}`)
+	}
+	var job LifecycleJob
+	err = tx.QueryRow(ctx, `
+		INSERT INTO lifecycle_jobs (
+			kind, status, predecessor_cert_id, idempotency_key, expected,
+			aap_job_id, aap_workflow
+		) VALUES ('renew', $1, $2, $3, $4, $5, $6)
+		RETURNING id, kind, status, predecessor_cert_id, successor_cert_id,
+			aap_job_id, aap_workflow, idempotency_key, expected, observed,
+			failure_reason, lease_owner, lease_expires_at, created_at, updated_at
+	`, LifecycleAAPPending, certID, key, expected, aapJobID, workflow).Scan(
+		&job.ID, &job.Kind, &job.Status, &job.PredecessorCertID, &job.SuccessorCertID,
+		&job.AAPJobID, &job.AAPWorkflow, &job.IdempotencyKey, &job.Expected, &job.Observed,
+		&job.FailureReason, &job.LeaseOwner, &job.LeaseExpiresAt, &job.CreatedAt, &job.UpdatedAt,
+	)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return LifecycleJob{}, ErrLifecycleIdempotencyConflict
+		}
+		return LifecycleJob{}, err
+	}
+
+	payload, _ := json.Marshal(map[string]any{
+		"aap_job_id": aapJobID, "workflow": workflow, "certificate_id": certID,
+	})
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO lifecycle_job_events (job_id, event_type, payload)
+		VALUES ($1, 'job.launched', $2)
+	`, job.ID, payload); err != nil {
+		return LifecycleJob{}, err
+	}
+	if err := appendEventTx(ctx, tx, "renewal.launched", &certID, payload); err != nil {
+		return LifecycleJob{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO lifecycle_approvals (job_id, actor, decision)
+		VALUES ($1, 'consent', 'auto_approved')
+	`, job.ID); err != nil {
+		return LifecycleJob{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return LifecycleJob{}, err
+	}
+	return job, nil
+}
+
+// InsertLifecycleJobPending inserts a batch renew job without an AAP id (worker launches).
+func (s *Store) InsertLifecycleJobPending(ctx context.Context, certID uuid.UUID, fingerprint string, expected json.RawMessage) (LifecycleJob, error) {
+	key := RenewIdempotencyKey(certID, fingerprint)
+	job, err := s.InsertLifecycleJob(ctx, InsertLifecycleJobParams{
+		Kind:              "renew",
+		Status:            LifecycleLaunching,
+		PredecessorCertID: &certID,
+		IdempotencyKey:    key,
+		Expected:          expected,
+	})
+	if err != nil {
+		return LifecycleJob{}, err
+	}
+	_ = s.InsertLifecycleApproval(ctx, job.ID, "consent", "auto_approved")
+	payload, _ := json.Marshal(map[string]any{"certificate_id": certID})
+	_ = s.AppendLifecycleJobEvent(ctx, job.ID, "job.enqueued", payload)
+	_ = appendEventStandalone(ctx, s, "renewal.requested", &certID, payload)
+	return job, nil
+}
+
+func appendEventStandalone(ctx context.Context, s *Store, eventType string, certID *uuid.UUID, payload []byte) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := appendEventTx(ctx, tx, eventType, certID, payload); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+const lifecycleJobSelect = `
+	SELECT id, kind, status, predecessor_cert_id, successor_cert_id,
+		aap_job_id, aap_workflow, idempotency_key, expected, observed,
+		failure_reason, lease_owner, lease_expires_at, created_at, updated_at
+	FROM lifecycle_jobs
+`
+
+type scannable interface {
+	Scan(dest ...any) error
+}
+
+func (s *Store) scanLifecycleJob(row scannable) (LifecycleJob, error) {
+	job, err := scanLifecycleJobRow(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LifecycleJob{}, ErrLifecycleJobNotFound
+	}
+	return job, err
+}
+
+func scanLifecycleJobRow(row scannable) (LifecycleJob, error) {
+	var job LifecycleJob
+	err := row.Scan(
+		&job.ID, &job.Kind, &job.Status, &job.PredecessorCertID, &job.SuccessorCertID,
+		&job.AAPJobID, &job.AAPWorkflow, &job.IdempotencyKey, &job.Expected, &job.Observed,
+		&job.FailureReason, &job.LeaseOwner, &job.LeaseExpiresAt, &job.CreatedAt, &job.UpdatedAt,
+	)
+	return job, err
+}
+
+func nullJSON(b json.RawMessage) any {
+	if len(b) == 0 {
+		return nil
+	}
+	return b
+}
+
+func isUniqueViolation(err error) bool {
+	// pgx wraps pgconn.PgError; string match avoids importing pgconn in every call site.
+	return err != nil && (strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "23505"))
+}

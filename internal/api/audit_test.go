@@ -135,6 +135,7 @@ func TestPrivilegedMutationsWriteAuditAllow(t *testing.T) {
 				s.resources = &fakeResourceStore{cert: store.Certificate{SubjectCN: &cn}}
 				s.cfg.AAPDefaultMount = "pki"
 				s.renewer = &fakeRenewer{ref: RenewRef{JobID: 7}}
+				s.lifecycle = &fakeLifecycleStore{}
 			},
 			method:     http.MethodPost,
 			path:       "/api/v1/certificates/" + certID + "/renew",

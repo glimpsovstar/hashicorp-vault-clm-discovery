@@ -88,6 +88,17 @@ func TestHandleRenewCertificate_Statuses(t *testing.T) {
 					if !strings.Contains(rec.Body.String(), `"job_id":42`) {
 						t.Fatalf("response missing job id: %s", rec.Body.String())
 					}
+					if !strings.Contains(rec.Body.String(), `"lifecycle_job_id"`) {
+						t.Fatalf("response missing lifecycle_job_id: %s", rec.Body.String())
+					}
+					if fl, ok := srv.lifecycle.(*fakeLifecycleStore); ok {
+						if !fl.gotPersist {
+							t.Fatal("expected PersistRenewLaunch before 202")
+						}
+						if fl.gotRenewalCfg == nil || fl.gotRenewalCfg.Role != "web-server" {
+							t.Fatalf("SetRenewalConfig via persist missing: %#v", fl.gotRenewalCfg)
+						}
+					}
 				}
 			}
 		})

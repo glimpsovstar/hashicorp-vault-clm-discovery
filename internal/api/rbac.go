@@ -63,6 +63,7 @@ func isViewerRead(method, path string) bool {
 		"/api/v1/certificates",
 		"/api/v1/issuers",
 		"/api/v1/events",
+		"/api/v1/lifecycle-jobs",
 		"/api/v1/blindspot",
 		"/api/v1/compliance",
 	} {

@@ -15,6 +15,7 @@ import {
 } from "@/lib/api";
 import EnrichmentForm from "./enrichment-form";
 import CatalogImportButton from "@/components/catalog-import-button";
+import MigrateToVaultButton from "@/components/migrate-to-vault-button";
 import RevocationCheckButton from "./revocation-check-button";
 import RenewalKit from "./renewal-kit";
 
@@ -111,6 +112,9 @@ export default async function CertificateDetailPage({
               <EnrichmentForm cert={cert} />
               <div style={{ marginTop: 16 }}>
                 <CatalogImportButton cert={cert} />
+              </div>
+              <div style={{ marginTop: 16 }}>
+                <MigrateToVaultButton cert={cert} />
               </div>
               <div style={{ marginTop: 16 }}>
                 <RevocationCheckButton cert={cert} />

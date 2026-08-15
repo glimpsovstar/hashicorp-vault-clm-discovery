@@ -23,6 +23,8 @@ var (
 	ErrScanNotFound        = errors.New("scan not found")
 	ErrCertificateNotFound = errors.New("certificate not found")
 	ErrIssuerNotFound      = errors.New("issuer not found")
+	// ErrScanQueueFull is returned when pending scans already hit the configured cap.
+	ErrScanQueueFull = errors.New("scan queue full")
 )
 
 type Store struct {
@@ -64,6 +66,8 @@ type Scan struct {
 	ExpansionWarnings []string              `json:"expansion_warnings"`
 	FailureSamples    []TargetFailureSample `json:"failure_samples"`
 	Error             *string               `json:"error,omitempty"`
+	ClaimedBy         *string               `json:"claimed_by,omitempty"`
+	ClaimedAt         *time.Time            `json:"claimed_at,omitempty"`
 	CreatedAt         time.Time             `json:"created_at"`
 }
 
@@ -187,7 +191,9 @@ type EnrichmentUpdate struct {
 	Tags        []string
 }
 
-func (s *Store) CreateScan(ctx context.Context, cidrs, hostnames []string, ports []int, concurrency int) (Scan, error) {
+// CreateScan inserts a pending scan row. When maxPending > 0 and that many
+// pending scans already exist, it returns ErrScanQueueFull (no insert).
+func (s *Store) CreateScan(ctx context.Context, cidrs, hostnames []string, ports []int, concurrency, maxPending int) (Scan, error) {
 	if cidrs == nil {
 		cidrs = []string{}
 	}
@@ -196,19 +202,149 @@ func (s *Store) CreateScan(ctx context.Context, cidrs, hostnames []string, ports
 	}
 	var scan Scan
 	samplesScanner := failureSamplesArg(&scan.FailureSamples)
-	err := s.pool.QueryRow(ctx, `
+	var err error
+	if maxPending > 0 {
+		err = s.pool.QueryRow(ctx, `
+			WITH pending AS (
+				SELECT COUNT(*)::int AS c FROM scans WHERE status = 'pending'
+			)
+			INSERT INTO scans (cidrs, hostnames, ports, concurrency, targets_total)
+			SELECT $1, $2, $3, $4, 0 FROM pending WHERE c < $5
+			RETURNING id, source, status::text, cidrs, hostnames, ports, concurrency,
+				started_at, finished_at, targets_total, targets_scanned, targets_succeeded, targets_failed,
+				certs_found, upsert_failures, expansion_warnings, failure_samples, error,
+				claimed_by, claimed_at, created_at
+		`, cidrs, hostnames, ports, concurrency, maxPending).Scan(
+			&scan.ID, &scan.Source, &scan.Status, &scan.CIDRs, &scan.Hostnames, &scan.Ports, &scan.Concurrency,
+			&scan.StartedAt, &scan.FinishedAt, &scan.TargetsTotal, &scan.TargetsScanned,
+			&scan.TargetsSucceeded, &scan.TargetsFailed, &scan.CertsFound, &scan.UpsertFailures,
+			&scan.ExpansionWarnings, &samplesScanner, &scan.Error,
+			&scan.ClaimedBy, &scan.ClaimedAt, &scan.CreatedAt,
+		)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Scan{}, ErrScanQueueFull
+		}
+		return scan, err
+	}
+	err = s.pool.QueryRow(ctx, `
 		INSERT INTO scans (cidrs, hostnames, ports, concurrency, targets_total)
 		VALUES ($1, $2, $3, $4, 0)
 		RETURNING id, source, status::text, cidrs, hostnames, ports, concurrency,
 			started_at, finished_at, targets_total, targets_scanned, targets_succeeded, targets_failed,
-			certs_found, upsert_failures, expansion_warnings, failure_samples, error, created_at
+			certs_found, upsert_failures, expansion_warnings, failure_samples, error,
+			claimed_by, claimed_at, created_at
 	`, cidrs, hostnames, ports, concurrency).Scan(
 		&scan.ID, &scan.Source, &scan.Status, &scan.CIDRs, &scan.Hostnames, &scan.Ports, &scan.Concurrency,
 		&scan.StartedAt, &scan.FinishedAt, &scan.TargetsTotal, &scan.TargetsScanned,
 		&scan.TargetsSucceeded, &scan.TargetsFailed, &scan.CertsFound, &scan.UpsertFailures,
-		&scan.ExpansionWarnings, &samplesScanner, &scan.Error, &scan.CreatedAt,
+		&scan.ExpansionWarnings, &samplesScanner, &scan.Error,
+		&scan.ClaimedBy, &scan.ClaimedAt, &scan.CreatedAt,
 	)
 	return scan, err
+}
+
+// ClaimNextScans claims up to limit pending or lease-expired running scans using
+// FOR UPDATE SKIP LOCKED so at most one replica owns a given scan id.
+func (s *Store) ClaimNextScans(ctx context.Context, owner string, leaseTTL time.Duration, limit int) ([]Scan, error) {
+	if owner == "" {
+		return nil, fmt.Errorf("claim owner required")
+	}
+	if leaseTTL <= 0 {
+		leaseTTL = 30 * time.Second
+	}
+	if limit <= 0 {
+		limit = 1
+	}
+	staleBefore := time.Now().UTC().Add(-leaseTTL)
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, `
+		SELECT id FROM scans
+		WHERE status IN ('pending', 'running')
+		  AND (
+			status = 'pending'
+			OR claimed_at IS NULL
+			OR claimed_at < $1
+		  )
+		ORDER BY created_at
+		FOR UPDATE SKIP LOCKED
+		LIMIT $2
+	`, staleBefore, limit)
+	if err != nil {
+		return nil, err
+	}
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return []Scan{}, tx.Commit(ctx)
+	}
+
+	now := time.Now().UTC()
+	_, err = tx.Exec(ctx, `
+		UPDATE scans SET
+			status = 'running',
+			claimed_by = $2,
+			claimed_at = $3,
+			started_at = COALESCE(started_at, $3)
+		WHERE id = ANY($1)
+	`, ids, owner, now)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	out := make([]Scan, 0, len(ids))
+	for _, id := range ids {
+		scan, err := s.GetScan(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, scan)
+	}
+	return out, nil
+}
+
+// HeartbeatScanClaim refreshes claimed_at so other replicas do not steal the lease.
+func (s *Store) HeartbeatScanClaim(ctx context.Context, id uuid.UUID, owner string) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE scans SET claimed_at = NOW()
+		WHERE id = $1 AND claimed_by = $2 AND status = 'running'
+	`, id, owner)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrScanNotFound
+	}
+	return nil
+}
+
+// ReleaseScanClaim clears the claim so another worker can reclaim immediately
+// (used on graceful shutdown / cancelled scan context).
+func (s *Store) ReleaseScanClaim(ctx context.Context, id uuid.UUID, owner string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE scans SET claimed_by = NULL, claimed_at = NULL
+		WHERE id = $1 AND claimed_by = $2 AND status = 'running'
+	`, id, owner)
+	return err
 }
 
 func (s *Store) UpdateScanRunning(ctx context.Context, id uuid.UUID, targetsTotal int) error {
@@ -247,7 +383,9 @@ func (s *Store) CompleteScan(ctx context.Context, id uuid.UUID, summary ScanSumm
 			upsert_failures = $7,
 			expansion_warnings = $8,
 			failure_samples = $9,
-			error = NULL
+			error = NULL,
+			claimed_by = NULL,
+			claimed_at = NULL
 		WHERE id = $1
 	`, id, now, summary.TargetsScanned, summary.TargetsSucceeded, summary.TargetsFailed,
 		summary.CertsFound, summary.UpsertFailures, warnings, samplesJSON)
@@ -257,7 +395,9 @@ func (s *Store) CompleteScan(ctx context.Context, id uuid.UUID, summary ScanSumm
 func (s *Store) FailScan(ctx context.Context, id uuid.UUID, errMsg string) error {
 	now := time.Now().UTC()
 	_, err := s.pool.Exec(ctx, `
-		UPDATE scans SET status = 'failed', finished_at = $2, error = $3 WHERE id = $1
+		UPDATE scans SET status = 'failed', finished_at = $2, error = $3,
+			claimed_by = NULL, claimed_at = NULL
+		WHERE id = $1
 	`, id, now, errMsg)
 	return err
 }
@@ -268,13 +408,15 @@ func (s *Store) GetScan(ctx context.Context, id uuid.UUID) (Scan, error) {
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, source, status::text, cidrs, hostnames, ports, concurrency,
 			started_at, finished_at, targets_total, targets_scanned, targets_succeeded, targets_failed,
-			certs_found, upsert_failures, expansion_warnings, failure_samples, error, created_at
+			certs_found, upsert_failures, expansion_warnings, failure_samples, error,
+			claimed_by, claimed_at, created_at
 		FROM scans WHERE id = $1
 	`, id).Scan(
 		&scan.ID, &scan.Source, &scan.Status, &scan.CIDRs, &scan.Hostnames, &scan.Ports, &scan.Concurrency,
 		&scan.StartedAt, &scan.FinishedAt, &scan.TargetsTotal, &scan.TargetsScanned,
 		&scan.TargetsSucceeded, &scan.TargetsFailed, &scan.CertsFound, &scan.UpsertFailures,
-		&scan.ExpansionWarnings, &samplesScanner, &scan.Error, &scan.CreatedAt,
+		&scan.ExpansionWarnings, &samplesScanner, &scan.Error,
+		&scan.ClaimedBy, &scan.ClaimedAt, &scan.CreatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return scan, ErrScanNotFound
@@ -289,7 +431,8 @@ func (s *Store) ListScans(ctx context.Context, limit, offset int) ([]Scan, error
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, source, status::text, cidrs, hostnames, ports, concurrency,
 			started_at, finished_at, targets_total, targets_scanned, targets_succeeded, targets_failed,
-			certs_found, upsert_failures, expansion_warnings, failure_samples, error, created_at
+			certs_found, upsert_failures, expansion_warnings, failure_samples, error,
+			claimed_by, claimed_at, created_at
 		FROM scans ORDER BY created_at DESC LIMIT $1 OFFSET $2
 	`, limit, offset)
 	if err != nil {
@@ -305,7 +448,8 @@ func (s *Store) ListScans(ctx context.Context, limit, offset int) ([]Scan, error
 			&scan.ID, &scan.Source, &scan.Status, &scan.CIDRs, &scan.Hostnames, &scan.Ports, &scan.Concurrency,
 			&scan.StartedAt, &scan.FinishedAt, &scan.TargetsTotal, &scan.TargetsScanned,
 			&scan.TargetsSucceeded, &scan.TargetsFailed, &scan.CertsFound, &scan.UpsertFailures,
-			&scan.ExpansionWarnings, &samplesScanner, &scan.Error, &scan.CreatedAt,
+			&scan.ExpansionWarnings, &samplesScanner, &scan.Error,
+			&scan.ClaimedBy, &scan.ClaimedAt, &scan.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -707,8 +851,8 @@ func (s *Store) ListEvents(ctx context.Context, limit int) ([]Event, error) {
 }
 
 // ListUndeliveredEvents returns undelivered events (oldest first) that have not
-// exhausted their delivery attempts, for the dispatcher to deliver. Events at or
-// beyond maxAttempts are treated as dead-lettered and excluded.
+// exhausted their delivery attempts. Prefer ClaimUndeliveredEvents for multi-replica
+// dispatchers so two workers cannot take the same row.
 func (s *Store) ListUndeliveredEvents(ctx context.Context, limit, maxAttempts int) ([]Event, error) {
 	if limit <= 0 {
 		limit = 50
@@ -740,17 +884,102 @@ func (s *Store) ListUndeliveredEvents(ctx context.Context, limit, maxAttempts in
 	return events, rows.Err()
 }
 
-// MarkEventDelivered stamps an event as delivered.
+// ClaimUndeliveredEvents claims up to limit undelivered outbox events with
+// FOR UPDATE SKIP LOCKED so two EDA dispatchers cannot deliver the same event.
+func (s *Store) ClaimUndeliveredEvents(ctx context.Context, owner string, leaseTTL time.Duration, limit, maxAttempts int) ([]Event, error) {
+	if owner == "" {
+		return nil, fmt.Errorf("claim owner required")
+	}
+	if leaseTTL <= 0 {
+		leaseTTL = 2 * time.Minute
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if maxAttempts <= 0 {
+		maxAttempts = 10
+	}
+	expires := time.Now().UTC().Add(leaseTTL)
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, `
+		SELECT id FROM events
+		WHERE delivered_at IS NULL
+		  AND attempts < $2
+		  AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
+		ORDER BY created_at ASC
+		FOR UPDATE SKIP LOCKED
+		LIMIT $1
+	`, limit, maxAttempts)
+	if err != nil {
+		return nil, err
+	}
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return []Event{}, tx.Commit(ctx)
+	}
+
+	_, err = tx.Exec(ctx, `
+		UPDATE events SET lease_owner = $2, lease_expires_at = $3
+		WHERE id = ANY($1)
+	`, ids, owner, expires)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	out := make([]Event, 0, len(ids))
+	for _, id := range ids {
+		var e Event
+		err := s.pool.QueryRow(ctx, `
+			SELECT id, event_type, certificate_id, payload, created_at, delivered_at, attempts, last_error
+			FROM events WHERE id = $1
+		`, id).Scan(&e.ID, &e.EventType, &e.CertificateID, &e.Payload,
+			&e.CreatedAt, &e.DeliveredAt, &e.Attempts, &e.LastError)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+// MarkEventDelivered stamps an event as delivered and clears any claim lease.
 func (s *Store) MarkEventDelivered(ctx context.Context, id uuid.UUID) error {
-	_, err := s.pool.Exec(ctx, `UPDATE events SET delivered_at = NOW() WHERE id = $1`, id)
+	_, err := s.pool.Exec(ctx, `
+		UPDATE events SET delivered_at = NOW(), lease_owner = NULL, lease_expires_at = NULL
+		WHERE id = $1
+	`, id)
 	return err
 }
 
 // MarkEventFailed records a failed delivery attempt (increments attempts and
 // stores the error) so the dispatcher can back off and eventually dead-letter.
+// Clears the claim lease so another replica may retry after the next tick.
 func (s *Store) MarkEventFailed(ctx context.Context, id uuid.UUID, errMsg string) error {
 	_, err := s.pool.Exec(ctx, `
-		UPDATE events SET attempts = attempts + 1, last_error = $2 WHERE id = $1
+		UPDATE events SET attempts = attempts + 1, last_error = $2,
+			lease_owner = NULL, lease_expires_at = NULL
+		WHERE id = $1
 	`, id, errMsg)
 	return err
 }

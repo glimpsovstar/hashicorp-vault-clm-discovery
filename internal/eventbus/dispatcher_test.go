@@ -28,7 +28,7 @@ type fakeStore struct {
 	gotMaxAttempts int
 }
 
-func (f *fakeStore) ListUndeliveredEvents(_ context.Context, limit, maxAttempts int) ([]store.Event, error) {
+func (f *fakeStore) ClaimUndeliveredEvents(_ context.Context, _ string, _ time.Duration, limit, maxAttempts int) ([]store.Event, error) {
 	f.gotBatch = limit
 	f.gotMaxAttempts = maxAttempts
 	if f.listErr != nil {

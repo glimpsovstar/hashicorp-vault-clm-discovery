@@ -1,9 +1,10 @@
 # M4 — Durable scan queue — design
 
-**Status:** Draft  
+**Status:** Implemented  
 **Date:** 2026-08-13  
 **Parent:** [GCM closed-loop roadmap](2026-08-13-gcm-closed-loop-roadmap-design.md)  
 **Plan:** [2026-08-13-m4-durable-scan-queue.md](../plans/2026-08-13-m4-durable-scan-queue.md)
+**Issue:** [#81](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/81)
 
 ---
 

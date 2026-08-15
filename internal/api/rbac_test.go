@@ -65,7 +65,7 @@ func (a *recordingAuditor) denies() []AuditEvent {
 
 type stubScanCreator struct{}
 
-func (stubScanCreator) CreateScan(_ context.Context, cidrs, hostnames []string, ports []int, concurrency int) (store.Scan, error) {
+func (stubScanCreator) CreateScan(_ context.Context, cidrs, hostnames []string, ports []int, concurrency, maxPending int) (store.Scan, error) {
 	return store.Scan{
 		ID:          uuid.New(),
 		Status:      "pending",
@@ -83,7 +83,7 @@ func newRBACServer(t *testing.T) (*Server, *recordingAuditor) {
 	srv.auditor = aud
 	srv.scans = stubScanCreator{}
 	srv.resources = &fakeResourceStore{}
-	srv.worker = &ScanWorker{srv: srv, jobs: make(chan scanJob, 8)}
+	srv.worker = nil
 	return srv, aud
 }
 

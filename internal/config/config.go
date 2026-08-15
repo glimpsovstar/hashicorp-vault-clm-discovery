@@ -31,6 +31,12 @@ type Config struct {
 	AllowPrivateRanges bool          `envconfig:"ALLOW_PRIVATE_RANGES" default:"false"`
 	CORSOrigins        []string      `envconfig:"CORS_ORIGINS" default:"http://localhost:3000"`
 	LogLevel           string        `envconfig:"LOG_LEVEL" default:"info"`
+	// Scan queue (M4): Postgres is the queue; these tune the claim poller.
+	ScanQueueMaxPending int           `envconfig:"SCAN_QUEUE_MAX_PENDING" default:"32"`
+	ScanWorkerSlots     int           `envconfig:"SCAN_WORKER_SLOTS" default:"2"`
+	ScanClaimInterval   time.Duration `envconfig:"SCAN_CLAIM_INTERVAL" default:"2s"`
+	ScanLeaseTTL        time.Duration `envconfig:"SCAN_LEASE_TTL" default:"30s"`
+	ScanWorkerID        string        `envconfig:"SCAN_WORKER_ID" default:""`
 	VaultAddr          string        `envconfig:"VAULT_ADDR" default:""`
 	VaultNamespace     string        `envconfig:"VAULT_NAMESPACE" default:""`
 	VaultToken         string        `envconfig:"VAULT_TOKEN" default:""`

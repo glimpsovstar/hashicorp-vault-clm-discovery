@@ -162,6 +162,8 @@ Related: `lifecycle_job_events` (append-only timeline), `lifecycle_approvals` (a
 |-------|------|-------------|
 | `status` | enum | `pending`, `running`, `completed`, `failed` |
 | `cidrs`, `hostnames`, `ports` | | Scan targets |
+| `claimed_by` | text | Worker owner while running (SKIP LOCKED claim) |
+| `claimed_at` | timestamptz | Last claim / heartbeat; stale running rows are reclaimable |
 | `targets_total` | int | Expanded target count |
 | `targets_scanned` | int | Targets processed so far |
 | `certs_found` | int | Certificates **successfully persisted** (upsert OK), not probe count |
@@ -172,7 +174,7 @@ Related: `lifecycle_job_events` (append-only timeline), `lifecycle_approvals` (a
 | `failure_samples` | jsonb | Capped array of `{ip, port, hostname, sni, reason, kind}` samples |
 | `error` | text | Fatal scan error only (status `failed`) |
 
-Expansion warnings are not stored in `error` on successful scans.
+Expansion warnings are not stored in `error` on successful scans. The EDA `events` outbox also has `lease_owner` / `lease_expires_at` for multi-replica dispatch.
 
 ### Dashboard column mapping (inventory)
 

@@ -76,7 +76,8 @@ flowchart TB
 - RBAC: `viewer` (GET), `scanner_operator` (+ scans), `remediator` (+ catalog/renew/PATCH/revoke), `vault_import_admin` (+ CA import/reconcile), `approver` (stub), `platform_admin` (DELETE + Settings mutate), `inventory` (`GET /inventory` only — AAP, not a dashboard page)
 - Consent is **intent after RBAC**: unauthorized + `consent:true` → 401/403; authorized + `consent:false` → 400
 - Append-only `audit_events` on privileged mutations and 401/403 (not the EDA `events` outbox)
-- Background scan worker with bounded concurrency
+- Durable scan queue: `POST /scans` inserts `pending` and returns **202** immediately (never blocks on an in-memory channel). Over-cap pending → **503**
+- Background scan poller claims rows with `FOR UPDATE SKIP LOCKED` (multi-replica safe); Compose stays **1** API replica by default
 - Consent gate on scan creation
 - `GET /api/v1/scans/{id}` — scan detail and diagnostics
 - `GET /api/v1/scans/{id}/certificates` — certificates discovered in that scan
@@ -95,12 +96,18 @@ At certificate upsert, `ClassifyScope` assigns `cert_scope`:
 
 ### Scan worker flow
 
-1. Expand hostnames/CIDRs into targets; record non-fatal expansion warnings
-2. Probe each target concurrently; on success, upsert certificate (empty AIA arrays as `{}`)
-3. Increment `certs_found` only after a successful certificate upsert (not on probe alone)
-4. Track `targets_succeeded` / `targets_failed`, `upsert_failures`, and capped `failure_samples`
-5. On completion, persist summary counts on the `scans` row
-6. When `RECONCILE_ON_SCAN_COMPLETE=true`, run Vault PKI reconcile (errors logged, scan still succeeds; the reconcile is bounded by a timeout so an unresponsive Vault cannot block subsequent scans)
+`scans` **is** the queue. There is no Redis and no in-process job channel.
+
+1. `POST /api/v1/scans` inserts a `pending` row (backpressure: `SCAN_QUEUE_MAX_PENDING` → 503) and returns 202
+2. A poller claims claimable `pending` / lease-expired `running` rows with `FOR UPDATE SKIP LOCKED`, heartbeats `claimed_at` while probing, and releases the claim on graceful cancel so another replica can resume
+3. Expand hostnames/CIDRs into targets; record non-fatal expansion warnings (hostname-resolved private IPs obey `ALLOW_PRIVATE_RANGES` the same as CIDRs)
+4. Probe each target concurrently; on success, upsert certificate (empty AIA arrays as `{}`)
+5. Increment `certs_found` only after a successful certificate upsert (not on probe alone)
+6. Track `targets_succeeded` / `targets_failed`, `upsert_failures`, and capped `failure_samples`
+7. On completion, persist summary counts on the `scans` row and clear the claim
+8. When `RECONCILE_ON_SCAN_COMPLETE=true`, run Vault PKI reconcile (errors logged, scan still succeeds; the reconcile is bounded by a timeout so an unresponsive Vault cannot block subsequent scans)
+
+The EDA outbox dispatcher uses the same SKIP LOCKED claim pattern so two API replicas cannot double-deliver an event.
 
 ### Observability
 

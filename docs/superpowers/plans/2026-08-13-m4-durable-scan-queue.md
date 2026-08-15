@@ -28,22 +28,22 @@
 
 ### Task 1: Migration + claim SQL
 
-- [ ] `claimed_at`, `claimed_by`; SKIP LOCKED claim; concurrent claim test.
+- [x] `claimed_at`, `claimed_by`; SKIP LOCKED claim; concurrent claim test.
 
 ### Task 2: Replace ScanWorker channel
 
-- [ ] POST only CreateScan; poller Run; 503 over cap; no blocking enqueue.
+- [x] POST only CreateScan; poller Run; 503 over cap; no blocking enqueue.
 
 ### Task 3: Context + shutdown + heartbeat
 
-- [ ] Cancel ctx from main; reclaimable on SIGTERM; no `context.Background()` in execute.
+- [x] Cancel ctx from main; reclaimable on SIGTERM; no `context.Background()` in execute.
 
 ### Task 4: Hostname private-range + outbox SKIP LOCKED
 
-- [ ] Drop/warn RFC1918/ULA unless ALLOW_PRIVATE_RANGES.
-- [ ] Two EDA claimers cannot take the same event.
+- [x] Drop/warn RFC1918/ULA unless ALLOW_PRIVATE_RANGES.
+- [x] Two EDA claimers cannot take the same event.
 
 ### Task 5: Docs + restart smoke
 
-- [ ] Architecture: DB claim not “worker pool channel”.
+- [x] Architecture: DB claim not “worker pool channel”.
 - [ ] Optional: kill API mid-scan, restart, same id completes.

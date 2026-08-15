@@ -64,7 +64,7 @@ func main() {
 		AllowPrivateRanges: cfg.AllowPrivateRanges,
 	})
 
-	scan, err := st.CreateScan(ctx, cidrList, hostnameList, portList, *concurrency)
+	scan, err := st.CreateScan(ctx, cidrList, hostnameList, portList, *concurrency, 0)
 	if err != nil {
 		logger.Error("create scan", "err", err)
 		os.Exit(1)

@@ -6,6 +6,8 @@ import {
   severityCounts,
   coverageFromBlindSpot,
   findingSeverityBadgeClass,
+  sortCertificatesByRisk,
+  type FindingSeverity,
 } from "./findings";
 import type { Certificate, Issuer, ReportDocument } from "./api";
 
@@ -139,5 +141,55 @@ describe("findingSeverityBadgeClass", () => {
   it("maps severity to a per-severity class", () => {
     expect(findingSeverityBadgeClass("critical")).toBe("finding-sev finding-sev-critical");
     expect(findingSeverityBadgeClass("info")).toBe("finding-sev finding-sev-info");
+  });
+});
+
+describe("buildFindings with persisted", () => {
+  it("prefers persisted findings and never surfaces warning severity", () => {
+    const certs = [cert({ id: "c1", subject_cn: "app.db", risk_score: 90 })];
+    const findings = buildFindings(report(), certs, [], [
+      {
+        id: "f1",
+        cert_id: "c1",
+        rule_id: "sc081.expiry.expired",
+        pack: "sc081",
+        severity: "critical",
+        title: "Expired",
+        detail: "expired",
+        status: "open",
+        waived: false,
+      },
+    ]);
+    expect(findings.some((f) => f.kind === "persisted")).toBe(true);
+    expect(findings.every((f) => f.severity !== ("warning" as FindingSeverity))).toBe(true);
+    expect(findings.some((f) => f.kind === "shadow")).toBe(false);
+  });
+
+  it("excludes waived findings from severity counts", () => {
+    const certs = [cert({ id: "c1" })];
+    const findings = buildFindings(report(), certs, [], [
+      {
+        id: "f1",
+        cert_id: "c1",
+        rule_id: "ops.shadow_internal",
+        pack: "ops",
+        severity: "low",
+        title: "Shadow",
+        detail: "x",
+        status: "open",
+        waived: true,
+      },
+    ]);
+    expect(severityCounts(findings).low).toBe(0);
+  });
+});
+
+describe("sortCertificatesByRisk", () => {
+  it("sorts by risk_score descending", () => {
+    const sorted = sortCertificatesByRisk([
+      cert({ id: "a", risk_score: 20 }),
+      cert({ id: "b", risk_score: 90 }),
+    ]);
+    expect(sorted.map((c) => c.id)).toEqual(["b", "a"]);
   });
 });

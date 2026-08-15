@@ -31,6 +31,7 @@ type ParsedCertificate struct {
 	OCSPServers           []string
 	ChainStatus           ChainStatus
 	HostnameMatchesSAN    bool
+	PQCTag                PQCTag
 	Notes                 string `json:"notes"`
 }
 

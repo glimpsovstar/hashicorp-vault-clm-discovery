@@ -107,11 +107,23 @@ type Certificate struct {
 	Environment           *string        `json:"environment"`
 	Tags                  []string       `json:"tags"`
 	RiskScore             int            `json:"risk_score"`
+	RiskReasons           []RiskReason   `json:"risk_reasons"`
+	PQCTag                string         `json:"pqc_tag"`
 	RemediationState      string         `json:"remediation_state"`
 	RenewalConfig         *RenewalConfig `json:"renewal_config,omitempty"`
 	ObservationCount      int            `json:"observation_count,omitempty"`
 	CreatedAt             time.Time      `json:"created_at"`
 	UpdatedAt             time.Time      `json:"updated_at"`
+}
+
+// RiskReason explains one contributor to certificates.risk_score.
+type RiskReason struct {
+	RuleID   string `json:"rule_id"`
+	Pack     string `json:"pack"`
+	Severity string `json:"severity"`
+	Title    string `json:"title"`
+	Score    int    `json:"score"`
+	Waived   bool   `json:"waived,omitempty"`
 }
 
 // RenewalConfig is the per-certificate Vault PKI coordinates used by Mode C
@@ -180,6 +192,10 @@ type CertificateFilter struct {
 	ChainStatus string
 	Search      string
 	ScanID      uuid.UUID
+	PQCTag      string
+	MinRisk     *int
+	SortBy      string // risk_score | last_seen (default)
+	SortDesc    bool
 	Limit       int
 	Offset      int
 }
@@ -481,10 +497,10 @@ func (s *Store) UpsertCertificate(ctx context.Context, scanID uuid.UUID, parsed 
 			authority_key_id, not_before, not_after, key_type, key_bits, signature_algorithm,
 			is_ca, key_usage, ext_key_usage, pem, days_until_expiry, status,
 			crl_distribution_points, ocsp_servers, hostname_matches_san, chain_status,
-			cert_scope, first_discovered, last_seen
+			cert_scope, pqc_tag, first_discovered, last_seen
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-			$18, $19, $20, $21, $22, $23, $23
+			$18, $19, $20, $21, $22, $23, $24, $24
 		)
 		ON CONFLICT (fingerprint_sha256) DO UPDATE SET
 			last_seen = EXCLUDED.last_seen,
@@ -495,6 +511,7 @@ func (s *Store) UpsertCertificate(ctx context.Context, scanID uuid.UUID, parsed 
 				ELSE EXCLUDED.status
 			END,
 			cert_scope = EXCLUDED.cert_scope,
+			pqc_tag = EXCLUDED.pqc_tag,
 			updated_at = NOW()
 		RETURNING id
 	`,
@@ -503,7 +520,7 @@ func (s *Store) UpsertCertificate(ctx context.Context, scanID uuid.UUID, parsed 
 		parsed.KeyType, parsed.KeyBits, parsed.SignatureAlgorithm, parsed.IsCA,
 		stringSliceForPG(parsed.KeyUsage), stringSliceForPG(parsed.ExtKeyUsage), parsed.PEM, days, string(status),
 		stringSliceForPG(parsed.CRLDistributionPoints), stringSliceForPG(parsed.OCSPServers), parsed.HostnameMatchesSAN,
-		string(parsed.ChainStatus), certScope, obs.ObservedAt,
+		string(parsed.ChainStatus), certScope, pqcTagOrUnknown(parsed.PQCTag), obs.ObservedAt,
 	).Scan(&certID)
 	if err != nil {
 		return uuid.Nil, err
@@ -571,6 +588,16 @@ func (s *Store) ListCertificates(ctx context.Context, f CertificateFilter) ([]Ce
 		args = append(args, f.ScanID)
 		argN++
 	}
+	if f.PQCTag != "" {
+		where += fmt.Sprintf(" AND c.pqc_tag = $%d", argN)
+		args = append(args, f.PQCTag)
+		argN++
+	}
+	if f.MinRisk != nil {
+		where += fmt.Sprintf(" AND c.risk_score >= $%d", argN)
+		args = append(args, *f.MinRisk)
+		argN++
+	}
 
 	countQuery := "SELECT COUNT(*) FROM certificates c " + where
 	var total int
@@ -578,19 +605,20 @@ func (s *Store) ListCertificates(ctx context.Context, f CertificateFilter) ([]Ce
 		return nil, 0, err
 	}
 
+	orderBy := "c.last_seen DESC"
+	switch f.SortBy {
+	case "risk_score":
+		if f.SortDesc {
+			orderBy = "c.risk_score DESC, c.last_seen DESC"
+		} else {
+			orderBy = "c.risk_score ASC, c.last_seen DESC"
+		}
+	}
+
 	query := fmt.Sprintf(`
-		SELECT c.id, c.serial_number, c.fingerprint_sha256, c.subject_cn, c.subject_alt_names,
-			c.issuer_dn, c.authority_key_id, c.not_before, c.not_after, c.key_type, c.key_bits,
-			c.signature_algorithm, c.is_ca, c.key_usage, c.ext_key_usage, c.pem,
-			c.days_until_expiry, c.status::text, c.revocation_status, c.revocation_checked_at,
-			c.crl_distribution_points, c.ocsp_servers, c.first_discovered, c.last_seen,
-			c.hostname_matches_san, c.chain_status::text, c.managed_status::text, c.cert_scope::text,
-			c.vault_issuer_ref, c.vault_pki_mount, c.owner, c.team, c.environment, c.tags,
-			c.risk_score, c.remediation_state::text, c.created_at, c.updated_at,
-			c.renewal_config,
-			(SELECT COUNT(*) FROM certificate_observations o WHERE o.certificate_id = c.id) AS obs_count
-		FROM certificates c %s ORDER BY c.last_seen DESC LIMIT $%d OFFSET $%d
-	`, where, argN, argN+1)
+		SELECT %s
+		FROM certificates c %s ORDER BY %s LIMIT $%d OFFSET $%d
+	`, certificateSelectColumns, where, orderBy, argN, argN+1)
 	args = append(args, f.Limit, f.Offset)
 
 	rows, err := s.pool.Query(ctx, query, args...)
@@ -615,16 +643,7 @@ func (s *Store) ListCertificates(ctx context.Context, f CertificateFilter) ([]Ce
 
 func (s *Store) GetCertificate(ctx context.Context, id uuid.UUID) (Certificate, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT c.id, c.serial_number, c.fingerprint_sha256, c.subject_cn, c.subject_alt_names,
-			c.issuer_dn, c.authority_key_id, c.not_before, c.not_after, c.key_type, c.key_bits,
-			c.signature_algorithm, c.is_ca, c.key_usage, c.ext_key_usage, c.pem,
-			c.days_until_expiry, c.status::text, c.revocation_status, c.revocation_checked_at,
-			c.crl_distribution_points, c.ocsp_servers, c.first_discovered, c.last_seen,
-			c.hostname_matches_san, c.chain_status::text, c.managed_status::text, c.cert_scope::text,
-			c.vault_issuer_ref, c.vault_pki_mount, c.owner, c.team, c.environment, c.tags,
-			c.risk_score, c.remediation_state::text, c.created_at, c.updated_at,
-			c.renewal_config,
-			(SELECT COUNT(*) FROM certificate_observations o WHERE o.certificate_id = c.id)
+		SELECT `+certificateSelectColumns+`
 		FROM certificates c WHERE c.id = $1
 	`, id)
 	cert, err := scanCertificate(row.Scan)
@@ -640,16 +659,7 @@ func (s *Store) GetCertificate(ctx context.Context, id uuid.UUID) (Certificate, 
 // soonest expiry first so the most urgent renewals launch first.
 func (s *Store) ListRenewable(ctx context.Context, withinDays int) ([]Certificate, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT c.id, c.serial_number, c.fingerprint_sha256, c.subject_cn, c.subject_alt_names,
-			c.issuer_dn, c.authority_key_id, c.not_before, c.not_after, c.key_type, c.key_bits,
-			c.signature_algorithm, c.is_ca, c.key_usage, c.ext_key_usage, c.pem,
-			c.days_until_expiry, c.status::text, c.revocation_status, c.revocation_checked_at,
-			c.crl_distribution_points, c.ocsp_servers, c.first_discovered, c.last_seen,
-			c.hostname_matches_san, c.chain_status::text, c.managed_status::text, c.cert_scope::text,
-			c.vault_issuer_ref, c.vault_pki_mount, c.owner, c.team, c.environment, c.tags,
-			c.risk_score, c.remediation_state::text, c.created_at, c.updated_at,
-			c.renewal_config,
-			(SELECT COUNT(*) FROM certificate_observations o WHERE o.certificate_id = c.id)
+		SELECT `+certificateSelectColumns+`
 		FROM certificates c
 		WHERE c.renewal_config IS NOT NULL
 			AND c.managed_status IN ('imported', 'managed_in_vault')
@@ -1069,6 +1079,28 @@ func nullStr(s string) *string {
 	return &s
 }
 
+func pqcTagOrUnknown(tag cert.PQCTag) string {
+	switch tag {
+	case cert.PQCTagClassic, cert.PQCTagHybrid, cert.PQCTagPQC, cert.PQCTagUnknown:
+		return string(tag)
+	default:
+		return string(cert.PQCTagUnknown)
+	}
+}
+
+// certificateSelectColumns is shared by list/get/renewable certificate queries.
+const certificateSelectColumns = `
+			c.id, c.serial_number, c.fingerprint_sha256, c.subject_cn, c.subject_alt_names,
+			c.issuer_dn, c.authority_key_id, c.not_before, c.not_after, c.key_type, c.key_bits,
+			c.signature_algorithm, c.is_ca, c.key_usage, c.ext_key_usage, c.pem,
+			c.days_until_expiry, c.status::text, c.revocation_status, c.revocation_checked_at,
+			c.crl_distribution_points, c.ocsp_servers, c.first_discovered, c.last_seen,
+			c.hostname_matches_san, c.chain_status::text, c.managed_status::text, c.cert_scope::text,
+			c.vault_issuer_ref, c.vault_pki_mount, c.owner, c.team, c.environment, c.tags,
+			c.risk_score, c.risk_reasons, c.pqc_tag, c.remediation_state::text, c.created_at, c.updated_at,
+			c.renewal_config,
+			(SELECT COUNT(*) FROM certificate_observations o WHERE o.certificate_id = c.id) AS obs_count`
+
 type scanner interface {
 	Scan(dest ...any) error
 }
@@ -1077,6 +1109,7 @@ func scanCertificate(scan func(dest ...any) error) (Certificate, error) {
 	var c Certificate
 	var sansJSON []byte
 	var renewalJSON []byte
+	var reasonsJSON []byte
 	err := scan(
 		&c.ID, &c.SerialNumber, &c.FingerprintSHA256, &c.SubjectCN, &sansJSON,
 		&c.IssuerDN, &c.AuthorityKeyID, &c.NotBefore, &c.NotAfter, &c.KeyType, &c.KeyBits,
@@ -1085,12 +1118,21 @@ func scanCertificate(scan func(dest ...any) error) (Certificate, error) {
 		&c.CRLDistributionPoints, &c.OCSPServers, &c.FirstDiscovered, &c.LastSeen,
 		&c.HostnameMatchesSAN, &c.ChainStatus, &c.ManagedStatus, &c.CertScope,
 		&c.VaultIssuerRef, &c.VaultPKIMount, &c.Owner, &c.Team, &c.Environment, &c.Tags,
-		&c.RiskScore, &c.RemediationState, &c.CreatedAt, &c.UpdatedAt, &renewalJSON, &c.ObservationCount,
+		&c.RiskScore, &reasonsJSON, &c.PQCTag, &c.RemediationState, &c.CreatedAt, &c.UpdatedAt, &renewalJSON, &c.ObservationCount,
 	)
 	if err != nil {
 		return Certificate{}, err
 	}
 	_ = json.Unmarshal(sansJSON, &c.SubjectAltNames)
+	if len(reasonsJSON) > 0 {
+		_ = json.Unmarshal(reasonsJSON, &c.RiskReasons)
+	}
+	if c.RiskReasons == nil {
+		c.RiskReasons = []RiskReason{}
+	}
+	if c.PQCTag == "" {
+		c.PQCTag = string(cert.PQCTagUnknown)
+	}
 	if len(renewalJSON) > 0 {
 		var rc RenewalConfig
 		if json.Unmarshal(renewalJSON, &rc) == nil {

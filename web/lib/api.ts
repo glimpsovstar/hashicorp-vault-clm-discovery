@@ -33,7 +33,33 @@ export type Certificate = {
   team?: string;
   environment?: string;
   tags?: string[];
+  risk_score?: number;
+  risk_reasons?: RiskReason[];
+  pqc_tag?: "classic" | "hybrid" | "pqc" | "unknown";
 };
+
+export type RiskReason = {
+  rule_id: string;
+  pack: string;
+  severity: string;
+  title: string;
+  score: number;
+  waived?: boolean;
+};
+
+export type PersistedFinding = {
+  id: string;
+  cert_id: string;
+  rule_id: string;
+  pack: string;
+  severity: FindingSeverityLike;
+  title: string;
+  detail: string;
+  status: string;
+  waived: boolean;
+};
+
+type FindingSeverityLike = "critical" | "high" | "medium" | "low" | "info";
 
 export type Observation = {
   id: string;
@@ -191,6 +217,18 @@ async function fetchVoid(path: string, init?: RequestInit): Promise<void> {
 export function listCertificates(params: Record<string, string> = {}) {
   const qs = new URLSearchParams(params).toString();
   return fetchJSON<{ items: Certificate[]; total: number }>(`/api/v1/certificates?${qs}`);
+}
+
+export function listScanFindings(scanId: string) {
+  return fetchJSON<{ items: PersistedFinding[] }>(`/api/v1/scans/${scanId}/findings`);
+}
+
+export function listCertFindings(certId: string) {
+  return fetchJSON<{ items: PersistedFinding[] }>(`/api/v1/certificates/${certId}/findings`);
+}
+
+export function getPQCInventory() {
+  return fetchJSON<{ pqc_tags: Record<string, number> }>(`/api/v1/inventory/pqc`);
 }
 
 export function getCertificate(id: string) {

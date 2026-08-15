@@ -19,6 +19,7 @@ import (
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/config"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/inventory"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/lifecycle"
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/posture"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/renewal"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/revocation"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/scanner"
@@ -225,6 +226,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/scans/{id}/blindspot", s.handleGetScanBlindSpot)
 		r.Get("/scans/{id}/compliance", s.handleGetScanCompliance)
 		r.Get("/scans/{id}/report", s.handleGetScanReport)
+		r.Get("/scans/{id}/findings", s.handleListScanFindings)
 		r.Get("/scans/{id}/certificates", s.handleListScanCertificates)
 		r.Delete("/scans/{id}", s.handleDeleteScan)
 
@@ -232,12 +234,16 @@ func (s *Server) Router() http.Handler {
 		r.Get("/certificates/{id}", s.handleGetCertificate)
 		r.Get("/certificates/{id}/pem", s.handleGetCertificatePEM)
 		r.Get("/certificates/{id}/choose", s.handleGetCertificateChoose)
+		r.Get("/certificates/{id}/findings", s.handleListCertFindings)
+		r.Get("/certificates/{id}/waivers", s.handleListCertWaivers)
+		r.Post("/certificates/{id}/waivers", s.handleCreateCertWaiver)
 		r.Get("/certificates/{id}/renewal-kit", s.handleRenewalKit)
 		r.Post("/certificates/{id}/revocation-check", s.handleRevocationCheck)
 		r.Post("/certificates/{id}/renew", s.handleRenewCertificate)
 		r.Patch("/certificates/{id}", s.handlePatchCertificate)
 		r.Post("/certificates/{id}/catalog-import", s.handleCatalogImport)
 		r.Delete("/certificates/{id}", s.handleDeleteCertificate)
+		r.Delete("/waivers/{id}", s.handleRevokeWaiver)
 
 		r.Get("/issuers", s.handleListIssuers)
 		r.Post("/issuers/{id}/import", s.handleImportIssuer)
@@ -246,6 +252,7 @@ func (s *Server) Router() http.Handler {
 		r.Post("/reconcile", s.handleReconcile)
 		r.Post("/renew-expiring", s.handleRenewExpiring)
 		r.Get("/inventory", s.handleInventory)
+		r.Get("/inventory/pqc", s.handlePQCInventory)
 		r.Get("/events", s.handleListEvents)
 		r.Get("/lifecycle-jobs/{id}", s.handleGetLifecycleJob)
 		r.Get("/certificates/{id}/lifecycle-jobs", s.handleListCertLifecycleJobs)
@@ -421,8 +428,23 @@ func (s *Server) handleListCertificates(w http.ResponseWriter, r *http.Request) 
 		Status:      r.URL.Query().Get("status"),
 		ChainStatus: r.URL.Query().Get("chain_status"),
 		Search:      r.URL.Query().Get("search"),
+		PQCTag:      r.URL.Query().Get("pqc_tag"),
+		SortBy:      r.URL.Query().Get("sort"),
 		Limit:       limit,
 		Offset:      offset,
+	}
+	if r.URL.Query().Get("sort_dir") == "asc" {
+		filter.SortDesc = false
+	} else if filter.SortBy == "risk_score" {
+		filter.SortDesc = true
+	}
+	if minRisk := r.URL.Query().Get("min_risk"); minRisk != "" {
+		n, err := strconv.Atoi(minRisk)
+		if err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid min_risk")
+			return
+		}
+		filter.MinRisk = &n
 	}
 	if scanID := r.URL.Query().Get("scan_id"); scanID != "" {
 		id, err := uuid.Parse(scanID)
@@ -499,6 +521,11 @@ func (s *Server) handlePatchCertificate(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		s.writeServerError(w, r, err, "failed to update certificate")
 		return
+	}
+	if recomputed, err := posture.RecomputeCert(r.Context(), s.store, id); err == nil {
+		cert = recomputed
+	} else {
+		s.log.Warn("posture recompute after enrichment failed", "cert_id", id, "err", err)
 	}
 	writeJSON(w, http.StatusOK, cert)
 }

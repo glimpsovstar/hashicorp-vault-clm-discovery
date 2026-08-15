@@ -22,6 +22,8 @@ export default function InventoryTable({ items }: { items: Certificate[] }) {
       <thead>
         <tr>
           <th>Subject CN</th>
+          <th>Risk</th>
+          <th>PQC</th>
           <th>Vault</th>
           <th>Imported</th>
           <th>Scope</th>
@@ -48,6 +50,8 @@ export default function InventoryTable({ items }: { items: Certificate[] }) {
                 </span>
               )}
             </td>
+            <td>{cert.risk_score ?? 0}</td>
+            <td>{cert.pqc_tag ?? "unknown"}</td>
             <td>
               <span className={vaultConnectedBadgeClass(cert.managed_status)}>
                 {vaultConnectedLabel(cert.managed_status)}
@@ -83,7 +87,7 @@ export default function InventoryTable({ items }: { items: Certificate[] }) {
         ))}
         {items.length === 0 && (
           <tr>
-            <td colSpan={11} className="muted">
+            <td colSpan={13} className="muted">
               No certificates discovered yet. Run a scan from the Scans page.
             </td>
           </tr>

@@ -95,6 +95,12 @@ export default async function CertificateDetailPage({
                 <strong>Days until expiry:</strong> {cert.days_until_expiry}
               </p>
               <p>
+                <strong>Risk score:</strong> {cert.risk_score ?? 0}
+              </p>
+              <p>
+                <strong>PQC tag:</strong> {cert.pqc_tag ?? "unknown"}
+              </p>
+              <p>
                 <strong>SANs:</strong> {cert.subject_alt_names.join(", ") || "—"}
               </p>
               <p>
@@ -113,6 +119,24 @@ export default async function CertificateDetailPage({
           </div>
         </div>
       </section>
+
+      {(cert.risk_reasons?.length ?? 0) > 0 && (
+        <section className="panel">
+          <div className="panel-header">
+            <h2>Risk reasons</h2>
+          </div>
+          <div className="panel-body">
+            <ul className="detail-list">
+              {cert.risk_reasons!.map((r) => (
+                <li key={r.rule_id}>
+                  <strong>{r.severity}</strong> · {r.title} ({r.rule_id}
+                  {r.waived ? ", waived" : ""}) — score {r.score}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      )}
 
       <section className="panel">
         <div className="panel-header">

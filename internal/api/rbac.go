@@ -78,7 +78,10 @@ func isViewerRead(method, path string) bool {
 }
 
 func isCreateScan(method, path string) bool {
-	return method == http.MethodPost && path == "/api/v1/scans"
+	if method != http.MethodPost {
+		return false
+	}
+	return path == "/api/v1/scans" || path == "/api/v1/scans/collect"
 }
 
 func isRemediate(method, path string) bool {
@@ -90,6 +93,7 @@ func isRemediate(method, path string) bool {
 		if strings.HasPrefix(path, "/api/v1/certificates/") {
 			return strings.HasSuffix(path, "/catalog-import") ||
 				strings.HasSuffix(path, "/renew") ||
+				strings.HasSuffix(path, "/revoke") ||
 				strings.HasSuffix(path, "/revocation-check") ||
 				strings.HasSuffix(path, "/waivers")
 		}

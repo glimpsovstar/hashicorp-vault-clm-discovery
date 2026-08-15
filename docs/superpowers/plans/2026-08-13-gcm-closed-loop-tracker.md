@@ -22,12 +22,12 @@
 
 ## Priority order
 
-1. [ ] **M1** Secure the control plane — [#79](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/79) · [spec](../specs/2026-08-13-m1-control-plane-security-design.md) · [plan](2026-08-13-m1-control-plane-security.md)
+1. [x] **M1** Secure the control plane — [#79](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/79) · [spec](../specs/2026-08-13-m1-control-plane-security-design.md) · [plan](2026-08-13-m1-control-plane-security.md)
 2. [x] **M2** Durable jobs + wire verify — [#80](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/80) · [spec](../specs/2026-08-13-m2-durable-lifecycle-jobs-design.md) · [plan](2026-08-13-m2-durable-lifecycle-jobs.md)
 3. [x] **M4 core** Durable scan queue — [#81](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/81) · [spec](../specs/2026-08-13-m4-durable-scan-queue-design.md) · [plan](2026-08-13-m4-durable-scan-queue.md)
 4. [x] **M3** Explainable posture — [#82](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/82) · [spec](../specs/2026-08-13-m3-explainable-posture-design.md) · [plan](2026-08-13-m3-explainable-posture.md)
-5. [ ] **M5** Broader integrations — [#83](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/83) · [spec](../specs/2026-08-13-m5-broader-integrations-design.md) · [plan](2026-08-13-m5-broader-integrations.md)
-6. [ ] **Connections Settings** (after M1) — [#85](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/85) · [spec](../specs/2026-08-13-connections-settings-design.md) · [plan](2026-08-13-connections-settings.md)
+5. [x] **M5** Broader integrations — [#83](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/83) · [spec](../specs/2026-08-13-m5-broader-integrations-design.md) · [plan](2026-08-13-m5-broader-integrations.md)
+6. [x] **Connections Settings** (after M1) — [#85](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/85) · [spec](../specs/2026-08-13-connections-settings-design.md) · [plan](2026-08-13-connections-settings.md)
 7. [ ] **Migrate + pending verify** (after M2) — [#87](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/87) · [spec](../specs/2026-08-13-migrate-pending-verify-design.md) · [plan](2026-08-13-migrate-pending-verify.md)
 8. [ ] **ADCS then AKV collectors** (after M1; M5 sibling) — [#86](https://github.com/glimpsovstar/hashicorp-vault-clm-discovery/issues/86) · [spec](../specs/2026-08-13-adcs-akv-collectors-design.md) · [plan](2026-08-13-adcs-akv-collectors.md)
 

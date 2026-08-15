@@ -2,7 +2,8 @@
 // (ADR 0001, event Phase 1). It is the reactive counterpart to the batch
 // endpoints: a background dispatcher polls the outbox and POSTs each undelivered
 // event to a configured EDA webhook, retrying with attempt tracking and
-// dead-lettering after a cap. The whole thing is a no-op when no webhook URL is
+// dead-lettering after a cap. An optional ITSM sink receives the same events as
+// ticket templates (M5). The whole thing is a no-op when neither webhook is
 // configured. The transport is swappable — Phase 2 replaces the webhook sink
 // with a message bus without touching the outbox or the domain logic.
 //
@@ -23,6 +24,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/itsm"
 	"github.com/glimpsovstar/hashicorp-vault-clm-discovery/internal/store"
 )
 
@@ -43,6 +45,9 @@ type Config struct {
 	MaxAttempts int
 	Owner       string
 	LeaseTTL    time.Duration
+	// Optional ITSM fan-out (templates over catalogue events).
+	ITSMWebhookURL        string
+	ITSMWebhookHMACSecret string
 }
 
 // Dispatcher polls the outbox and delivers events to the EDA webhook.
@@ -51,10 +56,11 @@ type Dispatcher struct {
 	store eventStore
 	http  *http.Client
 	log   *slog.Logger
+	itsm  *itsm.Sink
 }
 
 // New builds a dispatcher. It is inert until Run is called and does nothing when
-// the webhook URL is empty (Configured()==false).
+// neither EDA nor ITSM is configured (Configured()==false).
 func New(cfg Config, st eventStore, log *slog.Logger) *Dispatcher {
 	if cfg.Interval <= 0 {
 		cfg.Interval = 15 * time.Second
@@ -71,7 +77,7 @@ func New(cfg Config, st eventStore, log *slog.Logger) *Dispatcher {
 	if cfg.LeaseTTL <= 0 {
 		cfg.LeaseTTL = 2 * time.Minute
 	}
-	return &Dispatcher{
+	d := &Dispatcher{
 		cfg:   cfg,
 		store: st,
 		log:   log,
@@ -82,10 +88,19 @@ func New(cfg Config, st eventStore, log *slog.Logger) *Dispatcher {
 			},
 		},
 	}
+	if cfg.ITSMWebhookURL != "" {
+		d.itsm = itsm.New(itsm.Config{
+			WebhookURL: cfg.ITSMWebhookURL,
+			HMACSecret: cfg.ITSMWebhookHMACSecret,
+		})
+	}
+	return d
 }
 
-// Configured reports whether a webhook URL is set.
-func (d *Dispatcher) Configured() bool { return d.cfg.WebhookURL != "" }
+// Configured reports whether EDA and/or ITSM delivery is enabled.
+func (d *Dispatcher) Configured() bool {
+	return d.cfg.WebhookURL != "" || (d.itsm != nil && d.itsm.Configured())
+}
 
 // Run polls and delivers on Interval until ctx is canceled. It is a no-op when
 // the dispatcher is not configured.
@@ -140,13 +155,27 @@ func (d *Dispatcher) RunOnce(ctx context.Context) (delivered, failed int, err er
 	return delivered, failed, nil
 }
 
-// deliver POSTs a single event to the EDA webhook as JSON.
+// deliver POSTs a single event to the EDA webhook (when set) and optionally to
+// the ITSM template sink. Both must succeed when configured.
 func (d *Dispatcher) deliver(ctx context.Context, e store.Event) error {
 	body, err := json.Marshal(e)
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
 	}
-	return postWebhook(ctx, d.http, d.cfg.WebhookURL, d.cfg.Token, body)
+	if d.cfg.WebhookURL != "" {
+		if err := postWebhook(ctx, d.http, d.cfg.WebhookURL, d.cfg.Token, body); err != nil {
+			return err
+		}
+	}
+	if d.itsm != nil && d.itsm.Configured() {
+		if err := d.itsm.Deliver(ctx, e); err != nil {
+			return err
+		}
+	}
+	if d.cfg.WebhookURL == "" && (d.itsm == nil || !d.itsm.Configured()) {
+		return fmt.Errorf("no delivery sink configured")
+	}
+	return nil
 }
 
 // Ping POSTs a connection-test event to the webhook using the same auth as

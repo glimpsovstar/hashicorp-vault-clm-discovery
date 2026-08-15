@@ -37,12 +37,12 @@ type Config struct {
 	ScanClaimInterval   time.Duration `envconfig:"SCAN_CLAIM_INTERVAL" default:"2s"`
 	ScanLeaseTTL        time.Duration `envconfig:"SCAN_LEASE_TTL" default:"30s"`
 	ScanWorkerID        string        `envconfig:"SCAN_WORKER_ID" default:""`
-	VaultAddr          string        `envconfig:"VAULT_ADDR" default:""`
-	VaultNamespace     string        `envconfig:"VAULT_NAMESPACE" default:""`
-	VaultToken         string        `envconfig:"VAULT_TOKEN" default:""`
-	VaultAuthMethod    string        `envconfig:"VAULT_AUTH_METHOD" default:"token"` // token | approle
-	VaultRoleID        string        `envconfig:"VAULT_ROLE_ID" default:""`          // AppRole; never logged
-	VaultSecretID      string        `envconfig:"VAULT_SECRET_ID" default:""`
+	VaultAddr           string        `envconfig:"VAULT_ADDR" default:""`
+	VaultNamespace      string        `envconfig:"VAULT_NAMESPACE" default:""`
+	VaultToken          string        `envconfig:"VAULT_TOKEN" default:""`
+	VaultAuthMethod     string        `envconfig:"VAULT_AUTH_METHOD" default:"token"` // token | approle
+	VaultRoleID         string        `envconfig:"VAULT_ROLE_ID" default:""`          // AppRole; never logged
+	VaultSecretID       string        `envconfig:"VAULT_SECRET_ID" default:""`
 	// Import identity is separate from the read/reconcile client. Never logged.
 	// Empty VaultImportAuthMethod inherits the read method, or token if only
 	// VAULT_IMPORT_TOKEN is set (approle if only import role+secret are set).
@@ -54,16 +54,22 @@ type Config struct {
 	// AAP (Ansible Automation Platform) drives Mode C renewals. When AAPURL is
 	// empty the renew endpoint returns 503. Token/URL are read from the env and
 	// never logged.
-	AAPURL           string `envconfig:"AAP_URL" default:""`
-	AAPToken         string `envconfig:"AAP_TOKEN" default:""`
-	AAPRenewTemplate string `envconfig:"AAP_RENEW_TEMPLATE" default:"CLM - Issue Certificate"`
-	AAPRenewWorkflow bool   `envconfig:"AAP_RENEW_WORKFLOW" default:"false"`
-	AAPSkipTLSVerify bool   `envconfig:"AAP_SKIP_TLS_VERIFY" default:"false"`
-	AAPDefaultMount  string `envconfig:"AAP_DEFAULT_MOUNT" default:"pki"`
+	AAPURL            string `envconfig:"AAP_URL" default:""`
+	AAPToken          string `envconfig:"AAP_TOKEN" default:""`
+	AAPRenewTemplate  string `envconfig:"AAP_RENEW_TEMPLATE" default:"CLM - Issue Certificate"`
+	AAPRenewWorkflow  bool   `envconfig:"AAP_RENEW_WORKFLOW" default:"false"`
+	AAPRevokeTemplate string `envconfig:"AAP_REVOKE_TEMPLATE" default:"CLM - Revoke Certificate"`
+	AAPRevokeWorkflow bool   `envconfig:"AAP_REVOKE_WORKFLOW" default:"false"`
+	AAPSkipTLSVerify  bool   `envconfig:"AAP_SKIP_TLS_VERIFY" default:"false"`
+	AAPDefaultMount   string `envconfig:"AAP_DEFAULT_MOUNT" default:"pki"`
 	// Event dispatcher (ADR 0001, event Phase 1b). When EDAWebhookURL is empty the
 	// dispatcher does not start. Token/URL are read from the env and never logged.
-	EDAWebhookURL         string        `envconfig:"EDA_WEBHOOK_URL" default:""`
-	EDAWebhookToken       string        `envconfig:"EDA_WEBHOOK_TOKEN" default:""`
+	EDAWebhookURL   string `envconfig:"EDA_WEBHOOK_URL" default:""`
+	EDAWebhookToken string `envconfig:"EDA_WEBHOOK_TOKEN" default:""`
+	// ITSM webhook (M5): optional HTTP sink for catalogue events. Empty ⇒ disabled.
+	// HMAC secret is never logged; when set, requests include X-CLM-Signature.
+	ITSMWebhookURL        string        `envconfig:"ITSM_WEBHOOK_URL" default:""`
+	ITSMWebhookHMACSecret string        `envconfig:"ITSM_WEBHOOK_HMAC_SECRET" default:""`
 	EventDispatchInterval time.Duration `envconfig:"EVENT_DISPATCH_INTERVAL" default:"15s"`
 	EventDispatchBatch    int           `envconfig:"EVENT_DISPATCH_BATCH" default:"50"`
 	EventMaxAttempts      int           `envconfig:"EVENT_MAX_ATTEMPTS" default:"10"`

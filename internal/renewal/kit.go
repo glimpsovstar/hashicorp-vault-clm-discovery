@@ -72,6 +72,26 @@ func Validate(in KitInput) error { return validate(in) }
 // service is allowed (it just means "no service override").
 func ValidService(s string) bool { return s == "" || validName(s) }
 
+// ValidReason reports whether a revoke reason is safe for AAP extra_vars
+// (no Jinja/SSTI). Empty is invalid — callers require an explicit reason.
+func ValidReason(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) > 128 {
+		return false
+	}
+	if strings.Contains(s, "{{") || strings.Contains(s, "}}") || strings.Contains(s, "{%") {
+		return false
+	}
+	for _, c := range s {
+		ok := c == '-' || c == '_' || c == ' ' || c == '.' ||
+			(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
 var ttlPattern = regexp.MustCompile(`^[0-9]+(s|m|h|d)$`)
 
 // ValidTTL reports whether s is empty or a Vault-style duration (e.g. "72h",

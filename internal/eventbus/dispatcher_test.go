@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -70,6 +71,34 @@ func TestConfigured(t *testing.T) {
 	}
 	if !New(Config{WebhookURL: "http://x"}, &fakeStore{}, testLogger()).Configured() {
 		t.Fatal("URL should be configured")
+	}
+	if !New(Config{ITSMWebhookURL: "http://itsm"}, &fakeStore{}, testLogger()).Configured() {
+		t.Fatal("ITSM-only should be configured")
+	}
+}
+
+func TestRunOnce_ITSMOnlyDelivers(t *testing.T) {
+	t.Parallel()
+
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got = string(b)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	fs := &fakeStore{events: []store.Event{event()}}
+	d := New(Config{ITSMWebhookURL: srv.URL}, fs, testLogger())
+	delivered, failed, err := d.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if delivered != 1 || failed != 0 {
+		t.Fatalf("delivered=%d failed=%d", delivered, failed)
+	}
+	if !strings.Contains(got, `"source":"clm"`) || !strings.Contains(got, "cert.revoked") {
+		t.Fatalf("itsm body = %s", got)
 	}
 }
 

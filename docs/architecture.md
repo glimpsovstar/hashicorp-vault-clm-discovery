@@ -81,12 +81,15 @@ flowchart TB
 
 - Chi HTTP router with CORS for dashboard
 - **Default-deny AuthN** except `GET /api/v1/health`. `CLM_AUTH_MODE=static_token` maps Bearer tokens (`CLM_STATIC_TOKENS`) to RBAC roles. `CLM_INSECURE_NO_AUTH=true` is a UAT/integration hatch (caller treated as `platform_admin`)
-- RBAC: `viewer` (GET), `scanner_operator` (+ scans), `remediator` (+ catalog/renew/PATCH/revoke/waivers), `vault_import_admin` (+ CA import/reconcile), `approver` (+ waivers), `platform_admin` (DELETE + Settings mutate), `inventory` (`GET /inventory` only — AAP, not a dashboard page)
+- RBAC: `viewer` (GET), `scanner_operator` (+ scans / collect), `remediator` (+ catalog/renew/revoke/PATCH/revocation-check/waivers), `vault_import_admin` (+ CA import/reconcile), `approver` (+ waivers), `platform_admin` (DELETE + Settings mutate), `inventory` (`GET /inventory` only — AAP, not a dashboard page)
 - Consent is **intent after RBAC**: unauthorized + `consent:true` → 401/403; authorized + `consent:false` → 400
 - Append-only `audit_events` on privileged mutations and 401/403 (not the EDA `events` outbox)
 - Durable scan queue: `POST /scans` inserts `pending` and returns **202** immediately (never blocks on an in-memory channel). Over-cap pending → **503**
+- Cloud collectors: `POST /scans/collect` with `source=cloud_akv|cloud_acm|cloud_gcp` ingests public PEMs only (upsert by `fingerprint_sha256`; private keys rejected). No cloud root keys in CLM
 - Background scan poller claims rows with `FOR UPDATE SKIP LOCKED` (multi-replica safe); Compose stays **1** API replica by default
 - Consent gate on scan creation
+- `POST /api/v1/certificates/{id}/revoke` — consent-gated AAP launch (`clm_action=clm_revoke`); find-by-name template; **503** if AAP unset; CLM never calls Vault `pki/revoke`. Verify via existing `revocation-check` + reconcile
+- AAP renew/revoke `extra_vars` contain no secrets (Vault AppRole is an AAP credential)
 - `GET /api/v1/scans/{id}` — scan detail and diagnostics
 - `GET /api/v1/scans/{id}/certificates` — certificates discovered in that scan
 - `DELETE` on scans, certificates, and issuers (204 No Content) for demo reset — `platform_admin` only
@@ -115,7 +118,7 @@ At certificate upsert, `ClassifyScope` assigns `cert_scope`:
 7. On completion, persist summary counts on the `scans` row and clear the claim
 8. When `RECONCILE_ON_SCAN_COMPLETE=true`, run Vault PKI reconcile (errors logged, scan still succeeds; the reconcile is bounded by a timeout so an unresponsive Vault cannot block subsequent scans)
 
-The EDA outbox dispatcher uses the same SKIP LOCKED claim pattern so two API replicas cannot double-deliver an event.
+The EDA outbox dispatcher uses the same SKIP LOCKED claim pattern so two API replicas cannot double-deliver an event. When `ITSM_WEBHOOK_URL` is set, the same drain fan-outs ticket-shaped JSON templates (`internal/itsm`) with optional HMAC (`X-CLM-Signature`).
 
 ### Observability
 
